@@ -764,8 +764,8 @@ export const claudeAdapter: ProviderAdapter = {
   brandColor: "#d97757",
 
   models(): ModelOption[] {
-    // Pinned, verified model IDs (checked 2026-09-23 against the Claude Platform
-    // reference). Add newer ones here as they ship. Users can also type any
+    // Pinned, verified model IDs (checked 2026-09-29 against the Claude Code
+    // model-config reference). Add newer ones here as they ship. Users can also type any
     // custom model id in settings.
     return [
       { id: "claude-fable-5-1", label: "Fable 5.1" },
@@ -773,6 +773,7 @@ export const claudeAdapter: ProviderAdapter = {
       { id: "claude-opus-5-5", label: "Opus 5.5" },
       { id: "claude-opus-5", label: "Opus 5" },
       { id: "claude-opus-4-8", label: "Opus 4.8" },
+      { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
       { id: "claude-sonnet-5", label: "Sonnet 5" },
       { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
       { id: "claude-haiku-4-5", label: "Haiku 4.5" },
