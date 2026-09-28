@@ -12,6 +12,7 @@ import type { ModelOption } from "../providers/types";
  *  observer's own hardcoded fast-path model elsewhere. Keep in sync with the
  *  pinned ids in `providers/claude.ts`. */
 export const BACKGROUND_MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
   { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
 ];
