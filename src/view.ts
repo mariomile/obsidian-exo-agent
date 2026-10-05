@@ -665,8 +665,9 @@ export class ChatView extends ItemView {
   private ensureSession(c: Convo): Promise<AgentSession> {
     const sig = this.sessionSigOf(c);
     if (c.session && sig === c.sessionSig) {
-      // A background tab's session may predate the last mode change.
-      c.session.setPermissionMode?.(this.plugin.settings.permissionMode);
+      // A background tab's session may predate the last mode change. A session
+      // without tools has no permission mode at all.
+      if (this.plugin.settings.toolsEnabled) c.session.setPermissionMode?.(this.plugin.settings.permissionMode);
       return Promise.resolve(c.session);
     }
     // Reuse an in-flight spawn ONLY if it was started for the same config

@@ -727,7 +727,11 @@ export class CodexSession implements AgentSession {
       const message = typeof error.message === "string"
         ? error.message
         : typeof params.message === "string" ? params.message : "Codex app-server error.";
-      this.emitFailure(message);
+      // A retrying error (reconnecting n/5) or one about another turn does not
+      // fail the turn in flight.
+      const otherTurn = typeof params.turnId === "string" && params.turnId !== this.activeTurnId;
+      if (params.willRetry === true || otherTurn) this.onEvent?.({ kind: "notice", message });
+      else this.emitFailure(message);
       return;
     }
     if (method === "turn/completed") {
@@ -964,7 +968,8 @@ export class CodexSession implements AgentSession {
   compact(_instructions?: string): void {
     if (this.disposed || this.ended || !this.threadId || this.activeTurnId) return;
     void this.request("thread/compact/start", { threadId: this.threadId })
-      .catch((error) => this.emitFailure(`Compact failed: ${String(error)}`));
+      // A compact failure is never a turn failure, even if a turn started meanwhile.
+      .catch((error) => this.onEvent?.({ kind: "notice", message: `Compact failed: ${String(error)}` }));
   }
 
   setPermissionMode(mode: import("./types").PermissionMode): void {

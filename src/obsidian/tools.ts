@@ -1096,8 +1096,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
       if (args.action === "run_now") {
         if (!auto) return ok(`No automation named "${args.name}" — see list_automations.`);
-        const okRun = await exo.runAutomationNow(auto);
-        return ok(okRun ? `Run completed — report in ${paths.reports}/.` : `Run failed — see the report in ${paths.reports}/.`);
+        const run = await exo.runAutomationNow(auto);
+        if (run.refused) return ok(`Not run: ${run.refused}.`);
+        return ok(run.ok ? `Run completed — report in ${paths.reports}/.` : `Run failed — see the report in ${paths.reports}/.`);
       }
 
       const parseWhens = (linesIn: string[]) => {

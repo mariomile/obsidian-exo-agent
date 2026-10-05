@@ -696,6 +696,24 @@ describe("CodexSession app-server lifecycle", () => {
     session.dispose();
   });
 
+  it("keeps a turn alive through retrying server errors and a late compact failure", async () => {
+    const { session, child } = await readySession();
+    session.compact();
+    const compact = await child.next("thread/compact/start");
+    const events: AgentEvent[] = [];
+    const { turn } = await startTurn(session, child, events);
+    child.push({ id: compact.id, error: { message: "compact boom" } });
+    child.push({ method: "error", params: { error: { message: "reconnecting 1/5" }, willRetry: true, threadId: "thread-1", turnId: "turn-1" } });
+    child.push({ method: "error", params: { error: { message: "old turn" }, willRetry: false, threadId: "thread-1", turnId: "turn-0" } });
+    await vi.waitFor(() => expect(events.filter((e) => e.kind === "notice")).toHaveLength(3));
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    child.push({ method: "error", params: { error: { message: "fatal" }, willRetry: false, threadId: "thread-1", turnId: "turn-1" } });
+    await vi.waitFor(() => expect(events.some((e) => e.kind === "error")).toBe(true));
+    child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
+    await turn;
+    session.dispose();
+  });
+
   it("keeps a 1% Codex window at 1%, not 100% and rejected", async () => {
     const { session, child } = await readySession();
     const refresh = session.refreshRateLimits();

@@ -43,7 +43,7 @@ export interface ExoToolHost {
     filePath(slug: string): string;
   };
   /** Manual run of one automation through the shared executor. */
-  runAutomationNow(a: Automation): Promise<boolean>;
+  runAutomationNow(a: Automation): Promise<{ ok: boolean; refused?: string }>;
   /** Resolves false when named agents are disabled in settings. */
   agentsReady(): Promise<boolean>;
   agentStore: {

@@ -226,7 +226,9 @@ export async function runHeadlessPlaybook(
     };
   } finally {
     session?.dispose("headless-run-end");
-    if (!session) opts.codexBridge?.release();
+    // Idempotent: a no-op when the session already released it, and the only
+    // release when the bridge never reached a session (no session, or tools off).
+    opts.codexBridge?.release();
   }
 }
 

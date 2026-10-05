@@ -108,14 +108,16 @@ describe("run gate and caller identity", () => {
   it("Run now respects the run gate: refused while another run holds the only slot", async () => {
     const { plugin } = fakePlugin(true);
     (plugin as unknown as { agentRunsInFlight: Set<string> }).agentRunsInFlight.add("agent:other::daily");
-    expect(await plugin.runAutomationNow(automation())).toBe(false);
+    const run = await plugin.runAutomationNow(automation());
+    expect(run.ok).toBe(false);
+    expect(run.refused).toBeTruthy();
     expect(headless.prompts).toHaveLength(0);
   });
 
   it("Run now respects the background budget", async () => {
     const { plugin } = fakePlugin(true);
     (plugin as unknown as { checkBackgroundBudget: () => boolean }).checkBackgroundBudget = () => false;
-    expect(await plugin.runAutomationNow(automation())).toBe(false);
+    expect((await plugin.runAutomationNow(automation())).refused).toBeTruthy();
     expect(headless.prompts).toHaveLength(0);
   });
 
@@ -137,7 +139,7 @@ describe("prompt-only automation through the agent executor", () => {
   it("runs its own prompt as the direct run's standing task, with the proposal contract", async () => {
     const { plugin } = fakePlugin(true);
     headless.output = "Digest body.";
-    expect(await plugin.runAutomationNow(automation())).toBe(true);
+    expect(await plugin.runAutomationNow(automation())).toEqual({ ok: true });
 
     expect(headless.prompts).toHaveLength(1);
     const { prompt, opts } = headless.prompts[0];
@@ -360,9 +362,13 @@ describe("automation run history", () => {
     expect(names.sort()).toEqual(["a", "b"]);
   });
 
-  it("leaves a corrupt history untouched instead of overwriting it", async () => {
+  it("keeps a corrupt history aside as a copy and still records the new run", async () => {
     const { files, record } = historyPlugin("{not json");
-    expect(await record("a")).toBeNull();
-    expect(files.get("plugins/exo/automation-runs.json")).toBe("{not json");
+    expect(await record("a")).not.toBeNull();
+    const copies = [...files.keys()].filter((k) => k.includes("automation-runs.corrupt-"));
+    expect(copies).toHaveLength(1);
+    expect(files.get(copies[0])).toBe("{not json");
+    const names = (JSON.parse(files.get("plugins/exo/automation-runs.json")!) as { name: string }[]).map((r) => r.name);
+    expect(names).toEqual(["a"]);
   });
 });

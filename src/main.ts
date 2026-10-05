@@ -2662,21 +2662,22 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   /** Manual "Run now" from the hub: bypasses the schedule and the enabled
-   *  flag, but not the run gate (concurrency, budget, duplicates). */
-  async runAutomationNow(a: Automation): Promise<boolean> {
-    if (a.system === "daily-pulse") return this.generateAndPersistDailyPulse(Date.now());
+   *  flag, but not the run gate (concurrency, budget, duplicates). `refused`
+   *  says why nothing ran, as opposed to a run that failed. */
+  async runAutomationNow(a: Automation): Promise<{ ok: boolean; refused?: string }> {
+    if (a.system === "daily-pulse") return { ok: await this.generateAndPersistDailyPulse(Date.now()) };
     const def = this.automationDef(a);
     if (!def) {
       new Notice(`Agent "${a.agent}" not found.`);
-      return false;
+      return { ok: false, refused: `agent "${a.agent}" not found` };
     }
     const runKey = `${agentLastRunKey(a.slug)}::manual`;
     const gate = this.gateRun(def, runKey, { manual: true });
     if (!gate.ok) {
       new Notice(`Can't run now: ${gate.detail}.`);
-      return false;
+      return { ok: false, refused: gate.detail };
     }
-    return this.runAgent(def, "manual", runKey);
+    return { ok: await this.runAgent(def, "manual", runKey) };
   }
 
   /** Gate one due automation run, then hand it to `runAgent`. Sequential:
@@ -2965,16 +2966,25 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   /** Every change to the run history: one serialized read-modify-write, so two
-   *  runs finishing together cannot drop each other's record. A corrupt file
-   *  aborts the change rather than being replaced by a near-empty history. */
+   *  runs finishing together cannot drop each other's record. An unreadable
+   *  file is kept aside as a copy, never overwritten, and a new history starts
+   *  so later write runs still get their restore points. */
   private updateAutomationRuns(change: (records: AutomationRunRecord[]) => AutomationRunRecord[]): Promise<void> {
     return this.automationRunsWriteQueue.enqueue(async () => {
+      const { adapter } = this.app.vault;
       const path = this.automationRunsPath();
-      const records = (await this.app.vault.adapter.exists(path))
-        ? (JSON.parse(await this.app.vault.adapter.read(path)) as AutomationRunRecord[])
-        : [];
-      if (!Array.isArray(records)) throw new Error(`${path} is not a run list`);
-      await this.app.vault.adapter.write(path, JSON.stringify(change(records)));
+      const raw = (await adapter.exists(path)) ? await adapter.read(path) : "[]";
+      let records: AutomationRunRecord[] = [];
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new Error("not a run list");
+        records = parsed as AutomationRunRecord[];
+      } catch {
+        const copy = `${this.manifest.dir}/automation-runs.corrupt-${Date.now()}.json`;
+        await adapter.write(copy, raw);
+        new Notice(`Exo: the automation run history was unreadable. A copy is in ${copy}; a new history starts now.`);
+      }
+      await adapter.write(path, JSON.stringify(change(records)));
     });
   }
 
@@ -3018,7 +3028,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const restored = await restoreRun(this.app, rec.checkpoint);
     const restoredAt = Date.now();
-    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, restoredAt } : r)));
+    // The notes are already back; failing to stamp the record must not hide that.
+    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, restoredAt } : r)))
+      .catch((err) => console.warn("[Exo] couldn't mark the run as restored:", err));
     new Notice(
       restored.length
         ? `Restored ${restored.length} note${restored.length === 1 ? "" : "s"} from "${rec.name}".`
