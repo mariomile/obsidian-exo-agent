@@ -1,13 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Exo logo">
-  <defs>
-    <radialGradient id="exoGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
-      <stop offset="42%" stop-color="#ffffff" stop-opacity="0.14"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="200" height="200" rx="44" fill="#6b6b6f"/>
-  <circle cx="100" cy="100" r="96" fill="url(#exoGlow)"/>
+  <rect width="200" height="200" rx="44" fill="#000000"/>
   <g transform="scale(0.159490)" fill="#ffffff">
     <path d="M 312.96 312.5 L 424.47 312.5 L 691.96 584.17 L 691.96 450.28 L 832.24 312.5 L 940.7 312.5 L 940.94 421.77 L 729.16 632.5 L 711.46 632.5 L 626.96 548 L 559.46 615.5 L 507.77 615.5 L 312.96 421.76 Z"/>
     <path d="M 313.76 831.21 L 512.46 632.5 L 546.46 632.5 L 629.78 715.82 L 697.8 649.37 L 757.2 649.58 L 941.04 832.89 L 940.83 941.5 L 827.88 941.5 L 561.96 677.51 L 561.96 804.07 L 420.61 941.5 L 313.43 941.5 Z"/>
