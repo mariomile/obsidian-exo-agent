@@ -9,6 +9,7 @@ import { isReadOnlyExternalTool } from "./core/headless-tools";
 import { WRITE_TOOLS } from "./core/touched";
 import { exoPaths, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { memoryCaps } from "./core/memory-caps";
+import { effortFor } from "./core/model-tuning";
 import { toVaultRelative } from "./core/vault-path";
 import type { MVASettings } from "./settings";
 
@@ -124,10 +125,11 @@ export async function runHeadlessPlaybook(
         stop: opts.codexBridge.release,
       };
     }
+    const model = provider === "claude" ? settings.claudeModel : settings.codexModel;
     session = ADAPTERS[provider].createSession({
       cli,
-      model: provider === "claude" ? settings.claudeModel : settings.codexModel,
-      effort: settings.effort,
+      model,
+      effort: effortFor(provider, model, settings.effort),
       cwd: vaultPath(app),
       permissionMode: "default",
       toolsEnabled: true, // reads allowed; writes gated by the resolver / sandbox below

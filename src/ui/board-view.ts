@@ -19,7 +19,7 @@ import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type ExoPlugin from "../main";
 import { ADAPTERS } from "../providers/registry";
 import type { ProviderId } from "../providers/types";
-import { modelOptions } from "../core/model-options";
+import { providerModels } from "../core/model-options";
 import type { TaskEntry, TaskStatus } from "../core/tasks";
 import {
   projectSessionCards,
@@ -700,13 +700,15 @@ export class BoardView extends ItemView {
     return this.currentProvider() === "claude" ? s.claudeModel : s.codexModel;
   }
 
-  /** Reuse the settings/view model-choices logic: built-ins + custom ids for
-   *  the current provider, deduped. */
+  /** Same list as settings and the composer: the live Codex catalog (or the
+   *  built-ins) + custom ids for the current provider, deduped. Hidden models
+   *  are a composer preference and stay available here. */
   private modelChoices(): { id: string; label: string }[] {
     const provider = this.currentProvider();
     const s = this.plugin.settings;
-    return modelOptions(
+    return providerModels(
       ADAPTERS[provider].models(),
+      provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined,
       provider === "claude" ? s.claudeCustomModels : s.codexCustomModels
     );
   }

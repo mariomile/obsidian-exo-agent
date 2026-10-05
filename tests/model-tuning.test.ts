@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { clampEffort, effortOptionsFor } from "../src/core/model-tuning";
+import { clampEffort, effortOptionsFor, effortFor } from "../src/core/model-tuning";
 
 /** Effort tiers are a consequence of the chosen model (per the claude-api
  *  reference and Codex app-server `model/list`, checked 2026-09-23):
@@ -63,5 +63,21 @@ describe("clampEffort", () => {
 
   test("falls back to default when the control is hidden", () => {
     expect(clampEffort("high", effortOptionsFor("claude", "claude-haiku-4-5"))).toBe("default");
+  });
+});
+
+describe("effortFor", () => {
+  test("passes a tier the model offers through unchanged", () => {
+    expect(effortFor("claude", "claude-fable-5-1", "xhigh")).toBe("xhigh");
+  });
+
+  test("falls back to default for a model without effort support, without losing the stored tier", () => {
+    const stored = "xhigh";
+    expect(effortFor("claude", "claude-haiku-4-5", stored)).toBe("default");
+    expect(effortFor("claude", "claude-opus-5-5", stored)).toBe("xhigh");
+  });
+
+  test("treats an empty setting as default", () => {
+    expect(effortFor("codex", "gpt-6-astra", "")).toBe("default");
   });
 });

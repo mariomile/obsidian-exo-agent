@@ -2,10 +2,11 @@ import { App, DropdownComponent, PluginSettingTab, Setting } from "obsidian";
 import type ExoPlugin from "./main";
 import type { PermissionMode, ProviderId } from "./providers/types";
 import { ADAPTERS } from "./providers/registry";
-import { modelOptions, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
+import { providerModels, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
 import { parseMcpJson } from "./core/mcp-config";
 import { DEFAULT_MEMORY_ROOT, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { renderCliDiagnostics } from "./ui/settings-cli";
+import { renderComposerModels } from "./ui/settings-composer-models";
 
 import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, type MVASettings } from "./settings-schema";
 
@@ -100,12 +101,13 @@ export class MVASettingTab extends PluginSettingTab {
     // repopulates these dropdowns live via fill().
     let claudeDd: DropdownComponent | undefined;
     let codexDd: DropdownComponent | undefined;
+    let refreshComposerModels = () => {};
     const fill = (d: DropdownComponent, provider: ProviderId) => {
       d.selectEl.empty();
       const cur = provider === "claude" ? s.claudeModel : s.codexModel;
-      const runtimeModels = provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined;
-      const opts = modelOptions(
-        runtimeModels?.length ? runtimeModels : ADAPTERS[provider].models(),
+      const opts = providerModels(
+        ADAPTERS[provider].models(),
+        provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined,
         provider === "claude" ? s.claudeCustomModels : s.codexCustomModels
       );
       for (const o of opts) d.addOption(o.id, o.label);
@@ -177,6 +179,7 @@ export class MVASettingTab extends PluginSettingTab {
             s.claudeCustomModels = v;
             await this.plugin.saveSettings();
             if (claudeDd) fill(claudeDd, "claude");
+            refreshComposerModels();
           })
       );
 
@@ -191,8 +194,11 @@ export class MVASettingTab extends PluginSettingTab {
             s.codexCustomModels = v;
             await this.plugin.saveSettings();
             if (codexDd) fill(codexDd, "codex");
+            refreshComposerModels();
           })
       );
+
+    refreshComposerModels = renderComposerModels(this.plugin, el);
   }
 
   /* -------------------------------- Chat -------------------------------- */

@@ -57,3 +57,10 @@ export function clampEffort(effort: string, options: EffortOption[] | null): str
   if (!options) return "default";
   return options.some(([v]) => v === effort) ? effort : "default";
 }
+
+/** The effort a session for this model actually runs with. The stored setting
+ *  is never rewritten, so a tier the user chose survives a detour through a
+ *  model that doesn't offer it (e.g. Haiku) and applies again on the way back. */
+export function effortFor(provider: "claude" | "codex", modelId: string, effort: string): string {
+  return clampEffort(effort || "default", effortOptionsFor(provider, modelId));
+}
