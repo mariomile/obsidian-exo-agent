@@ -22,7 +22,7 @@ vi.mock("obsidian", async () => {
 vi.mock("electron", () => ({ shell: {}, default: {} }));
 
 const headless = vi.hoisted(() => ({
-  prompts: [] as { prompt: string; opts: { write?: boolean; systemPrompt?: string } }[],
+  prompts: [] as { prompt: string; opts: { write?: boolean; systemPrompt?: string; agentCaller?: { slug: string; depth: number } } }[],
   output: "",
   reports: [] as string[],
 }));
@@ -74,13 +74,13 @@ function fakePlugin(kernel: boolean) {
     proposalStore: { append: vi.fn(async (_candidate: unknown, _source: unknown) => ({ status: "appended" })) },
     recordAutomationRun: vi.fn(async () => "rec-1"),
     recordBackgroundSpend: vi.fn(),
+    checkBackgroundBudget: vi.fn(() => true),
     saveSettings: vi.fn(async () => undefined),
   };
   Object.assign(plugin, {
     ...deps,
     app: {},
     agentRunsInFlight: new Set<string>(),
-    agentContext: null,
     settings: {
       provider: "claude",
       obsidianToolsEnabled: false,
@@ -99,6 +99,28 @@ beforeEach(() => {
   headless.prompts.length = 0;
   headless.reports.length = 0;
   headless.output = "";
+});
+
+describe("run gate and caller identity", () => {
+  it("Run now respects the run gate: refused while another run holds the only slot", async () => {
+    const { plugin } = fakePlugin(true);
+    (plugin as unknown as { agentRunsInFlight: Set<string> }).agentRunsInFlight.add("agent:other::daily");
+    expect(await plugin.runAutomationNow(automation())).toBe(false);
+    expect(headless.prompts).toHaveLength(0);
+  });
+
+  it("Run now respects the background budget", async () => {
+    const { plugin } = fakePlugin(true);
+    (plugin as unknown as { checkBackgroundBudget: () => boolean }).checkBackgroundBudget = () => false;
+    expect(await plugin.runAutomationNow(automation())).toBe(false);
+    expect(headless.prompts).toHaveLength(0);
+  });
+
+  it("binds the run's own identity into its tools, one level below the caller", async () => {
+    const { plugin } = fakePlugin(true);
+    await plugin.runAutomationNow(automation());
+    expect(headless.prompts[0].opts.agentCaller).toEqual({ slug: "morning-digest", depth: 1 });
+  });
 });
 
 describe("prompt-only automation through the agent executor", () => {

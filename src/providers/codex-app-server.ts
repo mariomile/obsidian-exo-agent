@@ -165,7 +165,9 @@ function codexRateLimitWindows(payload: unknown, fullSnapshot: boolean): RateLim
       windows.push({
         id: `${limitId}:${slot}`,
         label: codexWindowLabel(limitId, window, limits),
-        utilization: usedPercent,
+        // app-server reports 0-100; Exo's RateLimitInfo convention is a fraction
+        // (see claudeRateLimitWindows), else 1% would read as 100%.
+        utilization: usedPercent / 100,
         ...(Number.isFinite(resetsAt) ? { resetsAt } : {}),
         ...(Number.isFinite(windowMinutes) && windowMinutes > 0 ? { windowMinutes } : {}),
       });
@@ -191,7 +193,7 @@ function codexRateLimitInfo(payload: unknown, previous: RateLimitInfo | null, fu
     : primary?.id;
   return {
     status: reached || max >= 100 ? "rejected" : max >= 80 ? "allowed_warning" : "allowed",
-    utilization: primary?.utilization === undefined ? undefined : primary.utilization / 100,
+    utilization: primary?.utilization,
     resetsAt: primary?.resetsAt,
     windowType: nativeLimitName,
     windows,
@@ -725,7 +727,7 @@ export class CodexSession implements AgentSession {
       const message = typeof error.message === "string"
         ? error.message
         : typeof params.message === "string" ? params.message : "Codex app-server error.";
-      this.onEvent?.({ kind: "error", message });
+      this.emitFailure(message);
       return;
     }
     if (method === "turn/completed") {
@@ -953,14 +955,16 @@ export class CodexSession implements AgentSession {
       threadId: this.threadId,
       expectedTurnId: this.activeTurnId,
       input: [{ type: "text", text, text_elements: [] }],
-    }).catch((error) => this.onEvent?.({ kind: "error", message: String(error) }));
+    // A failed steer is not a failed turn: the turn keeps running, only this
+    // message missed it, so say so without poisoning the answer in progress.
+    }).catch((error) => this.onEvent?.({ kind: "notice", message: `Message not delivered to the running turn: ${String(error)}` }));
     return true;
   }
 
   compact(_instructions?: string): void {
     if (this.disposed || this.ended || !this.threadId || this.activeTurnId) return;
     void this.request("thread/compact/start", { threadId: this.threadId })
-      .catch((error) => this.onEvent?.({ kind: "error", message: String(error) }));
+      .catch((error) => this.emitFailure(`Compact failed: ${String(error)}`));
   }
 
   setPermissionMode(mode: import("./types").PermissionMode): void {
@@ -1026,6 +1030,14 @@ export class CodexSession implements AgentSession {
 
   lastTurnTokens(): number | null {
     return this.turnTokens;
+  }
+
+  /** `onEvent` outlives its turn on purpose (late usage and quota snapshots
+   *  still land on the last turn), so an error raised while idle would reach a
+   *  finished turn and append a failure under a correct answer. Only an
+   *  in-flight turn can fail; outside one the same message is a notice. */
+  private emitFailure(message: string): void {
+    this.onEvent?.(this.onTurnComplete ? { kind: "error", message } : { kind: "notice", message });
   }
 
   private finishTurn(error?: Error): void {

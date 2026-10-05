@@ -179,6 +179,15 @@ export type InvokeGate = { ok: true } | { ok: false; reason: InvokeRefusal; deta
  * the allowlist is deny-by-default: an empty `can_call` means this agent
  * delegates to nobody.
  */
+/** Who is calling `invoke_agent`, and how deep the delegation chain already
+ *  is. Bound into each session's tool server, so concurrent runs never read
+ *  each other's identity. A chat session is `EXO_CALLER`. */
+export interface AgentCaller {
+  slug: string;
+  depth: number;
+}
+export const EXO_CALLER: AgentCaller = { slug: "exo", depth: 0 };
+
 export function gateAgentInvoke(
   caller: string,
   callee: AgentDef | null,

@@ -12,6 +12,7 @@ import { memoryCaps } from "./core/memory-caps";
 import { effortFor } from "./core/model-tuning";
 import { toVaultRelative } from "./core/vault-path";
 import type { MVASettings } from "./settings";
+import type { AgentCaller } from "./core/agent-runs";
 
 /** Per-step idle timeout — no event for this long aborts the run (bounded autonomy). */
 const STEP_IDLE_TIMEOUT = 180_000;
@@ -38,6 +39,8 @@ export interface HeadlessOpts {
    *  (see `buildAgentSystemPrompt`). Ignored by Claude, which keeps its
    *  delegation instruction inline in the prompt text via `buildAgentRunPrompt`. */
   systemPrompt?: string;
+  /** The agent this run executes as: what its `invoke_agent` calls delegate from. */
+  agentCaller?: AgentCaller;
 }
 
 function vaultPath(app: App): string {
@@ -106,6 +109,7 @@ export async function runHeadlessPlaybook(
   const toolOpts: ObsidianToolOpts = {
     memory: memoryCaps(settings, { surface: "headless" }),
     paths: exoPaths(settings.memoryRoot || LEGACY_MEMORY_ROOT),
+    agentCaller: opts.agentCaller,
   };
 
   let session: import("./providers/types").AgentSession | null = null;

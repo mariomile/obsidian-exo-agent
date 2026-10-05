@@ -94,6 +94,9 @@ import {
   isEmptyRun,
   gateAgentInvoke,
   gateAgentRun,
+  EXO_CALLER,
+  type AgentCaller,
+  type RunGate,
   proposeEligible,
   scheduleSlotKeys,
   writeModeFor,
@@ -2649,9 +2652,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  /** Manual "Run now" from the hub: bypasses the schedule and reuses the
-   *  same executor, so gates, snapshots and records behave identically.
-   *  `runAgent` dedups a second concurrent call with the same key. */
+  /** Manual "Run now" from the hub: bypasses the schedule and the enabled
+   *  flag, but not the run gate (concurrency, budget, duplicates). */
   async runAutomationNow(a: Automation): Promise<boolean> {
     if (a.system === "daily-pulse") return this.generateAndPersistDailyPulse(Date.now());
     const def = this.automationDef(a);
@@ -2659,23 +2661,19 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       new Notice(`Agent "${a.agent}" not found.`);
       return false;
     }
-    return this.runAgent(def, "manual", `${agentLastRunKey(a.slug)}::manual`);
+    const runKey = `${agentLastRunKey(a.slug)}::manual`;
+    const gate = this.gateRun(def, runKey, { manual: true });
+    if (!gate.ok) {
+      new Notice(`Can't run now: ${gate.detail}.`);
+      return false;
+    }
+    return this.runAgent(def, "manual", runKey);
   }
 
   /** Gate one due automation run, then hand it to `runAgent`. Sequential:
    *  one at a time. */
   private async runDueAutomation(run: DueAgentRun): Promise<void> {
-    const gate = gateAgentRun({
-      agent: run.agent,
-      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(run.agent.brain.slug)] ?? 0,
-      now: Date.now(),
-      running: this.agentRunsInFlight.size,
-      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-      inFlightKeys: this.agentRunsInFlight,
-      runKey: run.runKey,
-      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-    });
+    const gate = this.gateRun(run.agent, run.runKey);
     if (!gate.ok) {
       this.diag.push("automations", `run skipped (${gate.reason}): ${gate.detail}`);
       return;
@@ -2693,18 +2691,23 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   private static readonly AGENT_MAX_CONCURRENT = 1;
   /** Run keys currently queued or executing — the dedupe set for `gateAgentRun`. */
   private readonly agentRunsInFlight = new Set<string>();
-  /**
-   * Which agent is executing right now, and how deep the delegation chain is.
-   *
-   * The MCP tool surface carries no caller identity, so `invoke_agent` cannot
-   * ask "who is calling" — it reads this instead. Safe as a single value
-   * because agent runs are sequential: a nested run only starts while its
-   * caller is blocked awaiting the tool result, and the depth cap bounds the
-   * stack. Restored (not cleared) on exit so a nested run hands control back to
-   * its caller rather than to nobody.
-   */
-  agentContext: { slug: string; depth: number } | null = null;
 
+  /** The one run gate every entry point (schedule, Run now, picker, delegation)
+   *  passes through, so none of them can skip the budget or concurrency check. */
+  private gateRun(agent: AgentDef, runKey: string, mode: { manual?: boolean; nested?: boolean } = {}): RunGate {
+    return gateAgentRun({
+      agent,
+      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(agent.brain.slug)] ?? 0,
+      now: Date.now(),
+      running: this.agentRunsInFlight.size,
+      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
+      inFlightKeys: this.agentRunsInFlight,
+      runKey,
+      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
+      canSpawn: !Platform.isMobile,
+      ...mode,
+    });
+  }
 
   /**
    * Execute one agent run through the headless profile — the same bounded
@@ -2719,13 +2722,12 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     reason: string,
     runKey?: string,
     by = "exo",
-    task?: { from: string; text: string }
+    task?: { from: string; text: string },
+    callerDepth = 0
   ): Promise<boolean> {
     const key = runKey ?? `${agentLastRunKey(agent.brain.slug)}::manual`;
     if (this.agentRunsInFlight.has(key)) return false;
     this.agentRunsInFlight.add(key);
-    const callerContext = this.agentContext;
-    this.agentContext = { slug: agent.brain.slug, depth: (callerContext?.depth ?? 0) + 1 };
     const name = agentRunName(agent, reason);
     const startedAt = Date.now();
     const today = new Date(startedAt).toISOString().slice(0, 10);
@@ -2736,7 +2738,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     try {
       new Notice(`${agent.brain.name} — running (${reason})…`);
       const memory = await this.agentStore.loadMemory(agent, today);
-      const headlessOpts: HeadlessOpts = { write };
+      // This run's tools delegate as this agent, one level deeper than its caller.
+      const headlessOpts: HeadlessOpts = { write, agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 } };
       if (this.settings.provider === "codex" && this.settings.obsidianToolsEnabled) {
         headlessOpts.codexBridge = (await this.ensureCodexBridge()) ?? undefined;
       }
@@ -2833,7 +2836,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       return false;
     } finally {
       this.agentRunsInFlight.delete(key);
-      this.agentContext = callerContext;
     }
   }
 
@@ -2885,10 +2887,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    * other at all, and chaining has to be faked through database triggers. Here
    * it is a gated tool call, with the whole chain recorded in the run ledger.
    */
-  async invokeAgentFromAgent(target: string, task: string): Promise<string> {
+  async invokeAgentFromAgent(target: string, task: string, from: AgentCaller = EXO_CALLER): Promise<string> {
     if (!(await this.agentsReady())) return "Named agents are disabled in Exo settings.";
-    const caller = this.agentContext?.slug ?? "exo";
-    const depth = this.agentContext?.depth ?? 0;
+    const { slug: caller, depth } = from;
     const callee = this.agentStore.resolve(target);
     // The caller's powers come from its automation file (can_call lives
     // there since v2); an unbound agent has no delegation allowlist.
@@ -2899,23 +2900,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     if (!gate.ok) return `Refused (${gate.reason}): ${gate.detail}.`;
 
     const runKey = `${agentLastRunKey(callee!.brain.slug)}::from:${caller}`;
-    const runGate = gateAgentRun({
-      agent: callee!,
-      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(callee!.brain.slug)] ?? 0,
-      now: Date.now(),
-      running: this.agentRunsInFlight.size,
-      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-      inFlightKeys: this.agentRunsInFlight,
-      runKey,
-      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-      // A human asking through chat is a manual call; an agent asking is nested.
-      manual: caller === "exo",
-      nested: caller !== "exo",
-    });
+    // A human asking through chat is a manual call; an agent asking is nested.
+    const runGate = this.gateRun(callee!, runKey, { manual: caller === "exo", nested: caller !== "exo" });
     if (!runGate.ok) return `Refused (${runGate.reason}): ${runGate.detail}.`;
 
-    const ok = await this.runAgent(callee!, `invoked by ${caller}`, runKey, caller, { from: caller, text: task });
+    const ok = await this.runAgent(callee!, `invoked by ${caller}`, runKey, caller, { from: caller, text: task }, depth);
     return ok
       ? `${callee!.brain.name} ran and reported to ${this.paths.reports}/. The run is in the agent ledger.`
       : `${callee!.brain.name} ran but did not finish cleanly — see the report in ${this.paths.reports}/.`;
@@ -2936,18 +2925,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     new AgentPicker(this.app, agents, (agent) => {
       const runKey = `${agentLastRunKey(agent.brain.slug)}::manual`;
-      const gate = gateAgentRun({
-        agent,
-        lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(agent.brain.slug)] ?? 0,
-        now: Date.now(),
-        running: this.agentRunsInFlight.size,
-        maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-        inFlightKeys: this.agentRunsInFlight,
-        runKey,
-        budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-        manual: true,
-      });
+      const gate = this.gateRun(agent, runKey, { manual: true });
       if (!gate.ok) {
         new Notice(`Can't run now — ${gate.detail}.`);
         return;

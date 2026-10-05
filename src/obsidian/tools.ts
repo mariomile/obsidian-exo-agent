@@ -15,6 +15,7 @@ import {
   type LoopEntry,
 } from "../core/open-loops";
 import { WriteQueue } from "../core/write-queue";
+import { EXO_CALLER, type AgentCaller } from "../core/agent-runs";
 import { patchFrontmatter } from "../core/frontmatter-patch";
 import { createBacklogTask, createChildTask, ChildTaskRefused, adaptAppToTaskVault } from "./task-store";
 import { canSpawnChild, childrenOf } from "../core/child-tasks";
@@ -171,6 +172,8 @@ export interface ObsidianToolOpts {
   rethinkBridge?: (req: RethinkRequest) => Promise<string>;
   /** Resolved memory-layer paths. Absent → the legacy root (test/fallback). */
   paths?: ExoPaths;
+  /** Identity `invoke_agent` delegates as. Absent → Exo itself (chat). */
+  agentCaller?: AgentCaller;
 }
 
 /**
@@ -208,6 +211,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
      *  the feed diff+undo. Absent → the tool is not registered. */
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
+    agentCaller = EXO_CALLER,
   } = opts ?? {};
   const need = (target: string): TFile => {
     const f = resolveLink(app, target);
@@ -930,7 +934,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     async ({ agent, task }) => {
       const exo = getExo(app);
       if (!exo) return ok("Exo plugin not reachable.");
-      return ok(await exo.invokeAgentFromAgent(agent, task));
+      return ok(await exo.invokeAgentFromAgent(agent, task, agentCaller));
     }
   );
 
