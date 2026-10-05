@@ -2,7 +2,7 @@
 /**
  * Version bump — single source of truth for a release's version number.
  *
- * Usage:  node scripts/bump.mjs <X.Y.Z>   (or: pnpm bump -- <X.Y.Z>)
+ * Usage:  node scripts/bump.mjs <X.Y.Z>   (or: pnpm bump <X.Y.Z>)
  *
  * Updates, in lockstep, every file that carries the plugin version:
  *   - manifest.json           .version
