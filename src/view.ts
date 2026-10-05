@@ -2758,6 +2758,9 @@ export class ChatView extends ItemView {
     const block = req.block;
     const plan = planRethink(block);
     const agent = this.agent();
+    if (plan.requireRationale && !req.rationale?.trim()) {
+      return `Not written: ${block}.md needs a rationale. Call rethink_memory again with one.`;
+    }
 
     // Every block — governed direct write with feed diff + undo.
     const write = await agent.writeBlock(block, req.content);
