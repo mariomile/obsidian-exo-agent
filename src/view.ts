@@ -35,7 +35,7 @@ import {
 import { adaptAppToTaskVault, createBacklogTask } from "./obsidian/task-store";
 import { browserBridgeFor } from "./obsidian/browser-controller";
 import { AgentFolder, type BlockWrite } from "./obsidian/agent-folder";
-import { planRethink, type BlockName } from "./core/agent-self";
+import { planRethink } from "./core/agent-self";
 import { BootPreambleCache } from "./obsidian/memory";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
@@ -2749,8 +2749,7 @@ export class ChatView extends ItemView {
    * tier is resolved purely by {@link planRethink}:
    *  - `NOW.md`   → write freely, render the diff + undo row into the turn.
    *  - `USER.md` → write, render the diff + undo row WITH the rationale surfaced.
-   *  - `SOUL.md` → record a pending proposal card (diff + Apply/Dismiss); the
-   *    write happens only on the Apply click. Nothing is written here.
+   *  - `SOUL.md` → same as USER.md: written directly, rationale surfaced, undo available.
    * Returns the short status line the tool reports back to the model.
    */
   private async rethinkBridge(c: Convo, req: RethinkRequest): Promise<string> {
@@ -2759,15 +2758,8 @@ export class ChatView extends ItemView {
     const block = req.block;
     const plan = planRethink(block);
     const agent = this.agent();
-    const current = (await agent.readBlock(block))?.content ?? "";
 
-    if (plan.verb === "propose") {
-      // SOUL.md — propose-only: render an Apply/Dismiss card, write on Apply.
-      this.renderBlockProposalCard(ctx.bodyEl, block, current, req.content, req.rationale);
-      return `Proposed a change to ${block}.md — waiting for the user to Apply or Dismiss it. Not written yet.`;
-    }
-
-    // NOW.md / USER.md — governed direct write with feed diff + undo.
+    // Every block — governed direct write with feed diff + undo.
     const write = await agent.writeBlock(block, req.content);
     // Identity edits nudge the git-autocommit debounce like any other vault
     // write (integration audit 2026-07-10): without this, a rethink followed by
@@ -2819,59 +2811,6 @@ export class ChatView extends ItemView {
           row.empty();
           row.createSpan({ text: "Couldn't undo — the block may have changed." });
         });
-    });
-  }
-
-  /** Render a pending block proposal card (the propose-only SOUL tier):
-   *  a diff with Apply / Dismiss. Apply writes through the governed path and
-   *  swaps in a review·undo row; Dismiss leaves the block untouched. */
-  private renderBlockProposalCard(
-    parent: HTMLElement,
-    block: BlockName,
-    current: string,
-    proposed: string,
-    rationale?: string
-  ): void {
-    const card = parent.createDiv({ cls: "mva-rethink mva-rethink-proposal" });
-    card.createSpan({ cls: "mva-rethink-chip", text: `Proposed: ${block}.md` });
-    if (rationale) {
-      const r = card.createDiv({ cls: "mva-rethink-rationale" });
-      r.createSpan({ cls: "mva-rethink-rationale-k", text: "Why: " });
-      r.createSpan({ text: rationale });
-    }
-    this.renderTextDiff(card, current, proposed);
-
-    const actions = card.createDiv({ cls: "mva-rethink-actions" });
-    const apply = actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Apply" });
-    const dismiss = actions.createEl("button", { cls: "mva-btn", text: "Dismiss" });
-    let done = false;
-    const finish = (label: string) => {
-      done = true;
-      card.removeClass("mva-rethink-proposal");
-      actions.remove();
-      card.createDiv({ cls: "mva-faint", text: label });
-    };
-    this.clickable(apply, () => {
-      if (done) return;
-      done = true; // guard double-click while the write is in flight
-      void this.agent()
-        .writeBlock(block, proposed)
-        .then((write) => {
-          // Same git-autocommit debounce nudge as the direct-write tier (see
-          // rethinkBridge) — an Applied proposal is a vault write too.
-          this.plugin.noteVaultWrite([write.path]);
-          card.removeClass("mva-rethink-proposal");
-          actions.remove();
-          this.renderBlockUndoRow(card, write);
-        })
-        .catch(() => {
-          done = false; // let the user retry
-          new Notice(`Couldn't apply ${block}.md.`);
-        });
-    });
-    this.clickable(dismiss, () => {
-      if (done) return;
-      finish(`${block}.md proposal dismissed.`);
     });
   }
 

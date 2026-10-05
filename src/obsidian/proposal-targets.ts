@@ -220,16 +220,33 @@ export interface ProposalAcceptanceTargetOptions {
   openLoopsPath?: string;
   /** Decisions dir (`paths.decisions`). Absent → the legacy location. */
   decisionsDir?: string;
+  /** Called with each memory file a proposal wrote, so git autocommit covers it. */
+  noteWrite?: (paths: readonly string[]) => void;
 }
 
 /** Build the exact dependency object consumed by `routeAcceptedProposal`. */
 export function createProposalAcceptanceDeps(
   options: ProposalAcceptanceTargetOptions
 ): ProposalAcceptanceDeps {
+  const openLoopsPath = options.openLoopsPath ?? OPEN_LOOPS_PATH;
+  const loops = new OpenLoopProposalTarget(options.vault, options.loopsWriteQueue, options.nowMs, openLoopsPath);
+  const decisions = new DecisionProposalTarget(options.vault, options.nowDate, options.decisionsDir ?? DECISIONS_DIR);
   return {
     tasks: new TaskProposalTarget(options.tasks),
-    loops: new OpenLoopProposalTarget(options.vault, options.loopsWriteQueue, options.nowMs, options.openLoopsPath ?? OPEN_LOOPS_PATH),
-    decisions: new DecisionProposalTarget(options.vault, options.nowDate, options.decisionsDir ?? DECISIONS_DIR),
+    loops: {
+      create: async (input) => {
+        const created = await loops.create(input);
+        options.noteWrite?.([openLoopsPath]);
+        return created;
+      },
+    },
+    decisions: {
+      captureRawPreserving: async (input) => {
+        const created = await decisions.captureRawPreserving(input);
+        options.noteWrite?.([created.path]);
+        return created;
+      },
+    },
     playbooks: new PlaybookProposalTarget(options.playbooksWriteQueue, options.playbooks),
   };
 }

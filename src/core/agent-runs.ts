@@ -357,7 +357,7 @@ export function salvageProposalCandidates(block: string): ProposalCandidate[] {
 /** What the collector below needs: somewhere to append, and somewhere to say
  *  what went wrong. Structural so core stays free of the Obsidian-side store. */
 export interface RunProposalDeps {
-  store: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string }> };
+  store: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string; record?: { status?: string } }> };
   diagnostic?: (message: string, error?: unknown) => void;
 }
 
@@ -367,7 +367,7 @@ export interface RunProposalDeps {
  * this for a run that was given the contract.
  *
  * Never throws: a malformed block or a failed append costs the proposals, not
- * the run that already did the work. Returns how many landed.
+ * the run that already did the work. Returns how many landed pending review.
  */
 export async function collectRunProposals(
   output: string,
@@ -400,7 +400,8 @@ export async function collectRunProposals(
   for (const candidate of candidates) {
     try {
       const res = await deps.store.append(candidate, source);
-      if (res.status === "appended") landed++;
+      // Memory kinds are written on append (already accepted): nothing to review.
+      if (res.status === "appended" && res.record?.status !== "accepted") landed++;
     } catch (err) {
       diagnose(`proposal append failed for "${source.convoId}"`, err);
     }

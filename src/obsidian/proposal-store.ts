@@ -1,6 +1,7 @@
 import {
   evaluateProposal,
   fingerprintProposal,
+  isMemoryProposalKind,
   parseProposalCandidates,
   pruneProposalRecords,
   type ProposalCandidate,
@@ -242,7 +243,9 @@ export class ProposalStore {
 
   constructor(
     private readonly files: ProposalFileAdapter,
-    private readonly queue: WriteQueue
+    private readonly queue: WriteQueue,
+    /** Routes memory kinds (loop, decision) the moment they are appended. */
+    private readonly autoRoute?: (record: ProposalRecord) => Promise<ProposalRouteResult>
   ) {}
 
   async load(): Promise<ProposalStoreSnapshot> {
@@ -265,7 +268,7 @@ export class ProposalStore {
       return Promise.resolve({ status: "invalid", errors: validated.errors });
     }
     const clean = validated.value[0];
-    return this.mutate(({ data }) => {
+    return this.mutate<AppendProposalResult>(({ data }) => {
       data.metrics.generated += 1;
       const duplicate = evaluateProposal(clean, data.records, source.createdAt);
       if (duplicate.status === "duplicate") {
@@ -284,7 +287,20 @@ export class ProposalStore {
       };
       data.records.push(record);
       return { status: "appended", record };
-    });
+    }).then((result) => this.routeMemoryRecord(result));
+  }
+
+  /**
+   * Memory kinds skip the pending step: accept through the normal route right
+   * after the append commits (never inside its queue turn). A failed route leaves
+   * the record pending, so the inbox still offers Retry.
+   */
+  private async routeMemoryRecord(result: AppendProposalResult): Promise<AppendProposalResult> {
+    if (result.status !== "appended" || !this.autoRoute || !isMemoryProposalKind(result.record.kind)) {
+      return result;
+    }
+    const accepted = await this.accept(result.record.id, this.autoRoute);
+    return { status: "appended", record: accepted.record };
   }
 
   accept(

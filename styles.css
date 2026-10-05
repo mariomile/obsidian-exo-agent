@@ -71,9 +71,9 @@ body {
      It is deliberately NOT aliased to --cosmos-surface-1: Cosmos's rung 1 is
      chrome, not elevation. Under `realcraft` it equals rung 0 (#1b1b1b both)
      and under `linear` it is DARKER than rung 0 (#09090a vs #121213), because
-     Cosmos spends it on the sidebar frame. Exo spends its rung 1 on .mva-quote
-     and .mva-rethink-proposal, whose whole point is a subtle raise: aliasing it
-     would have flattened them onto the canvas under one flavour and recessed
+     Cosmos spends it on the sidebar frame. Exo spends its rung 1 on .mva-quote,
+     whose whole point is a subtle raise: aliasing it
+     would have flattened it onto the canvas under one flavour and recessed
      them under another. Mixing between Cosmos's own 0 and 3 keeps the raise a
      raise, in the flavour's own colours.
      There is no rung 2. It was published as "the hover step" and nothing ever
@@ -1024,18 +1024,10 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   }
 }
 
-/* ---- the agent is the folder: rethink diff + persona/now proposal card ---- */
+/* ---- the agent is the folder: rethink diff ---- */
 .mva-rethink {
   margin-top: 8px;
   max-width: min(480px, 100%);
-}
-/* Proposal (persona / observer now.md) reads as a real card; a direct rethink
-   diff (now/human) is quieter — just the chip + diff + undo row, no card chrome. */
-.mva-rethink-proposal {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--mva-r2);
-  background: var(--mva-surface-1);
-  padding: 10px 12px;
 }
 /* Eyebrow chip (register A) — muted at rest, no permanent fill. */
 .mva-rethink-chip {
@@ -1056,11 +1048,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-rethink-rationale-k {
   color: var(--text-faint);
   font-weight: 600;
-}
-.mva-rethink-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
 }
 
 .mva-assistant {

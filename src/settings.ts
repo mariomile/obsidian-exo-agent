@@ -503,7 +503,7 @@ export class MVASettingTab extends PluginSettingTab {
     this.toggleSetting(
       el,
       "The agent is the folder (identity)",
-      `Hydrate every conversation from ${paths.agentDir}/: three human-readable shared-kernel blocks (SOUL = principles, USER = working model of you, NOW = current focus) used by Exo and external agents. Adds the rethink_memory tool (NOW rewrites directly, USER requires a rationale, SOUL is propose-only). Off by default; with it off, boot is unchanged and the folder is never read. Rollout: run "Exo: Seed agent folder", review USER.md, then flip this on.`,
+      `Hydrate every conversation from ${paths.agentDir}/: three human-readable shared-kernel blocks (SOUL = principles, USER = working model of you, NOW = current focus) used by Exo and external agents. Adds the rethink_memory tool (NOW rewrites directly, USER and SOUL require a rationale, shown in the feed diff with undo). Off by default; with it off, boot is unchanged and the folder is never read. Rollout: run "Exo: Seed agent folder", review USER.md, then flip this on.`,
       "agentFolderEnabled"
     );
 

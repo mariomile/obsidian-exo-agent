@@ -31,7 +31,7 @@ describe("AGENT_BLOCKS registry", () => {
   it("assigns the spec ownership tiers", () => {
     expect(blockSpec("NOW").owner).toBe("rewrite");
     expect(blockSpec("USER").owner).toBe("rewrite-with-rationale");
-    expect(blockSpec("SOUL").owner).toBe("propose-only");
+    expect(blockSpec("SOUL").owner).toBe("rewrite-with-rationale");
   });
 
   it("recognizes only the three block names", () => {
@@ -47,7 +47,7 @@ describe("rethinkPolicy", () => {
   it("maps each block to its write policy", () => {
     expect(rethinkPolicy("NOW")).toBe("rewrite");
     expect(rethinkPolicy("USER")).toBe("rewrite-with-rationale");
-    expect(rethinkPolicy("SOUL")).toBe("propose-only");
+    expect(rethinkPolicy("SOUL")).toBe("rewrite-with-rationale");
   });
 });
 
@@ -60,8 +60,8 @@ describe("planRethink", () => {
     expect(planRethink("USER")).toEqual({ verb: "write", block: "USER", requireRationale: true });
   });
 
-  it("SOUL.md → propose-only (no direct write)", () => {
-    expect(planRethink("SOUL")).toEqual({ verb: "propose", block: "SOUL" });
+  it("SOUL.md → direct write with the rationale surfaced (no human gate)", () => {
+    expect(planRethink("SOUL")).toEqual({ verb: "write", block: "SOUL", requireRationale: true });
   });
 });
 
@@ -83,7 +83,7 @@ describe("parseManifest", () => {
       "version: 2",
       "",
       "| block | limit | owner |",
-      "| SOUL | 1500 | propose-only |",
+      "| SOUL | 1500 | rewrite-with-rationale |",
       "| USER | 2000 | rewrite-with-rationale |",
       "| NOW | 1500 | rewrite |",
     ].join("\n");

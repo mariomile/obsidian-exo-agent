@@ -129,6 +129,7 @@ describe("proposal producer extraction", () => {
       status: "generated",
       candidates: 0,
       appended: 0,
+      autoApplied: 0,
       duplicates: 0,
       invalid: 0,
     });
@@ -197,9 +198,20 @@ describe("proposal producer extraction", () => {
       status: "generated",
       candidates: 3,
       appended: 1,
+      autoApplied: 0,
       duplicates: 1,
       invalid: 1,
     });
     expect(mocked.recordMetric).not.toHaveBeenCalled();
+  });
+
+  it("counts auto-applied memory records apart from pending suggestions", async () => {
+    const taskJson = { kind: "task", title: "First", prompt: "Do it", rationale: "Explicit" };
+    const mocked = deps(JSON.stringify([taskJson, { ...taskJson, title: "Second" }]), [
+      { status: "appended", record: { status: "pending" } as ProposalRecord },
+      { status: "appended", record: { status: "accepted" } as ProposalRecord },
+    ]);
+    const result = await produceTurnProposals(eligible(), mocked.value);
+    expect(result).toMatchObject({ status: "generated", appended: 1, autoApplied: 1 });
   });
 });

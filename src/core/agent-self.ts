@@ -33,11 +33,12 @@ export type BlockName = "SOUL" | "USER" | "NOW";
 /**
  * Ownership tier for a block's autonomous rewrite policy (design §3):
  *  - `rewrite`                — agent rewrites freely (low risk, high turnover). `NOW.md`.
- *  - `rewrite-with-rationale` — agent rewrites; the feed diff must surface the rationale. `USER.md`.
- *  - `propose-only`           — v1: the tool records a pending proposal; the write
- *                               happens only on the user's Apply click. `SOUL.md`.
+ *  - `rewrite-with-rationale` — agent rewrites; the feed diff must surface the rationale. `SOUL.md`, `USER.md`.
+ *
+ * No tier waits on a human: review happens after the write, through the feed
+ * diff, the git autocommit and undo.
  */
-export type BlockOwner = "rewrite" | "rewrite-with-rationale" | "propose-only";
+export type BlockOwner = "rewrite" | "rewrite-with-rationale";
 
 /** Static registry entry for one block. */
 export interface BlockSpec {
@@ -54,7 +55,7 @@ export interface BlockSpec {
  * char limits, ownership tiers, and headings. Order here IS the compile order.
  */
 export const AGENT_BLOCKS: readonly BlockSpec[] = [
-  { name: "SOUL", limit: 1500, owner: "propose-only", heading: "Soul — how you behave" },
+  { name: "SOUL", limit: 1500, owner: "rewrite-with-rationale", heading: "Soul — how you behave" },
   { name: "USER", limit: 2000, owner: "rewrite-with-rationale", heading: "User — who you work with" },
   { name: "NOW", limit: 1500, owner: "rewrite", heading: "Now — what matters right now" },
 ] as const;
@@ -131,13 +132,11 @@ export function rethinkPolicy(name: BlockName): BlockOwner {
  * ownership tier (design §3). The Obsidian tool enacts the plan; this keeps the
  * tier policy fully unit-testable and impossible to drift per call-site:
  *  - `write`        — rewrite `NOW.md` freely; render a feed diff + undo.
- *  - `write`+rationale — rewrite `USER.md`; the feed diff must surface the rationale.
- *  - `propose`      — record a pending `SOUL.md` proposal card; write only on Apply.
+ *  - `write`+rationale — rewrite `SOUL.md` / `USER.md`; the feed diff must surface the rationale.
  */
 export type RethinkAction =
   | { verb: "write"; block: BlockName; requireRationale: false }
-  | { verb: "write"; block: BlockName; requireRationale: true }
-  | { verb: "propose"; block: BlockName };
+  | { verb: "write"; block: BlockName; requireRationale: true };
 
 /**
  * Map a target block to its rethink action from the registry's ownership tier.
@@ -150,8 +149,6 @@ export function planRethink(block: BlockName): RethinkAction {
       return { verb: "write", block, requireRationale: false };
     case "rewrite-with-rationale":
       return { verb: "write", block, requireRationale: true };
-    case "propose-only":
-      return { verb: "propose", block };
   }
 }
 

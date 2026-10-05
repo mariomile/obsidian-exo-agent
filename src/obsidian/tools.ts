@@ -207,7 +207,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
      *  Mario watches it. */
     browserBridge,
     /** View-side bridge that enacts a `rethink_memory` request: resolves the tier,
-     *  writes (now/human) or records a pending proposal card (persona), and renders
+     *  writes the block directly (rationale surfaced for SOUL/USER), and renders
      *  the feed diff+undo. Absent → the tool is not registered. */
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
@@ -679,11 +679,11 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
   const rethinkMemory = tool(
     "rethink_memory",
-    "Rewrite one shared-kernel block when your MODEL OF THE WORLD changes, not for single facts (those land in the vault automatically after the chat). `NOW.md` = what matters right now (hot projects, focus); `USER.md` = your distilled working model of the user (pass a `rationale`: it's surfaced with the change); `SOUL.md` = shared operating principles (this only PROPOSES a change for the user to approve, it does not write). Pass the WHOLE new block content, not a patch.",
+    "Rewrite one shared-kernel block when your MODEL OF THE WORLD changes, not for single facts (those land in the vault automatically after the chat). `NOW.md` = what matters right now (hot projects, focus); `USER.md` = your distilled working model of the user; `SOUL.md` = shared operating principles. Pass a `rationale` for USER.md and SOUL.md: it's surfaced with the change in the feed, where the user reviews and can undo. Pass the WHOLE new block content, not a patch.",
     {
       block: z.enum(["SOUL", "USER", "NOW"]),
       new_content: z.string().describe("The complete new content for the block (replaces it whole; never truncated)."),
-      rationale: z.string().optional().describe("Why the change — required for USER.md, surfaced prominently in the change."),
+      rationale: z.string().optional().describe("Why the change — required for USER.md and SOUL.md, surfaced prominently in the change."),
     },
     async (args) => {
       if (!rethinkBridge) return err("The agent identity layer is off.");
@@ -1196,7 +1196,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     listAutomations, savePlaybook, manageAutomation, reviewAutomationRun,
     ...buildCapabilityTools(app),
     ...(memory.ledgerWrite ? [captureDecision, openLoop, closeLoopTool] : []),
-    // `rethink_memory` also needs a live view bridge to render its diff/proposal.
+    // `rethink_memory` also needs a live view bridge to render its diff.
     ...(memory.rethink && rethinkBridge ? [rethinkMemory] : []),
     ...buildMemoryTools(app, memory),
     ...(orchestrationEnabled ? [addTask, listTasks] : []),

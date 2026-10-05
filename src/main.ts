@@ -393,13 +393,14 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;
+    // The 3rd arg routes memory kinds (loop, decision) on append: no human gate.
     this.proposalStore = new ProposalStore({
       read: async (relativePath) => {
         const path = `${proposalRoot}/${relativePath}`;
         return await adapter.exists(path) ? adapter.read(path) : null;
       },
       write: (relativePath, content) => adapter.write(`${proposalRoot}/${relativePath}`, content),
-    }, this.proposalWriteQueue);
+    }, this.proposalWriteQueue, (record) => routeAcceptedProposal(record, this.proposalAcceptanceDeps));
     const workflowSignalsPath = this.paths.workflowSignals;
     const memoryDir = this.paths.memory;
     this.workflowSignalStore = new WorkflowSignalStore({
@@ -444,6 +445,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       },
       openLoopsPath: this.paths.openLoops,
       decisionsDir: this.paths.decisions,
+      noteWrite: (paths) => this.noteVaultWrite(paths),
     });
 
     registerMemory(this);
@@ -2246,7 +2248,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         return output;
       },
     });
-    if (result.status === "generated" && result.appended > 0) void this.refreshCockpit();
+    if (result.status === "generated" && result.appended + result.autoApplied > 0) void this.refreshCockpit();
     return result;
   }
 

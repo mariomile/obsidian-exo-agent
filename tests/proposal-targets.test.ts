@@ -268,4 +268,34 @@ describe("createProposalAcceptanceDeps", () => {
       error: "vault is read-only",
     });
   });
+
+  it("notes the vault write for a created loop and decision so git autocommit covers them", async () => {
+    const { adapter } = fakeVault();
+    const noteWrite = vi.fn();
+    const deps = createProposalAcceptanceDeps({
+      tasks: { createOnce: async () => ({ id: "task-1" }) },
+      vault: adapter,
+      loopsWriteQueue: new WriteQueue(),
+      playbooksWriteQueue: new WriteQueue(),
+      playbooks: {
+        settings: () => ({ customPrompts: [] }),
+        saveSettings: async () => undefined,
+      },
+      openLoopsPath: "Memory/open-loops.md",
+      decisionsDir: "Memory/decisions",
+      noteWrite,
+    });
+
+    await deps.loops.create({ proposalId: "p-loop", title: "Call Anna", note: "Soon" });
+    expect(noteWrite).toHaveBeenLastCalledWith(["Memory/open-loops.md"]);
+
+    const { path } = await deps.decisions.captureRawPreserving({
+      proposalId: "p-dec",
+      title: "Use Postgres",
+      context: "c",
+      decision: "d",
+      rationale: "r",
+    });
+    expect(noteWrite).toHaveBeenLastCalledWith([path]);
+  });
 });

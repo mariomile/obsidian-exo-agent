@@ -29,6 +29,24 @@ function playbook(
   };
 }
 
+function loop(title: string, note = "Circle back"): ProposalCandidate {
+  return {
+    kind: "loop",
+    title,
+    payload: { kind: "loop", title, note },
+    rationale: "Explicit follow-up",
+  };
+}
+
+function decision(title: string): ProposalCandidate {
+  return {
+    kind: "decision",
+    title,
+    payload: { kind: "decision", title, context: "Context", decision: "Do X", rationale: "Because" },
+    rationale: "Decision already made",
+  };
+}
+
 function source(createdAt = 1_720_000_000_000) {
   return { convoId: "convo-1", turnId: "turn-1", createdAt };
 }
@@ -315,5 +333,71 @@ describe("ProposalStore", () => {
     const reloaded = new ProposalStore(adapter, new WriteQueue());
     expect((await reloaded.listPending()).records.map((record: ProposalRecord) => record.id)).toEqual([kept.record.id]);
     expect((await reloaded.load()).data.metrics).toMatchObject({ generated: 2, dismissed: 1, parseErrors: 2 });
+  });
+
+  describe("memory kinds route with no human gate", () => {
+    it("routes a loop immediately as accepted, with no pending step", async () => {
+      const { adapter } = fakeFiles();
+      const route = vi.fn(async () => ({ ok: true as const, target: "loop-1" }));
+      const store = new ProposalStore(adapter, new WriteQueue(), route);
+
+      const result = await store.append(loop("Call Anna"), source());
+      if (result.status !== "appended") throw new Error("expected append");
+
+      expect(route).toHaveBeenCalledTimes(1);
+      expect(result.record.status).toBe("accepted");
+      expect(result.record.resolvedAt).toEqual(expect.any(Number));
+      expect((await store.listPending()).records).toEqual([]);
+      expect((await store.load()).data.metrics).toMatchObject({ generated: 1, accepted: 1 });
+    });
+
+    it("routes a decision immediately as accepted", async () => {
+      const { adapter } = fakeFiles();
+      const route = vi.fn(async () => ({ ok: true as const, target: "Decisions/x.md" }));
+      const store = new ProposalStore(adapter, new WriteQueue(), route);
+
+      const result = await store.append(decision("Use Postgres"), source());
+      if (result.status !== "appended") throw new Error("expected append");
+
+      expect(result.record.status).toBe("accepted");
+      expect(route).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves tasks and playbooks pending and never routes them", async () => {
+      const { adapter } = fakeFiles();
+      const route = vi.fn(async () => ({ ok: true as const, target: "x" }));
+      const store = new ProposalStore(adapter, new WriteQueue(), route);
+
+      await store.append(task("Ship it"), source());
+      await store.append(playbook("Weekly review"), source());
+
+      expect(route).not.toHaveBeenCalled();
+      expect((await store.listPending()).records.map((r) => r.kind).sort()).toEqual(["playbook", "task"]);
+    });
+
+    it("keeps a loop pending and retryable when the route fails", async () => {
+      const { adapter } = fakeFiles();
+      const route = vi.fn(async () => ({ ok: false as const, error: "vault is read-only" }));
+      const store = new ProposalStore(adapter, new WriteQueue(), route);
+
+      const result = await store.append(loop("Call Anna"), source());
+      if (result.status !== "appended") throw new Error("expected append");
+
+      expect(result.record.status).toBe("pending");
+      expect((await store.listPending()).records).toHaveLength(1);
+      expect((await store.load()).data.metrics.routeErrors).toBe(1);
+    });
+
+    it("still dedups against an auto-accepted loop", async () => {
+      const { adapter } = fakeFiles();
+      const route = vi.fn(async () => ({ ok: true as const, target: "loop-1" }));
+      const store = new ProposalStore(adapter, new WriteQueue(), route);
+
+      await store.append(loop("Call Anna"), source());
+      const again = await store.append(loop("Call Anna"), source(1_720_000_001_000));
+
+      expect(again.status).toBe("duplicate");
+      expect(route).toHaveBeenCalledTimes(1);
+    });
   });
 });
