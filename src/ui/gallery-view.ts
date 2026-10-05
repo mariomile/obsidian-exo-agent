@@ -138,7 +138,6 @@ export class GalleryView {
    *  filters that were active before they tore the gallery down, so an
    *  unrelated event never silently undoes the user's chip selection. */
   private async showGallery(preset?: HistoryFilter | readonly HistoryFilter[]): Promise<void> {
-    this.view.saveActive();
     this.gallerySelection.clear();
     this.historyFilters.clear();
     if (preset) for (const f of typeof preset === "string" ? [preset] : preset) this.historyFilters.add(f);

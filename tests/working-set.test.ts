@@ -128,7 +128,7 @@ describe("toTabCandidate", () => {
     queue: [],
     ...over,
   });
-  const draft = (over = {}) => ({ text: "", images: [], attached: [], excludeActiveNote: false, ...over });
+  const draft = (over = {}) => ({ text: "", images: [], attached: [], dismissedActive: null, ...over });
 
   it("prefers lastActiveAt, falls back to updatedAt, then 0", () => {
     // The fallback is what keeps pre-field conversations from all tying at 0.

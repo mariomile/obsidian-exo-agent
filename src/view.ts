@@ -39,8 +39,10 @@ import { planRethink, type BlockName } from "./core/agent-self";
 import { BootPreambleCache } from "./obsidian/memory";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
+import { setProviderMark } from "./ui/provider-mark";
 import { effortFor } from "./core/model-tuning";
 import { sessionSignature } from "./core/session-signature";
+import { isUntouchedChat } from "./core/untouched-chat";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
 import { renderRecallRow } from "./ui/recall-row";
@@ -125,7 +127,7 @@ import type { SessionFileProbe } from "./core/resume-status";
 import { reconcileList } from "./ui/keyed-reconcile";
 import type { CardModel } from "./ui/keyed-reconcile";
 import { DEFAULT_SETTINGS } from "./settings";
-import { persistViewState } from "./settings-schema";
+import { defaultModel, persistViewState } from "./settings-schema";
 import {
   buildRecap,
   isRecoverableSessionError,
@@ -184,8 +186,20 @@ const MAX_CHECKPOINT_FILE = 64_000; // don't persist a rewind snapshot larger th
 let convoSeed = 0;
 
 export class ChatView extends ItemView {
-  private provider: ProviderId;
-  private model: string;
+  /** The active chat owns its provider and model: these read and write it.
+   *  Before restore creates the first chat they read the settings default. */
+  private get provider(): ProviderId {
+    return this.active?.provider ?? this.plugin.settings.provider;
+  }
+  private set provider(p: ProviderId) {
+    this.active.provider = p;
+  }
+  private get model(): string {
+    return this.active?.model ?? defaultModel(this.plugin.settings, this.provider);
+  }
+  private set model(m: string) {
+    this.active.model = m;
+  }
   /** The composer subsystem (input box + toolbar + popovers + context row).
    *  Owns its own DOM, images, selection chip, usage ring, and rate badge. */
   composer!: Composer;
@@ -342,8 +356,6 @@ export class ChatView extends ItemView {
 
   constructor(leaf: WorkspaceLeaf, readonly plugin: ExoPlugin) {
     super(leaf);
-    this.provider = plugin.settings.provider;
-    this.model = this.provider === "claude" ? plugin.settings.claudeModel : plugin.settings.codexModel;
   }
 
   getViewType(): string {
@@ -451,7 +463,6 @@ export class ChatView extends ItemView {
       reenterActive(this.active, this.reentryHost);
     }, 120, true);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => refreshForLeafChange()));
-    this.registerEvent(this.app.workspace.on("layout-change", () => reenterActive(this.active, this.reentryHost))); // sidebar riaperta: un rientro che non cambia chat attiva
     this.register(() => refreshForLeafChange.cancel());
     // Resizing the pane can flip a short transcript into overflow (or back) without
     // any content change — keep the tail "Related" section in sync with that too.
@@ -483,8 +494,10 @@ export class ChatView extends ItemView {
         // active-leaf-change — this leaf was already active, only its location
         // moved — so the debounced handler above can miss it and the "Current
         // Document" card is left showing the note active in the pane Exo just
-        // left. Cheap and idempotent to re-run here on every layout-change.
-        this.composer.refreshContext();
+        // left. Debounced like the leaf-change path: layout-change streams during
+        // splitter drags, and the context row now measures leaf visibility.
+        // Also the re-entry for a reopened sidebar, which changes no active chat.
+        refreshForLeafChange();
       })
     );
     // Strip density: the same debounce shape as the two observers above, for the
@@ -623,7 +636,6 @@ export class ChatView extends ItemView {
       toggleResearchMode: () => this.toggleResearchMode(),
       onProviderChange: (next, explicitModel) => this.onProviderChange(next, explicitModel),
       allModelChoices: () => this.allModelChoices(),
-      persistModel: () => this.persistModel(),
       persist: () => this.persist(),
       openNote: (p) => this.openNote(p),
       openArtifact: (p) => this.openArtifact(p),
@@ -910,8 +922,8 @@ export class ChatView extends ItemView {
 
   private buildHeader(root: HTMLElement): void {
     const header = root.createDiv({ cls: "mva-header" });
+    // Drawn by refreshProviderUI: the active chat's provider mark.
     this.brandDot = header.createSpan({ cls: "mva-brand-icon" });
-    setIcon(this.brandDot, EXO_ICON);
     header.createSpan({ cls: "mva-brand-name", text: "Exo" });
     header.createDiv({ cls: "mva-spacer" });
 
@@ -953,10 +965,9 @@ export class ChatView extends ItemView {
       new Notice("Can't switch provider while a reply is streaming.");
       return;
     }
+    // The pick belongs to this chat only; new chats start from the settings default.
     this.provider = next;
-    this.model = explicitModel ?? (next === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel);
-    this.active.provider = next;
-    this.persistModel(); // writes this.model into the right provider's settings slot + active.model
+    this.model = explicitModel ?? defaultModel(this.plugin.settings, next);
     this.active.sessionId = undefined;
     this.active.allow.clear();
     this.dropSession(this.active, "provider-change");
@@ -985,18 +996,10 @@ export class ChatView extends ItemView {
   }
 
   private refreshProviderUI(): void {
-    const a = ADAPTERS[this.provider];
-    // Provider identity tints the brand star. All interactive accents follow
-    // the theme (--mva-brand defaults to --interactive-accent in CSS).
-    this.brandDot.style.color = a.brandColor;
+    // The header wears the active chat's provider mark. All interactive
+    // accents follow the theme (--mva-brand defaults to --interactive-accent).
+    setProviderMark(this.brandDot, this.provider);
     this.composer.refreshModel();
-  }
-
-  private persistModel(): void {
-    if (this.active) this.active.model = this.model;
-    if (this.provider === "claude") this.plugin.settings.claudeModel = this.model;
-    else this.plugin.settings.codexModel = this.model;
-    void this.plugin.saveSettings();
   }
 
   /* ------------------------- persistence ---------------------------- */
@@ -1084,8 +1087,6 @@ export class ChatView extends ItemView {
       this.convos.push(this.active);
     } else {
       this.active = byId.get(s.activeTabId) ?? this.convos[this.convos.length - 1];
-      this.provider = this.active.provider;
-      this.model = this.active.model;
     }
 
     // Restore the open-tab set (filter to still-existing convos); fall back to active.
@@ -1163,8 +1164,8 @@ export class ChatView extends ItemView {
    *  and the archived payload (for the separate store). Neither side is trimmed:
    *  over-budget live conversations become advisory cleanup candidates, never
    *  deletions — only empty, unprotected "New chat" husks are dropped. One
-   *  partition, one `saveActive`: the two payloads are a single consistent
-   *  snapshot with no ordering coupling. See core/retention for the contract.
+   *  partition: the two payloads are a single consistent snapshot with no
+   *  ordering coupling. See core/retention for the contract.
    *
    *  ONE deliberate loss, recorded here because nothing else in the tree records
    *  it: an EMPTY conversation that is neither active nor pinned is dropped even
@@ -1177,7 +1178,6 @@ export class ChatView extends ItemView {
    *  the user wrote is lost: a husk holds zero messages. Recreating those tab
    *  placeholders belongs to the strip, not to the retention policy: Plan 2. */
   private serializeSplit(): { live: ConvoData[]; archived: ConvoData[] } {
-    this.saveActive();
     const { live, archived } = this.recomputeRetention();
     return {
       live: live.map((c) => this.toConvoData(c)),
@@ -1284,8 +1284,9 @@ export class ChatView extends ItemView {
       id: `c${++convoSeed}`,
       listEl: createDiv({ cls: "mva-list" }),
       title: "New chat",
-      provider: this.provider,
-      model: this.model,
+      // New chats start from the defaults in settings, not from the open chat.
+      provider: this.plugin.settings.provider,
+      model: defaultModel(this.plugin.settings, this.plugin.settings.provider),
       allow: new Set(),
       messages: [],
       session: null,
@@ -1306,16 +1307,9 @@ export class ChatView extends ItemView {
     return c;
   }
 
-  saveActive(): void {
-    if (!this.active) return;
-    this.active.provider = this.provider;
-    this.active.model = this.model;
-  }
-
   newConversation(target?: { provider: ProviderId; model: string }): void {
     if (this.gallery.galleryEl) this.gallery.hideGallery();
     // Keep other conversations (and their live sessions) alive — parallel.
-    this.saveActive();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
     const c = this.makeConvo();
     if (target) {
@@ -1399,7 +1393,6 @@ export class ChatView extends ItemView {
   switchTo(c: Convo): void {
     if (c === this.active) return;
     this.plugin.memoryHarvest.leaving(this.active.id); // switching away settles it for memory
-    this.saveActive();
     this.active.draft = this.composer.getDraft();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
     this.active = c;
@@ -1411,8 +1404,6 @@ export class ChatView extends ItemView {
     // Coming back from the history un-retires: it is in the strip again.
     c.retiredAt = undefined;
     if (!this.openTabs.includes(c.id)) this.openTabs.push(c.id);
-    this.provider = c.provider;
-    this.model = c.model;
     // A fresh tab should always start pinned so you see the latest content.
     this.pinnedToBottom = true;
     this.updateJumpPill();
@@ -1454,6 +1445,7 @@ export class ChatView extends ItemView {
    *  that is the only thing that keeps the two doors from drifting again. */
   private syncActiveSurfaces(c: Convo): void {
     this.refreshProviderUI();
+    this.composer.refreshPerm(); // permission modes are per provider, and chats can differ
     this.syncSendButton();
     this.composer.updateUsage(c.usage ?? null);
     this.composer.setDraft(c.draft);
@@ -2005,25 +1997,38 @@ export class ChatView extends ItemView {
    * so external behavior is unchanged. The model override falls back to the
    * settings default per provider.
    */
-  askInNewConversation(
-    text: string,
-    autoSend = true,
-    opts?: { model?: string; sendPrefix?: string }
-  ): string {
+  askInNewConversation(text: string, autoSend = true, opts?: { model?: string; sendPrefix?: string }): string {
     const q = text.trim();
     if (!q) return "";
     const provider = this.plugin.settings.provider;
-    const model =
-      opts?.model ??
-      (provider === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel);
-    this.newConversation({ provider, model });
+    this.newConversation({ provider, model: opts?.model ?? defaultModel(this.plugin.settings, provider) });
+    return this.seedAndSend(q, autoSend, opts?.sendPrefix);
+  }
+
+  /** An external prompt (askExo): fills the open chat while it is still
+   *  untouched instead of leaving it behind as an empty tab, else opens a new
+   *  one. Task spawns keep `askInNewConversation`: they need a NEW chat back. */
+  askInFreshChat(text: string, autoSend = true, sendPrefix?: string): string {
+    const q = text.trim();
+    if (!q) return "";
+    const a = this.active;
+    if (!a || !isUntouchedChat(a, this.composer.getDraft())) return this.askInNewConversation(q, autoSend, { sendPrefix });
+    a.provider = this.plugin.settings.provider; // session is keyed on provider + model: respawns on send
+    a.model = defaultModel(this.plugin.settings, a.provider);
+    this.syncActiveSurfaces(a);
+    this.persist();
+    return this.seedAndSend(q, autoSend, sendPrefix);
+  }
+
+  /** Put `q` in the active chat's composer and send it (or just focus). */
+  private seedAndSend(q: string, autoSend: boolean, sendPrefix?: string): string {
     const id = this.active.id;
     this.composer.setInputValue(q);
     this.composer.autoGrow();
     if (autoSend) {
       // One-shot handoff directive: send() consumes it into runTurn's
       // sendPrefix so it rides the outbound message, never the visible bubble.
-      this.handoffPrefix = opts?.sendPrefix ?? null;
+      this.handoffPrefix = sendPrefix ?? null;
       this.send();
     } else this.composer.focusInput();
     return id;
@@ -2481,8 +2486,6 @@ export class ChatView extends ItemView {
     // later switchTo to the SAME convo returns early on `c === this.active` and
     // would never get the chance to clear it.
     next.unread = false;
-    this.provider = next.provider;
-    this.model = next.model;
     // Same two facts switchTo records: this is now the focused tab (LRU key) and
     // it is back in the strip. The cap itself is left to the next switchTo —
     // retiring a tab out from under an open gallery overlay would be invisible.
@@ -5806,7 +5809,7 @@ export class ChatView extends ItemView {
         if (elapsed > 5000) {
           ctx.el
             .createDiv({ cls: "mva-turn-meta" })
-            .createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
+            .createSpan({ cls: "mva-turn-duration", text: `${poisoned ? "Failed after" : c.stopped ? "Stopped after" : "Done in"} ${this.fmtDuration(elapsed)}` });
         }
         if (!c.stopped && !poisoned) {
           // Workflow Foundry records privacy-safe deterministic metadata and,

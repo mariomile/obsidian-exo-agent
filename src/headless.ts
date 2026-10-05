@@ -12,6 +12,7 @@ import { memoryCaps } from "./core/memory-caps";
 import { effortFor } from "./core/model-tuning";
 import { toVaultRelative } from "./core/vault-path";
 import type { MVASettings } from "./settings";
+import { defaultModel } from "./settings-schema";
 import type { AgentCaller } from "./core/agent-runs";
 
 /** Per-step idle timeout — no event for this long aborts the run (bounded autonomy). */
@@ -129,7 +130,7 @@ export async function runHeadlessPlaybook(
         stop: opts.codexBridge.release,
       };
     }
-    const model = provider === "claude" ? settings.claudeModel : settings.codexModel;
+    const model = defaultModel(settings, provider);
     session = ADAPTERS[provider].createSession({
       cli,
       model,

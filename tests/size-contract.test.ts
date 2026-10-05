@@ -56,7 +56,7 @@ const CEILINGS: Record<string, number> = {
   // recall per turno vive in `obsidian/turn-recall.ts` + `ui/recall-row.ts`.
   // 6571 -> 6247 righe reali. Il tetto scende a 6260: 13 righe di margine,
   // come sugli altri file.
-  "src/view.ts": 6260,
+  "src/view.ts": 6230,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -94,7 +94,13 @@ const CEILINGS: Record<string, number> = {
   // sopra. 2 righe sono il margine dichiarato per il prossimo provider di
   // autocomplete, non un permesso di ricrescita — il prossimo candidato
   // all'estrazione è il blocco `atItems` (ricerca note + agenti).
-  "src/ui/composer.ts": 1720,
+  //
+  // Abbassato il 2026-10-05: la miniatura delle card del contesto
+  // (`fillThumb`, legge solo il vault) vive ora in `ui/context-thumb.ts`, e la
+  // regola "nota attiva allegata solo se visibile" in `core/active-note.ts` +
+  // `obsidian/note-visibility.ts`. 1735 -> 1690 righe reali. Tetto a 1700:
+  // 10 righe di margine, come sugli altri file.
+  "src/ui/composer.ts": 1700,
   // Abbassato il 2026-08-11: `BACKGROUND_MODEL_OPTIONS` è tornato a casa in
   // `core/model-options.ts`, il modulo che possiede già il catalogo dei modelli
   // per i picker — qui era un catalogo di prodotto parcheggiato in un file di
@@ -161,7 +167,7 @@ const CEILINGS: Record<string, number> = {
   // `src/styles/index.css` con gli @import in ordine di cascata). E' una
   // decisione di build, e questo tetto e' cio' che la mette sul tavolo quando
   // serve davvero invece che come refactor speculativo.
-  "styles.css": 7000,
+  "styles.css": 6970,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

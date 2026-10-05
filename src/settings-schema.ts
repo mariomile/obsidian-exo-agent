@@ -50,7 +50,9 @@ export interface MVASettings {
   /** What sending a message during a running turn does: "queue" waits and starts
    *  it as the next turn; "steer" injects it into the live turn. */
   steerMode: "queue" | "steer";
-  /** Phase 1 default: false (pure chat). Phase 2 turns this on with gating. */
+  /** On by default: without tools the agent can't read the vault, and a
+   *  fresh install's first question about a note fails. Sensitive actions stay
+   *  gated by the permission cards. */
   toolsEnabled: boolean;
   permissionMode: PermissionMode;
   autoAllowRead: boolean;
@@ -244,6 +246,11 @@ export interface MVASettings {
   collaboShares: Record<string, CollaboShare>;
 }
 
+/** The model new chats and background runs of `provider` start from. */
+export function defaultModel(s: Pick<MVASettings, "claudeModel" | "codexModel">, provider: ProviderId): string {
+  return provider === "claude" ? s.claudeModel : s.codexModel;
+}
+
 export const DEFAULT_SETTINGS: MVASettings = {
   provider: "claude",
   claudeBin: "",
@@ -259,7 +266,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   customPrompts: [],
   proposalPlaybookReceipts: {},
   steerMode: "queue",
-  toolsEnabled: false,
+  toolsEnabled: true,
   permissionMode: "default",
   autoAllowRead: true,
   fastStartup: true,

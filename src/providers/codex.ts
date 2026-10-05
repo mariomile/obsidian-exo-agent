@@ -162,10 +162,15 @@ export function handleCodexLine(
   }
 }
 
+/** Icon id of the OpenAI mark, registered in ui/icons.ts. */
+export const OPENAI_MARK = "exo-openai-mark";
+
 export const codexAdapter: ProviderAdapter = {
   id: "codex",
   displayName: "Codex",
   brandColor: "#19c37d",
+  icon: OPENAI_MARK,
+  iconTinted: false,
 
   models(): ModelOption[] {
     // Verified live via app-server `model/list` on codex-cli 0.156.1

@@ -758,10 +758,15 @@ class ClaudeSession implements AgentSession {
   }
 }
 
+/** Icon id of the Claude mark, registered in ui/icons.ts. */
+export const CLAUDE_MARK = "exo-claude-mark";
+
 export const claudeAdapter: ProviderAdapter = {
   id: "claude",
   displayName: "Claude",
   brandColor: "#d97757",
+  icon: CLAUDE_MARK,
+  iconTinted: true,
 
   models(): ModelOption[] {
     // Pinned, verified model IDs (checked 2026-09-29 against the Claude Code

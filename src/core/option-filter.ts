@@ -5,12 +5,15 @@
  * empty after filtering — is unit-testable without a DOM.
  */
 
+import type { ProviderId } from "../providers/types";
+
 export interface SelectOption {
   value: string;
   label: string;
   group?: string;
   risk?: string;
-  dotColor?: string;
+  /** Provider whose mark leads the row (model picker). */
+  mark?: ProviderId;
 }
 
 export type OptionRow =

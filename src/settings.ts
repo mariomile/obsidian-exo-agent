@@ -8,7 +8,7 @@ import { DEFAULT_MEMORY_ROOT, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { renderCliDiagnostics } from "./ui/settings-cli";
 import { renderComposerModels } from "./ui/settings-composer-models";
 
-import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, type MVASettings } from "./settings-schema";
+import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, defaultModel, type MVASettings } from "./settings-schema";
 
 export { DEFAULT_SETTINGS, type MVASettings };
 
@@ -104,7 +104,7 @@ export class MVASettingTab extends PluginSettingTab {
     let refreshComposerModels = () => {};
     const fill = (d: DropdownComponent, provider: ProviderId) => {
       d.selectEl.empty();
-      const cur = provider === "claude" ? s.claudeModel : s.codexModel;
+      const cur = defaultModel(s, provider);
       const opts = providerModels(
         ADAPTERS[provider].models(),
         provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined,

@@ -1442,7 +1442,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   flex-direction: column;
   background: var(--mva-surface-0);
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--mva-r3);
+  border-radius: var(--radius-l); /* the theme's container radius */
   transition: border-color var(--mva-t), box-shadow var(--mva-t);
 }
 /* Focus: a subtle neutral border only — no accent color highlight while typing */
@@ -1942,11 +1942,23 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 /* Brand-color dot on combined-provider popovers (e.g. the unified model picker) —
    same visual language as the tab bar / gallery card provider dots. */
-.mva-sel-opt-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* Provider mark (Claude / OpenAI) leading the model chip and picker rows. */
+.mva-sel-mark {
+  display: inline-flex;
   flex-shrink: 0;
+}
+.mva-sel-mark .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+.mva-sel-chip:has(.mva-sel-mark) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mva-sel-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .mva-sel-opt:hover,
 .mva-sel-opt.is-active {
@@ -1979,49 +1991,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-size: 11px;
   color: var(--text-faint);
 }
-
-/* ---- tune dialog: model + effort + permission in one popover ---- */
-.mva-tune-pop {
-  /* The tune icon sits on the LEFT of the composer toolbar (after "+"), so anchor
-     left and open rightward. A right-anchored popover would grow leftward off the
-     pane's edge and get clipped — leaving only the trailing checks visible (the
-     row labels, left-aligned, fall outside the pane). */
-  left: 0;
-  right: auto;
-  min-width: 200px;
-  max-height: 420px;
-}
-.mva-tune-group + .mva-tune-group {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 50%, transparent);
-}
-.mva-tune-label {
-  padding: 2px 10px 4px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-.mva-tune-rows:focus,
-.mva-tune-rows:focus-visible {
-  outline: none;
-}
-
-/* Always-visible permission dot in the toolbar — a small colored disc whose color
-   reflects the active permission/sandbox risk. Reuses the risk palette. */
-.mva-perm-dot {
-  width: 9px;
-  height: 9px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  margin: 0 2px;
-  cursor: pointer;
-  background: var(--mva-ok);
-}
-.mva-perm-dot.is-caution { background: var(--mva-caution); }
-.mva-perm-dot.is-danger  { background: var(--mva-danger); }
 
 /* ------------------------------ context ------------------------------- */
 /* Context strip lives at the top of the unified input box (Craft-style): its
@@ -2066,6 +2035,14 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-doc-card:hover {
   border-color: var(--background-modifier-border-hover);
   background: var(--background-modifier-hover);
+}
+/* The active note hidden behind a full-page chat: offered, not attached. */
+.mva-doc-card.is-suggested {
+  border-style: dashed;
+  background: transparent;
+}
+.mva-doc-card.is-suggested :is(.mva-doc-thumb, .mva-doc-title) {
+  opacity: 0.6;
 }
 /* tiny text preview that reads like a document thumbnail */
 .mva-doc-thumb {
@@ -4941,8 +4918,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* ---------------------- turn duration (F2) ---------------------------- */
 /* Always visible — completion feedback lives outside the hover-gated actions bar. */
 .mva-turn-meta {
-  font-size: 11px;
-  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
   text-align: right;
   padding: 2px 0;
 }
@@ -5968,11 +5945,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
    reuse the .mva-caps-chip vocabulary inside a grouped section. */
 .mva-hub-chipsec { display: flex; flex-direction: column; gap: 6px; }
 .mva-hub-chipsec .mva-caps-body { padding: 2px 2px 10px; }
-/* Standing permission rule covering an MCP source — visibility, not a control. */
-.mva-hub-rule { display: inline-flex; align-items: center; gap: 4px; }
-.mva-hub-rule-icon { display: inline-flex; }
-.mva-hub-rule-icon svg { width: 11px; height: 11px; }
-.mva-hub-rule.is-deny { color: var(--text-error, var(--text-muted)); }
 /* Playbook schedule badge (clock + cadence) on the Playbooks tab. */
 .mva-hub-sched { display: inline-flex; align-items: center; gap: 4px; }
 .mva-hub-sched-icon { display: inline-flex; }
