@@ -50,7 +50,7 @@ Run the bump script — it updates `manifest.json`, `package.json`,
 lockstep:
 
 ```bash
-pnpm bump -- 0.x.y
+pnpm bump 0.x.y
 pnpm build   # refresh main.js
 ```
 
