@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CodexSession, type CodexSessionRuntime } from "../src/providers/codex";
 import type { AgentEvent, SessionCaps, SessionOpts } from "../src/providers/types";
+import { normalizeUtilization } from "../src/core/rate-limit";
 
 type RpcMessage = {
   id?: number;
@@ -615,14 +616,14 @@ describe("CodexSession app-server lifecycle", () => {
       utilization: 0.85,
       resetsAt: 1234,
       windowType: "five-hour",
-      windows: [{ id: "codex:primary", label: "5-hour limit", utilization: 85, resetsAt: 1234 }],
+      windows: [{ id: "codex:primary", label: "5-hour limit", utilization: 0.85, resetsAt: 1234 }],
     });
     expect(session.rateLimit).toEqual({
       status: "allowed_warning",
       utilization: 0.85,
       resetsAt: 1234,
       windowType: "five-hour",
-      windows: [{ id: "codex:primary", label: "5-hour limit", utilization: 85, resetsAt: 1234 }],
+      windows: [{ id: "codex:primary", label: "5-hour limit", utilization: 0.85, resetsAt: 1234 }],
     });
     child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
     await turn;
@@ -658,11 +659,70 @@ describe("CodexSession app-server lifecycle", () => {
       windows: [{
         id: "codex:primary",
         label: "5-hour limit",
-        utilization: 34,
+        utilization: 0.34,
         resetsAt: 1_800_000_000,
         windowMinutes: 300,
       }],
     });
+    session.dispose();
+  });
+
+  it("reports idle Codex failures as notices, never as an error on the finished turn", async () => {
+    const { session, child } = await readySession();
+    const events: AgentEvent[] = [];
+    const { turn } = await startTurn(session, child, events);
+    child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
+    await turn;
+    session.compact();
+    const compact = await child.next("thread/compact/start");
+    child.push({ id: compact.id, error: { message: "boom" } });
+    child.push({ method: "error", params: { error: { message: "late server error" } } });
+    await vi.waitFor(() => expect(events.filter((e) => e.kind === "notice")).toHaveLength(2));
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    session.dispose();
+  });
+
+  it("reports a failed steer as a notice and keeps the turn alive", async () => {
+    const { session, child } = await readySession();
+    const events: AgentEvent[] = [];
+    const { turn } = await startTurn(session, child, events);
+    expect(session.steer("also this")).toBe(true);
+    const steer = await child.next("turn/steer");
+    child.push({ id: steer.id, error: { message: "turn moved on" } });
+    await vi.waitFor(() => expect(events.some((e) => e.kind === "notice")).toBe(true));
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
+    await turn;
+    session.dispose();
+  });
+
+  it("keeps a turn alive through retrying server errors and a late compact failure", async () => {
+    const { session, child } = await readySession();
+    session.compact();
+    const compact = await child.next("thread/compact/start");
+    const events: AgentEvent[] = [];
+    const { turn } = await startTurn(session, child, events);
+    child.push({ id: compact.id, error: { message: "compact boom" } });
+    child.push({ method: "error", params: { error: { message: "reconnecting 1/5" }, willRetry: true, threadId: "thread-1", turnId: "turn-1" } });
+    child.push({ method: "error", params: { error: { message: "old turn" }, willRetry: false, threadId: "thread-1", turnId: "turn-0" } });
+    await vi.waitFor(() => expect(events.filter((e) => e.kind === "notice")).toHaveLength(3));
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    child.push({ method: "error", params: { error: { message: "fatal" }, willRetry: false, threadId: "thread-1", turnId: "turn-1" } });
+    await vi.waitFor(() => expect(events.some((e) => e.kind === "error")).toBe(true));
+    child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
+    await turn;
+    session.dispose();
+  });
+
+  it("keeps a 1% Codex window at 1%, not 100% and rejected", async () => {
+    const { session, child } = await readySession();
+    const refresh = session.refreshRateLimits();
+    const request = await child.next("account/rateLimits/read");
+    child.reply(request, { rateLimits: { limitId: "codex", primary: { usedPercent: 1, windowDurationMins: 300 } } });
+    await refresh;
+    expect(session.rateLimit?.status).toBe("allowed");
+    expect(session.rateLimit?.utilization).toBe(0.01);
+    expect(normalizeUtilization(session.rateLimit?.windows?.[0].utilization)).toBe(1);
     session.dispose();
   });
 

@@ -64,17 +64,21 @@ function isWorkflowSignal(value: unknown): value is WorkflowSignal {
     && typeof signal.succeeded === "boolean";
 }
 
-export function parseWorkflowSignalLedger(raw: string | null): WorkflowSignalLedger {
+/** The stored ledger, or null when the file exists but is not one: readers
+ *  treat that as empty, a writer must leave it alone. */
+function readLedger(raw: string | null): WorkflowSignalLedger | null {
   if (!raw) return { version: 1, signals: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<WorkflowSignalLedger>;
-    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.signals)) {
-      return { version: 1, signals: [] };
-    }
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.signals)) return null;
     return { version: 1, signals: parsed.signals.filter(isWorkflowSignal) };
   } catch {
-    return { version: 1, signals: [] };
+    return null;
   }
+}
+
+export function parseWorkflowSignalLedger(raw: string | null): WorkflowSignalLedger {
+  return readLedger(raw) ?? { version: 1, signals: [] };
 }
 
 export class WorkflowSignalStore {
@@ -93,7 +97,8 @@ export class WorkflowSignalStore {
     options: RecordWorkflowOptions = {}
   ): Promise<RecordWorkflowResult> {
     return this.queue.enqueue(async () => {
-      const ledger = await this.load();
+      const ledger = readLedger(await this.adapter.read());
+      if (!ledger) throw new Error("workflow signal ledger is unreadable; left untouched");
       const result = recordWorkflowOccurrence(ledger, signal, now, options);
       if (JSON.stringify(result.ledger) !== JSON.stringify(ledger)) {
         await this.adapter.write(JSON.stringify(result.ledger, null, 2));

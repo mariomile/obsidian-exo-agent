@@ -22,14 +22,15 @@ vi.mock("obsidian", async () => {
 vi.mock("electron", () => ({ shell: {}, default: {} }));
 
 const headless = vi.hoisted(() => ({
-  prompts: [] as { prompt: string; opts: { write?: boolean; systemPrompt?: string } }[],
+  prompts: [] as { prompt: string; opts: { write?: boolean; systemPrompt?: string; agentCaller?: { slug: string; depth: number } } }[],
   output: "",
+  writes: [] as string[],
   reports: [] as string[],
 }));
 vi.mock("../src/headless", () => ({
   runHeadlessPlaybook: vi.fn(async (_app: unknown, _settings: unknown, prompt: string, opts: { write?: boolean }) => {
     headless.prompts.push({ prompt, opts });
-    return { ok: true, output: headless.output, reads: [], writes: [], checkpoint: new Map() };
+    return { ok: true, output: headless.output, reads: [], writes: headless.writes, checkpoint: new Map() };
   }),
   writeReport: vi.fn(async (_app: unknown, name: string) => {
     headless.reports.push(name);
@@ -74,13 +75,14 @@ function fakePlugin(kernel: boolean) {
     proposalStore: { append: vi.fn(async (_candidate: unknown, _source: unknown) => ({ status: "appended" })) },
     recordAutomationRun: vi.fn(async () => "rec-1"),
     recordBackgroundSpend: vi.fn(),
+    checkBackgroundBudget: vi.fn(() => true),
     saveSettings: vi.fn(async () => undefined),
+    noteVaultWrite: vi.fn(),
   };
   Object.assign(plugin, {
     ...deps,
     app: {},
     agentRunsInFlight: new Set<string>(),
-    agentContext: null,
     settings: {
       provider: "claude",
       obsidianToolsEnabled: false,
@@ -99,13 +101,45 @@ beforeEach(() => {
   headless.prompts.length = 0;
   headless.reports.length = 0;
   headless.output = "";
+  headless.writes = [];
+});
+
+describe("run gate and caller identity", () => {
+  it("Run now respects the run gate: refused while another run holds the only slot", async () => {
+    const { plugin } = fakePlugin(true);
+    (plugin as unknown as { agentRunsInFlight: Set<string> }).agentRunsInFlight.add("agent:other::daily");
+    const run = await plugin.runAutomationNow(automation());
+    expect(run.ok).toBe(false);
+    expect(run.refused).toBeTruthy();
+    expect(headless.prompts).toHaveLength(0);
+  });
+
+  it("Run now respects the background budget", async () => {
+    const { plugin } = fakePlugin(true);
+    (plugin as unknown as { checkBackgroundBudget: () => boolean }).checkBackgroundBudget = () => false;
+    expect((await plugin.runAutomationNow(automation())).refused).toBeTruthy();
+    expect(headless.prompts).toHaveLength(0);
+  });
+
+  it("hands an unattended run's writes to the git safety net", async () => {
+    const { plugin, noteVaultWrite } = fakePlugin(true);
+    headless.writes = ["_inbox/A.md"];
+    await plugin.runAutomationNow(automation({ mode: "act", scope: ["_inbox/**"] }));
+    expect(noteVaultWrite).toHaveBeenCalledWith(["_inbox/A.md"]);
+  });
+
+  it("binds the run's own identity into its tools, one level below the caller", async () => {
+    const { plugin } = fakePlugin(true);
+    await plugin.runAutomationNow(automation());
+    expect(headless.prompts[0].opts.agentCaller).toEqual({ slug: "morning-digest", depth: 1 });
+  });
 });
 
 describe("prompt-only automation through the agent executor", () => {
   it("runs its own prompt as the direct run's standing task, with the proposal contract", async () => {
     const { plugin } = fakePlugin(true);
     headless.output = "Digest body.";
-    expect(await plugin.runAutomationNow(automation())).toBe(true);
+    expect(await plugin.runAutomationNow(automation())).toEqual({ ok: true });
 
     expect(headless.prompts).toHaveLength(1);
     const { prompt, opts } = headless.prompts[0];
@@ -285,5 +319,56 @@ describe("agent-backed automation: the same eligibility rule", () => {
     await plugin.runAgent(librarian, "daily 08:00");
     expect(headless.prompts[0].prompt).not.toContain(AGENT_PROPOSAL_FENCE);
     expect(proposalStore.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("automation run history", () => {
+  function historyPlugin(initial: string | null) {
+    const files = new Map<string, string>();
+    if (initial !== null) files.set("plugins/exo/automation-runs.json", initial);
+    const plugin = Object.create(ExoPlugin.prototype) as InstanceType<typeof ExoPlugin>;
+    Object.assign(plugin, {
+      manifest: { dir: "plugins/exo" },
+      automationRunsWriteQueue: new (class {
+        private tail: Promise<void> = Promise.resolve();
+        enqueue<T>(fn: () => Promise<T>): Promise<T> {
+          const r = this.tail.then(fn);
+          this.tail = r.then(() => undefined, () => undefined);
+          return r;
+        }
+      })(),
+      app: {
+        vault: {
+          adapter: {
+            exists: async (p: string) => files.has(p),
+            // Yield between read and write, as the real adapter does.
+            read: async (p: string) => { const d = files.get(p)!; await new Promise((r) => setTimeout(r, 1)); return d; },
+            write: async (p: string, d: string) => { files.set(p, d); },
+          },
+        },
+      },
+    });
+    const record = (name: string) =>
+      (plugin as unknown as { recordAutomationRun: (...a: unknown[]) => Promise<string | null> }).recordAutomationRun(
+        name, Date.now(), { ok: true, output: "", reads: [], writes: [], checkpoint: new Map() }, "r.md"
+      );
+    return { plugin, files, record };
+  }
+
+  it("keeps both records when two runs finish together", async () => {
+    const { files, record } = historyPlugin("[]");
+    await Promise.all([record("a"), record("b")]);
+    const names = (JSON.parse(files.get("plugins/exo/automation-runs.json")!) as { name: string }[]).map((r) => r.name);
+    expect(names.sort()).toEqual(["a", "b"]);
+  });
+
+  it("keeps a corrupt history aside as a copy and still records the new run", async () => {
+    const { files, record } = historyPlugin("{not json");
+    expect(await record("a")).not.toBeNull();
+    const copies = [...files.keys()].filter((k) => k.includes("automation-runs.corrupt-"));
+    expect(copies).toHaveLength(1);
+    expect(files.get(copies[0])).toBe("{not json");
+    const names = (JSON.parse(files.get("plugins/exo/automation-runs.json")!) as { name: string }[]).map((r) => r.name);
+    expect(names).toEqual(["a"]);
   });
 });

@@ -2,6 +2,7 @@ import type { Automation } from "../core/automation-model";
 import type { App } from "obsidian";
 import type { AutomationConfig, AutomationRunRecord } from "../core/automations";
 import type { AgentDef } from "../core/agents";
+import type { AgentCaller } from "../core/agent-runs";
 import type { ChatRecord } from "../core/recent-chats";
 
 /** The shape every in-process tool returns. Free-form human-readable text —
@@ -42,7 +43,7 @@ export interface ExoToolHost {
     filePath(slug: string): string;
   };
   /** Manual run of one automation through the shared executor. */
-  runAutomationNow(a: Automation): Promise<boolean>;
+  runAutomationNow(a: Automation): Promise<{ ok: boolean; refused?: string }>;
   /** Resolves false when named agents are disabled in settings. */
   agentsReady(): Promise<boolean>;
   agentStore: {
@@ -51,7 +52,7 @@ export interface ExoToolHost {
     resolve(query: string): AgentDef | null;
   };
   /** Delegate to another agent; resolves to a human-readable result or refusal. */
-  invokeAgentFromAgent(target: string, task: string): Promise<string>;
+  invokeAgentFromAgent(target: string, task: string, caller: AgentCaller): Promise<string>;
   /** Re-render any open Agents pane after a contract change. */
   refreshAgentsUI(): Promise<void>;
   /** Live capability snapshot from the session's system/init (null pre-spawn

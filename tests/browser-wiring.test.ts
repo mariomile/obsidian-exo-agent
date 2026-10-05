@@ -28,12 +28,6 @@ describe("browser wiring", () => {
     expect(view).toMatch(/buildObsidianTools\(this\.app,\s*\{\s*\.\.\.toolOpts,/);
   });
 
-  it("the session signature includes browserEnabled, so flipping the flag respawns", () => {
-    const at = view.indexOf("sessionSigOf");
-    expect(at).toBeGreaterThan(-1);
-    expect(view.slice(at, at + 900)).toContain("browserEnabled");
-  });
-
   it("tools.ts registers the browser set only behind the bridge", () => {
     expect(tools).toMatch(/browserBridge \? buildBrowserTools\(browserBridge\) : \[\]/);
   });

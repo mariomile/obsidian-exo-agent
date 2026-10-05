@@ -94,6 +94,9 @@ import {
   isEmptyRun,
   gateAgentInvoke,
   gateAgentRun,
+  EXO_CALLER,
+  type AgentCaller,
+  type RunGate,
   proposeEligible,
   scheduleSlotKeys,
   writeModeFor,
@@ -284,6 +287,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   taskStore!: TaskStore;
   /** Serialized writes to the agent contract sidecars (`paths.agents`). */
   private readonly agentWriteQueue = new WriteQueue();
+  private readonly automationRunsWriteQueue = new WriteQueue();
   /**
    * THE ONE agent registry — loads canonical vault bundles plus external runtime
    * agents. Constructed in `onload()`; refreshed lazily via
@@ -2038,11 +2042,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const startedAt = Date.now();
     new Notice(`Running playbook "${name}"…`);
-    const headlessOpts: HeadlessOpts = { write: opts.write };
-    if (this.settings.provider === "codex" && this.settings.obsidianToolsEnabled) {
-      headlessOpts.codexBridge = (await this.ensureCodexBridge()) ?? undefined;
-    }
+    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge() };
     const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
+    if (result.writes.length) this.noteVaultWrite(result.writes);
     const path = await writeReport(this.app, name, result, this.paths.reports);
     // Every automation run is recorded, not just the ones that wrote. The
     // records started life as restore points, so read-only runs left no trace
@@ -2083,7 +2085,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     if (!this.settings.exoQueueEnabled || this.exoQueueBusy) return;
     this.exoQueueBusy = true;
     try {
-      await drainExoQueue(this.app, this.settings);
+      await drainExoQueue(this.app, this.settings, {
+        codexBridge: () => this.headlessBridge(),
+        noteWrite: (paths) => this.noteVaultWrite(paths),
+      });
     } catch (err) {
       console.warn("[Exo] queue drain failed:", err);
     } finally {
@@ -2122,6 +2127,13 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       }
       return false;
     }
+  }
+
+  /** The vault-tools bridge a headless run needs: one per run on Codex with the
+   *  Obsidian tools on, none otherwise (Claude gets its tools in-process). */
+  private async headlessBridge(): Promise<HeadlessOpts["codexBridge"]> {
+    if (this.settings.provider !== "codex" || !this.settings.obsidianToolsEnabled) return undefined;
+    return (await this.ensureCodexBridge()) ?? undefined;
   }
 
   /** Start an isolated loopback executor and materialize the shared stdio script
@@ -2649,33 +2661,29 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  /** Manual "Run now" from the hub: bypasses the schedule and reuses the
-   *  same executor, so gates, snapshots and records behave identically.
-   *  `runAgent` dedups a second concurrent call with the same key. */
-  async runAutomationNow(a: Automation): Promise<boolean> {
-    if (a.system === "daily-pulse") return this.generateAndPersistDailyPulse(Date.now());
+  /** Manual "Run now" from the hub: bypasses the schedule and the enabled
+   *  flag, but not the run gate (concurrency, budget, duplicates). `refused`
+   *  says why nothing ran, as opposed to a run that failed. */
+  async runAutomationNow(a: Automation): Promise<{ ok: boolean; refused?: string }> {
+    if (a.system === "daily-pulse") return { ok: await this.generateAndPersistDailyPulse(Date.now()) };
     const def = this.automationDef(a);
     if (!def) {
       new Notice(`Agent "${a.agent}" not found.`);
-      return false;
+      return { ok: false, refused: `agent "${a.agent}" not found` };
     }
-    return this.runAgent(def, "manual", `${agentLastRunKey(a.slug)}::manual`);
+    const runKey = `${agentLastRunKey(a.slug)}::manual`;
+    const gate = this.gateRun(def, runKey, { manual: true });
+    if (!gate.ok) {
+      new Notice(`Can't run now: ${gate.detail}.`);
+      return { ok: false, refused: gate.detail };
+    }
+    return { ok: await this.runAgent(def, "manual", runKey) };
   }
 
   /** Gate one due automation run, then hand it to `runAgent`. Sequential:
    *  one at a time. */
   private async runDueAutomation(run: DueAgentRun): Promise<void> {
-    const gate = gateAgentRun({
-      agent: run.agent,
-      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(run.agent.brain.slug)] ?? 0,
-      now: Date.now(),
-      running: this.agentRunsInFlight.size,
-      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-      inFlightKeys: this.agentRunsInFlight,
-      runKey: run.runKey,
-      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-    });
+    const gate = this.gateRun(run.agent, run.runKey);
     if (!gate.ok) {
       this.diag.push("automations", `run skipped (${gate.reason}): ${gate.detail}`);
       return;
@@ -2693,18 +2701,23 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   private static readonly AGENT_MAX_CONCURRENT = 1;
   /** Run keys currently queued or executing — the dedupe set for `gateAgentRun`. */
   private readonly agentRunsInFlight = new Set<string>();
-  /**
-   * Which agent is executing right now, and how deep the delegation chain is.
-   *
-   * The MCP tool surface carries no caller identity, so `invoke_agent` cannot
-   * ask "who is calling" — it reads this instead. Safe as a single value
-   * because agent runs are sequential: a nested run only starts while its
-   * caller is blocked awaiting the tool result, and the depth cap bounds the
-   * stack. Restored (not cleared) on exit so a nested run hands control back to
-   * its caller rather than to nobody.
-   */
-  agentContext: { slug: string; depth: number } | null = null;
 
+  /** The one run gate every entry point (schedule, Run now, picker, delegation)
+   *  passes through, so none of them can skip the budget or concurrency check. */
+  private gateRun(agent: AgentDef, runKey: string, mode: { manual?: boolean; nested?: boolean } = {}): RunGate {
+    return gateAgentRun({
+      agent,
+      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(agent.brain.slug)] ?? 0,
+      now: Date.now(),
+      running: this.agentRunsInFlight.size,
+      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
+      inFlightKeys: this.agentRunsInFlight,
+      runKey,
+      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
+      canSpawn: !Platform.isMobile,
+      ...mode,
+    });
+  }
 
   /**
    * Execute one agent run through the headless profile — the same bounded
@@ -2719,13 +2732,12 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     reason: string,
     runKey?: string,
     by = "exo",
-    task?: { from: string; text: string }
+    task?: { from: string; text: string },
+    callerDepth = 0
   ): Promise<boolean> {
     const key = runKey ?? `${agentLastRunKey(agent.brain.slug)}::manual`;
     if (this.agentRunsInFlight.has(key)) return false;
     this.agentRunsInFlight.add(key);
-    const callerContext = this.agentContext;
-    this.agentContext = { slug: agent.brain.slug, depth: (callerContext?.depth ?? 0) + 1 };
     const name = agentRunName(agent, reason);
     const startedAt = Date.now();
     const today = new Date(startedAt).toISOString().slice(0, 10);
@@ -2736,10 +2748,12 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     try {
       new Notice(`${agent.brain.name} — running (${reason})…`);
       const memory = await this.agentStore.loadMemory(agent, today);
-      const headlessOpts: HeadlessOpts = { write };
-      if (this.settings.provider === "codex" && this.settings.obsidianToolsEnabled) {
-        headlessOpts.codexBridge = (await this.ensureCodexBridge()) ?? undefined;
-      }
+      // This run's tools delegate as this agent, one level deeper than its caller.
+      const headlessOpts: HeadlessOpts = {
+        write,
+        agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
+        codexBridge: await this.headlessBridge(),
+      };
       // Claude delegates to a true isolated subagent via an inline Agent()
       // instruction (buildAgentRunPrompt). Codex has no such primitive — its own
       // `collabAgentToolCall` is unrelated and has no notion of a named persona
@@ -2758,6 +2772,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         );
       }
       const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
+      // Unattended writes join the git safety net exactly like a chat turn's.
+      if (result.writes.length) this.noteVaultWrite(result.writes);
       const proposed = propose ? await this.collectAgentProposals(agent, result.output, startedAt) : 0;
       // A note is earned, not automatic. An agent watching a folder runs far
       // more often than it finds anything, and a report per run turns a quiet
@@ -2833,7 +2849,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       return false;
     } finally {
       this.agentRunsInFlight.delete(key);
-      this.agentContext = callerContext;
     }
   }
 
@@ -2885,10 +2900,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    * other at all, and chaining has to be faked through database triggers. Here
    * it is a gated tool call, with the whole chain recorded in the run ledger.
    */
-  async invokeAgentFromAgent(target: string, task: string): Promise<string> {
+  async invokeAgentFromAgent(target: string, task: string, from: AgentCaller = EXO_CALLER): Promise<string> {
     if (!(await this.agentsReady())) return "Named agents are disabled in Exo settings.";
-    const caller = this.agentContext?.slug ?? "exo";
-    const depth = this.agentContext?.depth ?? 0;
+    const { slug: caller, depth } = from;
     const callee = this.agentStore.resolve(target);
     // The caller's powers come from its automation file (can_call lives
     // there since v2); an unbound agent has no delegation allowlist.
@@ -2899,23 +2913,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     if (!gate.ok) return `Refused (${gate.reason}): ${gate.detail}.`;
 
     const runKey = `${agentLastRunKey(callee!.brain.slug)}::from:${caller}`;
-    const runGate = gateAgentRun({
-      agent: callee!,
-      lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(callee!.brain.slug)] ?? 0,
-      now: Date.now(),
-      running: this.agentRunsInFlight.size,
-      maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-      inFlightKeys: this.agentRunsInFlight,
-      runKey,
-      budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-      // A human asking through chat is a manual call; an agent asking is nested.
-      manual: caller === "exo",
-      nested: caller !== "exo",
-    });
+    // A human asking through chat is a manual call; an agent asking is nested.
+    const runGate = this.gateRun(callee!, runKey, { manual: caller === "exo", nested: caller !== "exo" });
     if (!runGate.ok) return `Refused (${runGate.reason}): ${runGate.detail}.`;
 
-    const ok = await this.runAgent(callee!, `invoked by ${caller}`, runKey, caller, { from: caller, text: task });
+    const ok = await this.runAgent(callee!, `invoked by ${caller}`, runKey, caller, { from: caller, text: task }, depth);
     return ok
       ? `${callee!.brain.name} ran and reported to ${this.paths.reports}/. The run is in the agent ledger.`
       : `${callee!.brain.name} ran but did not finish cleanly — see the report in ${this.paths.reports}/.`;
@@ -2936,18 +2938,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     new AgentPicker(this.app, agents, (agent) => {
       const runKey = `${agentLastRunKey(agent.brain.slug)}::manual`;
-      const gate = gateAgentRun({
-        agent,
-        lastRunAt: this.settings.scheduledLastRun[agentLastRunKey(agent.brain.slug)] ?? 0,
-        now: Date.now(),
-        running: this.agentRunsInFlight.size,
-        maxConcurrent: ExoPlugin.AGENT_MAX_CONCURRENT,
-        inFlightKeys: this.agentRunsInFlight,
-        runKey,
-        budgetAvailable: this.checkBackgroundBudget(ExoPlugin.AGENT_RUN_TOKEN_ESTIMATE),
-      canSpawn: !Platform.isMobile,
-        manual: true,
-      });
+      const gate = this.gateRun(agent, runKey, { manual: true });
       if (!gate.ok) {
         new Notice(`Can't run now — ${gate.detail}.`);
         return;
@@ -2974,8 +2965,27 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  private async saveAutomationRuns(records: AutomationRunRecord[]): Promise<void> {
-    await this.app.vault.adapter.write(this.automationRunsPath(), JSON.stringify(records));
+  /** Every change to the run history: one serialized read-modify-write, so two
+   *  runs finishing together cannot drop each other's record. An unreadable
+   *  file is kept aside as a copy, never overwritten, and a new history starts
+   *  so later write runs still get their restore points. */
+  private updateAutomationRuns(change: (records: AutomationRunRecord[]) => AutomationRunRecord[]): Promise<void> {
+    return this.automationRunsWriteQueue.enqueue(async () => {
+      const { adapter } = this.app.vault;
+      const path = this.automationRunsPath();
+      const raw = (await adapter.exists(path)) ? await adapter.read(path) : "[]";
+      let records: AutomationRunRecord[] = [];
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new Error("not a run list");
+        records = parsed as AutomationRunRecord[];
+      } catch {
+        const copy = `${this.manifest.dir}/automation-runs.corrupt-${Date.now()}.json`;
+        await adapter.write(copy, raw);
+        new Notice(`Exo: the automation run history was unreadable. A copy is in ${copy}; a new history starts now.`);
+      }
+      await adapter.write(path, JSON.stringify(change(records)));
+    });
   }
 
   /** Persist one write-run record. Oversized snapshots are dropped (the report
@@ -3001,7 +3011,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         checkpoint,
         slug,
       };
-      await this.saveAutomationRuns(pruneRuns([rec, ...(await this.loadAutomationRuns())], 60));
+      await this.updateAutomationRuns((records) => pruneRuns([rec, ...records], 60));
       return rec.id;
     } catch (err) {
       console.warn("[Exo] couldn't persist the automation run record:", err);
@@ -3011,15 +3021,16 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   /** Revert every file an automation run touched to its pre-run snapshot. */
   async restoreAutomationRun(id: string): Promise<string[]> {
-    const records = await this.loadAutomationRuns();
-    const rec = records.find((r) => r.id === id);
+    const rec = (await this.loadAutomationRuns()).find((r) => r.id === id);
     if (!rec) {
       new Notice("Run record not found — it may have been pruned.");
       return [];
     }
     const restored = await restoreRun(this.app, rec.checkpoint);
-    rec.restoredAt = Date.now();
-    await this.saveAutomationRuns(records);
+    const restoredAt = Date.now();
+    // The notes are already back; failing to stamp the record must not hide that.
+    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, restoredAt } : r)))
+      .catch((err) => console.warn("[Exo] couldn't mark the run as restored:", err));
     new Notice(
       restored.length
         ? `Restored ${restored.length} note${restored.length === 1 ? "" : "s"} from "${rec.name}".`
@@ -3030,11 +3041,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   /** Mark a write run as reviewed — it leaves the Cockpit "to review" pool. */
   async markAutomationRunReviewed(id: string): Promise<void> {
-    const records = await this.loadAutomationRuns();
-    const rec = records.find((r) => r.id === id);
-    if (!rec) return;
-    rec.reviewedAt = Date.now();
-    await this.saveAutomationRuns(records);
+    const reviewedAt = Date.now();
+    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, reviewedAt } : r)));
   }
 
 }

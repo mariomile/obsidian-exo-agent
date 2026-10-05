@@ -15,6 +15,7 @@ import {
   type LoopEntry,
 } from "../core/open-loops";
 import { WriteQueue } from "../core/write-queue";
+import { EXO_CALLER, type AgentCaller } from "../core/agent-runs";
 import { patchFrontmatter } from "../core/frontmatter-patch";
 import { createBacklogTask, createChildTask, ChildTaskRefused, adaptAppToTaskVault } from "./task-store";
 import { canSpawnChild, childrenOf } from "../core/child-tasks";
@@ -171,6 +172,8 @@ export interface ObsidianToolOpts {
   rethinkBridge?: (req: RethinkRequest) => Promise<string>;
   /** Resolved memory-layer paths. Absent → the legacy root (test/fallback). */
   paths?: ExoPaths;
+  /** Identity `invoke_agent` delegates as. Absent → Exo itself (chat). */
+  agentCaller?: AgentCaller;
 }
 
 /**
@@ -208,6 +211,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
      *  the feed diff+undo. Absent → the tool is not registered. */
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
+    agentCaller = EXO_CALLER,
   } = opts ?? {};
   const need = (target: string): TFile => {
     const f = resolveLink(app, target);
@@ -507,8 +511,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     { target: z.string(), changes: z.record(z.string(), z.any()) },
     async (args) => {
       const file = need(args.target);
-      const content = await app.vault.read(file);
-      await app.vault.modify(file, patchFrontmatter(content, args.changes));
+      await app.vault.process(file, (content) => patchFrontmatter(content, args.changes));
       return ok(`Updated frontmatter of [[${file.path}]]`);
     }
   );
@@ -522,8 +525,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       const cached: unknown = app.metadataCache.getFileCache(file)?.frontmatter?.related;
       const cur = new Set<string>(Array.isArray(cached) ? cached.map(String) : cached ? [String(cached)] : []);
       for (const t of args.targets) cur.add(`[[${t.replace(/^\[\[|\]\]$/g, "")}]]`);
-      const content = await app.vault.read(file);
-      await app.vault.modify(file, patchFrontmatter(content, { related: [...cur] }));
+      await app.vault.process(file, (content) => patchFrontmatter(content, { related: [...cur] }));
       return ok(`Linked ${args.targets.length} note(s) from [[${file.path}]]`);
     }
   );
@@ -570,19 +572,19 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     { target: z.string(), old_string: z.string(), new_string: z.string(), replace_all: z.boolean().optional() },
     async (args) => {
       const file = need(args.target);
-      const content = await app.vault.read(file);
-      const count = args.old_string ? content.split(args.old_string).length - 1 : 0;
-      if (count === 0) return err(`Text not found in ${file.path}.`);
-      if (count > 1 && !args.replace_all) return err(`old_string appears ${count}× — pass replace_all or make it unique.`);
-      let next: string;
-      if (args.replace_all) {
-        next = content.split(args.old_string).join(args.new_string);
-      } else {
+      // One atomic read-modify-write: an edit typed into the note meanwhile is
+      // the content we patch, never content we overwrite.
+      let refusal: Result | null = null;
+      await app.vault.process(file, (content) => {
+        const count = args.old_string ? content.split(args.old_string).length - 1 : 0;
+        if (count === 0) refusal = err(`Text not found in ${file.path}.`);
+        else if (count > 1 && !args.replace_all) refusal = err(`old_string appears ${count}× — pass replace_all or make it unique.`);
+        if (refusal) return content;
+        if (args.replace_all) return content.split(args.old_string).join(args.new_string);
         const i = content.indexOf(args.old_string);
-        next = content.slice(0, i) + args.new_string + content.slice(i + args.old_string.length);
-      }
-      await app.vault.modify(file, next);
-      return ok(`Edited [[${file.path}]]`);
+        return content.slice(0, i) + args.new_string + content.slice(i + args.old_string.length);
+      });
+      return refusal ?? ok(`Edited [[${file.path}]]`);
     }
   );
 
@@ -740,8 +742,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       await loopsWriteQueue.enqueue(async () => {
         const existing = app.vault.getAbstractFileByPath(paths.openLoops);
         if (existing instanceof TFile) {
-          const cur = await app.vault.read(existing);
-          await app.vault.modify(existing, `${cur.replace(/\s+$/, "")}\n\n${block}\n`);
+          await app.vault.process(existing, (cur) => `${cur.replace(/\s+$/, "")}\n\n${block}\n`);
         } else {
           await ensureParentFolder(app, paths.openLoops);
           await app.vault.create(paths.openLoops, `${block}\n`);
@@ -763,18 +764,17 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
           result = err(`No open-loops ledger yet — nothing to close.`);
           return;
         }
-        const cur = await app.vault.read(f);
-        const entries = parseLoopsFile(cur);
-        let closed: LoopEntry[];
-        try {
-          closed = closeLoop(entries, args.id, args.outcome);
-        } catch {
-          result = err(`No loop found with id ${args.id}.`);
-          return;
-        }
-        const body = closed.map(formatLoop).join("\n\n");
-        await app.vault.modify(f, `${body}\n`);
-        result = ok(`Closed ${args.id}.`);
+        await app.vault.process(f, (cur) => {
+          let closed: LoopEntry[];
+          try {
+            closed = closeLoop(parseLoopsFile(cur), args.id, args.outcome);
+          } catch {
+            result = err(`No loop found with id ${args.id}.`);
+            return cur;
+          }
+          result = ok(`Closed ${args.id}.`);
+          return `${closed.map(formatLoop).join("\n\n")}\n`;
+        });
       });
       return result ?? err("Failed to close loop.");
     }
@@ -930,7 +930,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     async ({ agent, task }) => {
       const exo = getExo(app);
       if (!exo) return ok("Exo plugin not reachable.");
-      return ok(await exo.invokeAgentFromAgent(agent, task));
+      return ok(await exo.invokeAgentFromAgent(agent, task, agentCaller));
     }
   );
 
@@ -1096,8 +1096,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
       if (args.action === "run_now") {
         if (!auto) return ok(`No automation named "${args.name}" — see list_automations.`);
-        const okRun = await exo.runAutomationNow(auto);
-        return ok(okRun ? `Run completed — report in ${paths.reports}/.` : `Run failed — see the report in ${paths.reports}/.`);
+        const run = await exo.runAutomationNow(auto);
+        if (run.refused) return ok(`Not run: ${run.refused}.`);
+        return ok(run.ok ? `Run completed — report in ${paths.reports}/.` : `Run failed — see the report in ${paths.reports}/.`);
       }
 
       const parseWhens = (linesIn: string[]) => {
