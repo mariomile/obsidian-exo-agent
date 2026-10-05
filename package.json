@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-exo-agent",
-	"version": "0.39.1",
+	"version": "0.39.2",
 	"packageManager": "pnpm@10.17.1",
 	"description": "Exo Agent: an agentic AI assistant in your Obsidian sidebar, powered by the Claude or Codex CLI, with a custom theme-aware chat UI.",
 	"main": "main.js",
