@@ -9,24 +9,24 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshot-empty.png" width="380" alt="Exo — new-chat empty state" />
+  <img src="assets/screenshots/empty-state.png" width="900" alt="Exo in the sidebar next to a note: the new-chat empty state with suggestions, your prompts, and notes related to the open note" />
 </p>
-<p align="center"><em>The new-chat empty state — the Exo mark, prompt suggestions, and related notes.</em></p>
+<p align="center"><em>Exo in the sidebar, next to the note you are working on: suggestions, your saved prompts, and notes related to the open one.</em></p>
 
 <p align="center">
-  <img src="assets/screenshot-chat.png" width="900" alt="Exo — a conversation with tool cards and the Context panel" />
+  <img src="assets/screenshots/chat.png" width="900" alt="A conversation in which Exo reads the open note and lists its overdue tasks" />
 </p>
-<p align="center"><em>A conversation in a full-page pane: tool cards, the touched-files footer, and the live Context panel on the right.</em></p>
+<p align="center"><em>Ask about the open note: Exo reads it and answers with the overdue tasks, linking the file it touched.</em></p>
 
 <p align="center">
-  <img src="assets/screenshot-tune.png" width="380" alt="Exo — the tune dialog" />
+  <img src="assets/screenshots/model-picker.png" width="380" alt="The model picker in the composer, listing the Claude models" />
 </p>
-<p align="center"><em>The tune dialog — model, effort, and permission in one place.</em></p>
+<p align="center"><em>Model, effort, and permission sit in the composer, one click away.</em></p>
 
 <p align="center">
-  <img src="assets/screenshot-setup-banner.png" width="380" alt="Exo — the vault memory setup picker" />
+  <img src="assets/screenshots/capabilities.png" width="900" alt="The Capabilities hub overview: session, system, and Exo Queue" />
 </p>
-<p align="center"><em>On a fresh vault, a picker lets you choose how much Exo should set up — from nothing to a guided starter scaffold.</em></p>
+<p align="center"><em>The Capabilities hub: session state, skills, MCP servers, playbooks, automations, and memory in one place.</em></p>
 
 ## Features
 
