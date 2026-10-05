@@ -41,6 +41,13 @@ describe("WorkflowSignalStore", () => {
     });
   });
 
+  it("refuses to record over a corrupt ledger instead of replacing it", async () => {
+    const adapter = memoryAdapter("{broken");
+    await expect(new WorkflowSignalStore(adapter, new WriteQueue()).record(signal("t1"), 100)).rejects.toThrow(/unreadable/);
+    expect(adapter.value).toBe("{broken");
+    expect(adapter.write).not.toHaveBeenCalled();
+  });
+
   it("rejects unsafe or malformed stored records rather than preserving free text", () => {
     const raw = JSON.stringify({
       version: 1,
