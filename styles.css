@@ -1442,7 +1442,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   flex-direction: column;
   background: var(--mva-surface-0);
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--mva-r3);
+  border-radius: var(--radius-l); /* the theme's container radius */
   transition: border-color var(--mva-t), box-shadow var(--mva-t);
 }
 /* Focus: a subtle neutral border only — no accent color highlight while typing */
