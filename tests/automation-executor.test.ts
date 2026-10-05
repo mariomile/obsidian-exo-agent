@@ -24,12 +24,13 @@ vi.mock("electron", () => ({ shell: {}, default: {} }));
 const headless = vi.hoisted(() => ({
   prompts: [] as { prompt: string; opts: { write?: boolean; systemPrompt?: string; agentCaller?: { slug: string; depth: number } } }[],
   output: "",
+  writes: [] as string[],
   reports: [] as string[],
 }));
 vi.mock("../src/headless", () => ({
   runHeadlessPlaybook: vi.fn(async (_app: unknown, _settings: unknown, prompt: string, opts: { write?: boolean }) => {
     headless.prompts.push({ prompt, opts });
-    return { ok: true, output: headless.output, reads: [], writes: [], checkpoint: new Map() };
+    return { ok: true, output: headless.output, reads: [], writes: headless.writes, checkpoint: new Map() };
   }),
   writeReport: vi.fn(async (_app: unknown, name: string) => {
     headless.reports.push(name);
@@ -76,6 +77,7 @@ function fakePlugin(kernel: boolean) {
     recordBackgroundSpend: vi.fn(),
     checkBackgroundBudget: vi.fn(() => true),
     saveSettings: vi.fn(async () => undefined),
+    noteVaultWrite: vi.fn(),
   };
   Object.assign(plugin, {
     ...deps,
@@ -99,6 +101,7 @@ beforeEach(() => {
   headless.prompts.length = 0;
   headless.reports.length = 0;
   headless.output = "";
+  headless.writes = [];
 });
 
 describe("run gate and caller identity", () => {
@@ -114,6 +117,13 @@ describe("run gate and caller identity", () => {
     (plugin as unknown as { checkBackgroundBudget: () => boolean }).checkBackgroundBudget = () => false;
     expect(await plugin.runAutomationNow(automation())).toBe(false);
     expect(headless.prompts).toHaveLength(0);
+  });
+
+  it("hands an unattended run's writes to the git safety net", async () => {
+    const { plugin, noteVaultWrite } = fakePlugin(true);
+    headless.writes = ["_inbox/A.md"];
+    await plugin.runAutomationNow(automation({ mode: "act", scope: ["_inbox/**"] }));
+    expect(noteVaultWrite).toHaveBeenCalledWith(["_inbox/A.md"]);
   });
 
   it("binds the run's own identity into its tools, one level below the caller", async () => {

@@ -23,7 +23,7 @@
 
 import { Notice, TFile, TFolder, type App } from "obsidian";
 
-import { runHeadlessPlaybook } from "./headless";
+import { runHeadlessPlaybook, type HeadlessOpts } from "./headless";
 import type { MVASettings } from "./settings";
 import { patchFrontmatter } from "./core/frontmatter-patch";
 
@@ -107,7 +107,13 @@ export async function countPendingQueue(app: App, settings: MVASettings): Promis
 /** One drain cycle of the queue. Returns how many requests it fulfilled. */
 export async function drainExoQueue(
   app: App,
-  settings: MVASettings
+  settings: MVASettings,
+  deps: {
+    /** A fresh vault-tools bridge per request (Codex), so queue runs get the same tools as chat. */
+    codexBridge: () => Promise<HeadlessOpts["codexBridge"]>;
+    /** Reports the answered note to the git safety net. */
+    noteWrite: (paths: readonly string[]) => void;
+  }
 ): Promise<number> {
   const folder = app.vault.getAbstractFileByPath(settings.exoQueueFolder);
   if (!(folder instanceof TFolder)) return 0; // folder missing = empty queue
@@ -126,7 +132,7 @@ export async function drainExoQueue(
 
     const { fm, body } = parseNote(content);
     const prompt = queueRequestBody(body);
-    const result = await runHeadlessPlaybook(app, settings, prompt);
+    const result = await runHeadlessPlaybook(app, settings, prompt, { codexBridge: await deps.codexBridge() });
     const iso = new Date().toISOString().slice(0, 16).replace("T", " ");
 
     const previousAttempts = Number(fm.match(/^exo-attempts:\s*(\d+)/m)?.[1] ?? 0) || 0;
@@ -148,6 +154,7 @@ export async function drainExoQueue(
     const latest = await app.vault.read(file);
     if (latest !== content) continue;
     await app.vault.modify(file, next);
+    deps.noteWrite([file.path]);
     done++;
     if (result.ok) new Notice(`Exo queue: answer ready → ${file.basename}`);
     else if (attempt < MAX_ATTEMPTS) new Notice(`Exo queue: attempt ${attempt} failed — retrying later.`);

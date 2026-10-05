@@ -2041,11 +2041,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const startedAt = Date.now();
     new Notice(`Running playbook "${name}"…`);
-    const headlessOpts: HeadlessOpts = { write: opts.write };
-    if (this.settings.provider === "codex" && this.settings.obsidianToolsEnabled) {
-      headlessOpts.codexBridge = (await this.ensureCodexBridge()) ?? undefined;
-    }
+    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge() };
     const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
+    if (result.writes.length) this.noteVaultWrite(result.writes);
     const path = await writeReport(this.app, name, result, this.paths.reports);
     // Every automation run is recorded, not just the ones that wrote. The
     // records started life as restore points, so read-only runs left no trace
@@ -2086,7 +2084,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     if (!this.settings.exoQueueEnabled || this.exoQueueBusy) return;
     this.exoQueueBusy = true;
     try {
-      await drainExoQueue(this.app, this.settings);
+      await drainExoQueue(this.app, this.settings, {
+        codexBridge: () => this.headlessBridge(),
+        noteWrite: (paths) => this.noteVaultWrite(paths),
+      });
     } catch (err) {
       console.warn("[Exo] queue drain failed:", err);
     } finally {
@@ -2125,6 +2126,13 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       }
       return false;
     }
+  }
+
+  /** The vault-tools bridge a headless run needs: one per run on Codex with the
+   *  Obsidian tools on, none otherwise (Claude gets its tools in-process). */
+  private async headlessBridge(): Promise<HeadlessOpts["codexBridge"]> {
+    if (this.settings.provider !== "codex" || !this.settings.obsidianToolsEnabled) return undefined;
+    return (await this.ensureCodexBridge()) ?? undefined;
   }
 
   /** Start an isolated loopback executor and materialize the shared stdio script
@@ -2739,10 +2747,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       new Notice(`${agent.brain.name} — running (${reason})…`);
       const memory = await this.agentStore.loadMemory(agent, today);
       // This run's tools delegate as this agent, one level deeper than its caller.
-      const headlessOpts: HeadlessOpts = { write, agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 } };
-      if (this.settings.provider === "codex" && this.settings.obsidianToolsEnabled) {
-        headlessOpts.codexBridge = (await this.ensureCodexBridge()) ?? undefined;
-      }
+      const headlessOpts: HeadlessOpts = {
+        write,
+        agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
+        codexBridge: await this.headlessBridge(),
+      };
       // Claude delegates to a true isolated subagent via an inline Agent()
       // instruction (buildAgentRunPrompt). Codex has no such primitive — its own
       // `collabAgentToolCall` is unrelated and has no notion of a named persona
@@ -2761,6 +2770,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         );
       }
       const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
+      // Unattended writes join the git safety net exactly like a chat turn's.
+      if (result.writes.length) this.noteVaultWrite(result.writes);
       const proposed = propose ? await this.collectAgentProposals(agent, result.output, startedAt) : 0;
       // A note is earned, not automatic. An agent watching a folder runs far
       // more often than it finds anything, and a report per run turns a quiet
