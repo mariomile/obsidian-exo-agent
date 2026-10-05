@@ -902,12 +902,8 @@ export class Composer {
         return;
       }
       wrap.show();
-      const next = clampEffort(s.effort || "default", eo);
-      if (next !== (s.effort || "default")) {
-        s.effort = next;
-        void this.host.plugin.saveSettings();
-      }
-      chip.setText(Composer.effortLabel(s.effort || "default"));
+      // Display only: the stored tier is kept for models that offer it again.
+      chip.setText(Composer.effortLabel(clampEffort(s.effort || "default", eo)));
     };
 
     const popover = openablePopover({
@@ -917,7 +913,7 @@ export class Composer {
       onOpen: () => {
         const eo = effortOpts();
         if (!eo) return;
-        this.renderOptionRows(pop, eo.map(([value, label]) => ({ value, label })), s.effort || "default", {
+        this.renderOptionRows(pop, eo.map(([value, label]) => ({ value, label })), clampEffort(s.effort || "default", eo), {
           onPick: (v) => {
             s.effort = v;
             void this.host.plugin.saveSettings();

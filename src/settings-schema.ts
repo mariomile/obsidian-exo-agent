@@ -37,6 +37,10 @@ export interface MVASettings {
   /** Extra model ids (comma/newline separated) added to the model pickers. */
   claudeCustomModels: string;
   codexCustomModels: string;
+  /** Model ids left out of the composer's model picker. A hide list rather
+   *  than a show list, so a model added to the catalog appears by default. */
+  claudeHiddenModels: string[];
+  codexHiddenModels: string[];
   effort: string;
   systemPrompt: string;
   /** User-defined prompt templates surfaced in the "/" menu. */
@@ -248,6 +252,8 @@ export const DEFAULT_SETTINGS: MVASettings = {
   codexModel: "gpt-6-astra",
   claudeCustomModels: "",
   codexCustomModels: "",
+  claudeHiddenModels: [],
+  codexHiddenModels: [],
   effort: "default",
   systemPrompt: "",
   customPrompts: [],

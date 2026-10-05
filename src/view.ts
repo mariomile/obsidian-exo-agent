@@ -38,6 +38,8 @@ import { AgentFolder, type BlockWrite } from "./obsidian/agent-folder";
 import { planRethink, type BlockName } from "./core/agent-self";
 import { BootPreambleCache } from "./obsidian/memory";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
+import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
+import { effortFor } from "./core/model-tuning";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
 import { renderRecallRow } from "./ui/recall-row";
@@ -660,7 +662,7 @@ export class ChatView extends ItemView {
     return [
       c.provider,
       c.model,
-      s.effort,
+      effortFor(c.provider, c.model, s.effort),
       s.toolsEnabled,
       s.permissionMode,
       s.fastStartup,
@@ -774,7 +776,7 @@ export class ChatView extends ItemView {
     const session = ADAPTERS[c.provider].createSession({
       cli,
       model: c.model,
-      effort: s.effort,
+      effort: effortFor(c.provider, c.model, s.effort),
       systemPrompt: s.systemPrompt || undefined,
       cwd: this.vaultPath(),
       permissionMode: s.permissionMode,
@@ -982,31 +984,19 @@ export class ChatView extends ItemView {
     this.prewarm();
   }
 
-  /** All selectable models across BOTH providers (built-in + custom + current),
-   *  for the unified model picker — selecting one implicitly picks its provider. */
-  private allModelChoices(): { id: string; label: string; provider: ProviderId }[] {
-    const out: { id: string; label: string; provider: ProviderId }[] = [];
-    for (const provider of ["claude", "codex"] as ProviderId[]) {
-      const a = ADAPTERS[provider];
-      const seen = new Set<string>();
-      const runtimeModels = provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined;
-      for (const m of runtimeModels?.length ? runtimeModels : a.models()) {
-        out.push({ id: m.id, label: m.label, provider });
-        seen.add(m.id);
-      }
-      const custom = provider === "claude"
-        ? this.plugin.settings.claudeCustomModels
-        : this.plugin.settings.codexCustomModels;
-      for (const id of custom.split(/[\n,]/).map((x) => x.trim()).filter(Boolean)) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        out.push({ id, label: id, provider });
-      }
-      if (provider === this.provider && this.model && !seen.has(this.model)) {
-        out.push({ id: this.model, label: this.model, provider });
-      }
-    }
-    return out;
+  /** All selectable models across BOTH providers (built-in + custom + current,
+   *  minus the ones hidden in settings), for the unified model picker —
+   *  selecting one implicitly picks its provider. */
+  private allModelChoices(): ComposerModelChoice[] {
+    const s = this.plugin.settings;
+    const runtime = this.plugin.lastSessionCaps?.models;
+    return composerModelChoices(
+      [
+        { provider: "claude", options: providerModels(ADAPTERS.claude.models(), undefined, s.claudeCustomModels), hidden: s.claudeHiddenModels },
+        { provider: "codex", options: providerModels(ADAPTERS.codex.models(), runtime, s.codexCustomModels), hidden: s.codexHiddenModels },
+      ],
+      { provider: this.provider, model: this.model }
+    );
   }
 
   private refreshProviderUI(): void {
