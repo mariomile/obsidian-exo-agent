@@ -287,6 +287,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   taskStore!: TaskStore;
   /** Serialized writes to the agent contract sidecars (`paths.agents`). */
   private readonly agentWriteQueue = new WriteQueue();
+  private readonly automationRunsWriteQueue = new WriteQueue();
   /**
    * THE ONE agent registry — loads canonical vault bundles plus external runtime
    * agents. Constructed in `onload()`; refreshed lazily via
@@ -2963,8 +2964,18 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  private async saveAutomationRuns(records: AutomationRunRecord[]): Promise<void> {
-    await this.app.vault.adapter.write(this.automationRunsPath(), JSON.stringify(records));
+  /** Every change to the run history: one serialized read-modify-write, so two
+   *  runs finishing together cannot drop each other's record. A corrupt file
+   *  aborts the change rather than being replaced by a near-empty history. */
+  private updateAutomationRuns(change: (records: AutomationRunRecord[]) => AutomationRunRecord[]): Promise<void> {
+    return this.automationRunsWriteQueue.enqueue(async () => {
+      const path = this.automationRunsPath();
+      const records = (await this.app.vault.adapter.exists(path))
+        ? (JSON.parse(await this.app.vault.adapter.read(path)) as AutomationRunRecord[])
+        : [];
+      if (!Array.isArray(records)) throw new Error(`${path} is not a run list`);
+      await this.app.vault.adapter.write(path, JSON.stringify(change(records)));
+    });
   }
 
   /** Persist one write-run record. Oversized snapshots are dropped (the report
@@ -2990,7 +3001,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         checkpoint,
         slug,
       };
-      await this.saveAutomationRuns(pruneRuns([rec, ...(await this.loadAutomationRuns())], 60));
+      await this.updateAutomationRuns((records) => pruneRuns([rec, ...records], 60));
       return rec.id;
     } catch (err) {
       console.warn("[Exo] couldn't persist the automation run record:", err);
@@ -3000,15 +3011,14 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   /** Revert every file an automation run touched to its pre-run snapshot. */
   async restoreAutomationRun(id: string): Promise<string[]> {
-    const records = await this.loadAutomationRuns();
-    const rec = records.find((r) => r.id === id);
+    const rec = (await this.loadAutomationRuns()).find((r) => r.id === id);
     if (!rec) {
       new Notice("Run record not found — it may have been pruned.");
       return [];
     }
     const restored = await restoreRun(this.app, rec.checkpoint);
-    rec.restoredAt = Date.now();
-    await this.saveAutomationRuns(records);
+    const restoredAt = Date.now();
+    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, restoredAt } : r)));
     new Notice(
       restored.length
         ? `Restored ${restored.length} note${restored.length === 1 ? "" : "s"} from "${rec.name}".`
@@ -3019,11 +3029,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   /** Mark a write run as reviewed — it leaves the Cockpit "to review" pool. */
   async markAutomationRunReviewed(id: string): Promise<void> {
-    const records = await this.loadAutomationRuns();
-    const rec = records.find((r) => r.id === id);
-    if (!rec) return;
-    rec.reviewedAt = Date.now();
-    await this.saveAutomationRuns(records);
+    const reviewedAt = Date.now();
+    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, reviewedAt } : r)));
   }
 
 }

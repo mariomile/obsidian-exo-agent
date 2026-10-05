@@ -319,3 +319,50 @@ describe("agent-backed automation: the same eligibility rule", () => {
     expect(proposalStore.append).not.toHaveBeenCalled();
   });
 });
+
+describe("automation run history", () => {
+  function historyPlugin(initial: string | null) {
+    const files = new Map<string, string>();
+    if (initial !== null) files.set("plugins/exo/automation-runs.json", initial);
+    const plugin = Object.create(ExoPlugin.prototype) as InstanceType<typeof ExoPlugin>;
+    Object.assign(plugin, {
+      manifest: { dir: "plugins/exo" },
+      automationRunsWriteQueue: new (class {
+        private tail: Promise<void> = Promise.resolve();
+        enqueue<T>(fn: () => Promise<T>): Promise<T> {
+          const r = this.tail.then(fn);
+          this.tail = r.then(() => undefined, () => undefined);
+          return r;
+        }
+      })(),
+      app: {
+        vault: {
+          adapter: {
+            exists: async (p: string) => files.has(p),
+            // Yield between read and write, as the real adapter does.
+            read: async (p: string) => { const d = files.get(p)!; await new Promise((r) => setTimeout(r, 1)); return d; },
+            write: async (p: string, d: string) => { files.set(p, d); },
+          },
+        },
+      },
+    });
+    const record = (name: string) =>
+      (plugin as unknown as { recordAutomationRun: (...a: unknown[]) => Promise<string | null> }).recordAutomationRun(
+        name, Date.now(), { ok: true, output: "", reads: [], writes: [], checkpoint: new Map() }, "r.md"
+      );
+    return { plugin, files, record };
+  }
+
+  it("keeps both records when two runs finish together", async () => {
+    const { files, record } = historyPlugin("[]");
+    await Promise.all([record("a"), record("b")]);
+    const names = (JSON.parse(files.get("plugins/exo/automation-runs.json")!) as { name: string }[]).map((r) => r.name);
+    expect(names.sort()).toEqual(["a", "b"]);
+  });
+
+  it("leaves a corrupt history untouched instead of overwriting it", async () => {
+    const { files, record } = historyPlugin("{not json");
+    expect(await record("a")).toBeNull();
+    expect(files.get("plugins/exo/automation-runs.json")).toBe("{not json");
+  });
+});
