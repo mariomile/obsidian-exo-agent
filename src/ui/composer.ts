@@ -12,7 +12,7 @@ import { Autocomplete, type AcItem } from "./autocomplete";
 import { buildDescIndex, codexSkillNames, type DescIndex } from "../core/capability-desc";
 import { mergeSlashEntries } from "../core/slash";
 import type ExoPlugin from "../main";
-import { ADAPTERS } from "../providers/registry";
+import { setProviderMark } from "./provider-mark";
 import type {
   ContextUsage,
   ImageAttachment,
@@ -842,7 +842,11 @@ export class Composer {
     const pop = wrap.createDiv({ cls: "mva-sel-pop" });
     pop.hide();
 
-    const refreshLabel = () => chip.setText(this.modelLabel());
+    const refreshLabel = () => {
+      chip.empty();
+      setProviderMark(chip.createSpan({ cls: "mva-sel-mark" }), this.host.provider);
+      chip.createSpan({ cls: "mva-sel-chip-label", text: this.modelLabel() });
+    };
 
     const popover = openablePopover({
       anchor: chip,
@@ -854,7 +858,7 @@ export class Composer {
           this.host.allModelChoices().map((m) => ({
             value: m.id,
             label: m.label,
-            dotColor: ADAPTERS[m.provider].brandColor,
+            mark: m.provider,
             group: m.provider === "claude" ? "Claude" : "Codex",
           })),
           this.host.model,
@@ -1087,7 +1091,7 @@ export class Composer {
       const o = r.option;
       const row = container.createDiv({ cls: "mva-sel-opt" });
       if (o.risk) row.addClass(o.risk);
-      if (o.dotColor) row.createSpan({ cls: "mva-sel-opt-dot" }).style.background = o.dotColor;
+      if (o.mark) setProviderMark(row.createSpan({ cls: "mva-sel-mark" }), o.mark);
       row.createSpan({ cls: "mva-sel-opt-label", text: o.label });
       const check = row.createSpan({ cls: "mva-sel-opt-check" });
       setIcon(check, "check");

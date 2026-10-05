@@ -39,6 +39,7 @@ import { planRethink, type BlockName } from "./core/agent-self";
 import { BootPreambleCache } from "./obsidian/memory";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
+import { setProviderMark } from "./ui/provider-mark";
 import { effortFor } from "./core/model-tuning";
 import { sessionSignature } from "./core/session-signature";
 import { isUntouchedChat } from "./core/untouched-chat";
@@ -912,8 +913,8 @@ export class ChatView extends ItemView {
 
   private buildHeader(root: HTMLElement): void {
     const header = root.createDiv({ cls: "mva-header" });
+    // Drawn by refreshProviderUI: the active chat's provider mark.
     this.brandDot = header.createSpan({ cls: "mva-brand-icon" });
-    setIcon(this.brandDot, EXO_ICON);
     header.createSpan({ cls: "mva-brand-name", text: "Exo" });
     header.createDiv({ cls: "mva-spacer" });
 
@@ -987,10 +988,9 @@ export class ChatView extends ItemView {
   }
 
   private refreshProviderUI(): void {
-    const a = ADAPTERS[this.provider];
-    // Provider identity tints the brand star. All interactive accents follow
-    // the theme (--mva-brand defaults to --interactive-accent in CSS).
-    this.brandDot.style.color = a.brandColor;
+    // The header wears the active chat's provider mark. All interactive
+    // accents follow the theme (--mva-brand defaults to --interactive-accent).
+    setProviderMark(this.brandDot, this.provider);
     this.composer.refreshModel();
   }
 

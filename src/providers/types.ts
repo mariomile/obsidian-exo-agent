@@ -245,6 +245,10 @@ export interface ProviderAdapter {
   displayName: string;
   /** Fixed brand accent, theme-independent. */
   brandColor: string;
+  /** Registered icon id of the provider's own mark (see ui/icons.ts). */
+  icon: string;
+  /** Whether the mark wears `brandColor`; a monochrome mark follows the text color. */
+  iconTinted: boolean;
   models(): ModelOption[];
   createSession(opts: SessionOpts): AgentSession;
 }
