@@ -40,6 +40,7 @@ import { BootPreambleCache } from "./obsidian/memory";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
 import { effortFor } from "./core/model-tuning";
+import { sessionSignature } from "./core/session-signature";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
 import { renderRecallRow } from "./ui/recall-row";
@@ -658,33 +659,16 @@ export class ChatView extends ItemView {
   /* --------------------------- session mgmt ------------------------- */
 
   private sessionSigOf(c: Convo): string {
-    const s = this.plugin.settings;
-    return [
-      c.provider,
-      c.model,
-      effortFor(c.provider, c.model, s.effort),
-      s.toolsEnabled,
-      s.permissionMode,
-      s.fastStartup,
-      s.runHooks,
-      s.systemPrompt,
-      s.obsidianToolsEnabled,
-      s.nativeFirst,
-      JSON.stringify(this.memoryCaps()),
-      s.autoCompactEnabled,
-      s.contextSavingMode,
-      s.codexSandbox,
-      s.codexApproval,
-      s.orchestrationEnabled,
-      s.browserEnabled,
-      c.provider === "claude" ? s.claudeBin : s.codexBin,
-      c.id,
-    ].join("|");
+    return sessionSignature(c, this.plugin.settings, JSON.stringify(this.memoryCaps()));
   }
 
   private ensureSession(c: Convo): Promise<AgentSession> {
     const sig = this.sessionSigOf(c);
-    if (c.session && sig === c.sessionSig) return Promise.resolve(c.session);
+    if (c.session && sig === c.sessionSig) {
+      // A background tab's session may predate the last mode change.
+      c.session.setPermissionMode?.(this.plugin.settings.permissionMode);
+      return Promise.resolve(c.session);
+    }
     // Reuse an in-flight spawn ONLY if it was started for the same config
     // signature — a stale-sig spawn (settings changed mid-prewarm) must not be
     // handed to a send that expects the new config.
