@@ -1,3 +1,4 @@
+import { defaultModel } from "../../settings-schema";
 import { autonomyStatuses, autonomyActions, systemStatuses } from "../../core/actions-hub";
 import { buildGroupHeader, buildStatusRow, buildRowScaffold, openExoSettings, runCommand, type HubTabContext } from "./shared";
 
@@ -23,7 +24,7 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
   if (!caps) {
     host.createDiv({ cls: "mva-conn-empty", text: "No session yet — values below come from settings; open a chat to connect." });
   }
-  const model = s.provider === "claude" ? s.claudeModel : s.codexModel;
+  const model = defaultModel(s, s.provider);
   host.appendChild(buildStatusRow("Provider", s.provider));
   host.appendChild(buildStatusRow("Model", model || "default"));
   host.appendChild(buildStatusRow("Effort", s.effort));

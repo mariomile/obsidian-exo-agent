@@ -56,7 +56,7 @@ const CEILINGS: Record<string, number> = {
   // recall per turno vive in `obsidian/turn-recall.ts` + `ui/recall-row.ts`.
   // 6571 -> 6247 righe reali. Il tetto scende a 6260: 13 righe di margine,
   // come sugli altri file.
-  "src/view.ts": 6260,
+  "src/view.ts": 6230,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -167,7 +167,7 @@ const CEILINGS: Record<string, number> = {
   // `src/styles/index.css` con gli @import in ordine di cascata). E' una
   // decisione di build, e questo tetto e' cio' che la mette sul tavolo quando
   // serve davvero invece che come refactor speculativo.
-  "styles.css": 7000,
+  "styles.css": 6970,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

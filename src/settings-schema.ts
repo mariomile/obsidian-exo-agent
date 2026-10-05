@@ -246,6 +246,11 @@ export interface MVASettings {
   collaboShares: Record<string, CollaboShare>;
 }
 
+/** The model new chats and background runs of `provider` start from. */
+export function defaultModel(s: Pick<MVASettings, "claudeModel" | "codexModel">, provider: ProviderId): string {
+  return provider === "claude" ? s.claudeModel : s.codexModel;
+}
+
 export const DEFAULT_SETTINGS: MVASettings = {
   provider: "claude",
   claudeBin: "",

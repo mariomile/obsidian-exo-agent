@@ -39,7 +39,7 @@ import { buildOptionRows, type SelectOption } from "../core/option-filter";
 import { queryWords, matchesWords } from "../core/ac-token";
 import { selectionPreview } from "../core/selection-preview";
 import { clampEffort, effortOptionsFor } from "../core/model-tuning";
-import { activeNoteState, type ActiveNoteState } from "../core/active-note";
+import { activeNoteState, contextModel, type ContextModel } from "../core/active-note";
 import { isNoteVisible } from "../obsidian/note-visibility";
 import { fillThumb } from "./context-thumb";
 import { statSync } from "node:fs";
@@ -106,7 +106,6 @@ export interface ComposerHost {
   clearBoundAgent(): void;
   onProviderChange(next: ProviderId, explicitModel?: string): void;
   allModelChoices(): { id: string; label: string; provider: ProviderId }[];
-  persistModel(): void;
   persist(): void;
   openNote(path: string): void;
   openArtifact(path: string): void;
@@ -1008,18 +1007,15 @@ export class Composer {
       this.host.onProviderChange(found.provider, v);
       return;
     }
-    const changed = this.host.model !== v;
-    this.host.model = v;
-    this.host.persistModel();
-    if (changed) {
-      // A model switch creates a new provider session on the next send. Never
-      // carry the previous model's context occupancy or limit into that session.
+    // Re-picking the current model leaves the live counter untouched.
+    if (this.host.model !== v) {
+      // The pick belongs to this chat. A model switch creates a new provider
+      // session on the next send: never carry the previous model's context
+      // occupancy or limit into it.
+      this.host.model = v;
       this.host.active.usage = undefined;
       this.host.persist();
       this.updateUsage(null);
-    } else {
-      // Re-picking the current model should leave the live counter untouched.
-      this.updateUsage(this.lastUsage);
     }
     // Effort options (and the current tier's validity) follow the model —
     // re-sync the whole cascade.
@@ -1365,23 +1361,14 @@ export class Composer {
     return "";
   }
 
-  private activeNote(): ActiveNoteState {
+  /** The context row and the outbound message both read this: one rule. */
+  private context(): ContextModel {
     const p = this.app.workspace.getActiveFile()?.path ?? null;
-    return activeNoteState(p, !!p && isNoteVisible(this.app, p), this.dismissedActive);
-  }
-
-  /** The active note when it rides along with the message, else null. */
-  private activeNotePath(): string | null {
-    const a = this.activeNote();
-    return a.kind === "attached" ? a.path : null;
+    return contextModel(activeNoteState(p, !!p && isNoteVisible(this.app, p), this.dismissedActive), this.manualAttached);
   }
 
   contextPaths(): string[] {
-    const out: string[] = [];
-    const active = this.activeNotePath();
-    if (active) out.push(active);
-    for (const p of this.manualAttached) if (!out.includes(p)) out.push(p);
-    return out;
+    return this.context().paths;
   }
 
   /** The ambient selection currently advertised by the chip, or null. Bound to
@@ -1395,8 +1382,8 @@ export class Composer {
   /** Debug snapshot of the context chips (active doc + manual attachments),
    *  for the `[Exo][ctx]` diagnostic line. */
   contextChips(): { doc: string | null; manual: string[] } {
-    const active = this.activeNotePath();
-    return { doc: active, manual: this.manualAttached.filter((p) => p !== active) };
+    const { active, manual } = this.context();
+    return { doc: active.kind === "attached" ? active.path : null, manual };
   }
 
   refreshContext(): void {
@@ -1407,24 +1394,41 @@ export class Composer {
     // The ADD affordances live inside the composer toolbar now (the "+" menu);
     // this row is purely the list of attached items — so when it's empty it
     // collapses entirely rather than leaving an empty bar.
-    let state = this.activeNote();
-    // Once attached by hand, the hidden note shows as its own card, not twice.
-    if (state.kind === "suggested" && this.manualAttached.includes(state.path)) state = { kind: "none" };
-    const active = state.kind === "attached" ? state.path : null;
-    const items = state.kind === "none" ? 0 : 1;
+    const { active, manual } = this.context();
     // The selection chip shows only while a live selection exists that isn't
     // already attached as its own text (once attached it becomes redundant with
     // the seeded excerpt in the input — see attachSelection).
     const sel = this.selectionChipModel();
-    const hasAny = items + this.manualAttached.filter((p) => p !== active).length > 0 || !!sel;
+    const hasAny = active.kind !== "none" || manual.length > 0 || !!sel;
     this.contextEl.toggleClass("is-empty", !hasAny);
     if (!hasAny) return;
     const cards = this.contextEl.createDiv({ cls: "mva-doc-cards" });
-    if (state.kind !== "none") this.renderContextCard(cards, state.path, state.kind);
-    for (const p of this.manualAttached) {
-      if (p !== active) this.renderContextCard(cards, p, "manual");
+    const then = (change: () => void) => () => {
+      change();
+      this.refreshContext();
+    };
+    if (active.kind !== "none") {
+      const dismiss = then(() => (this.dismissedActive = active.path));
+      if (active.kind === "attached") {
+        this.renderContextCard(cards, active.path, { label: "Current Document", onClick: () => this.host.openNote(active.path), onRemove: dismiss });
+      } else {
+        this.renderContextCard(cards, active.path, {
+          label: "Open note · click to attach",
+          suggested: true,
+          onClick: then(() => this.manualAttached.push(active.path)),
+          onRemove: dismiss,
+        });
+      }
     }
-    if (sel) this.renderSelectionCard(cards, sel.text, sel.path, active);
+    for (const p of manual) {
+      const external = Composer.isExternalPath(p);
+      this.renderContextCard(cards, p, {
+        label: external ? "External" : "Document",
+        onClick: () => (external ? this.host.openArtifact(p) : this.host.openNote(p)),
+        onRemove: then(() => (this.manualAttached = this.manualAttached.filter((x) => x !== p))),
+      });
+    }
+    if (sel) this.renderSelectionCard(cards, sel.text, sel.path, active.kind === "attached" ? active.path : null);
   }
 
   /** The selection chip's model, or null when it shouldn't show: gated on the
@@ -1561,10 +1565,15 @@ export class Composer {
    *  "Document" / "External"). External (absolute) paths open via the OS. A
    *  "suggested" card is the active note hidden behind the chat: not sent until
    *  clicked, which attaches it. */
-  private renderContextCard(parent: HTMLElement, path: string, kind: "attached" | "suggested" | "manual"): void {
+  /** One context card: each kind (current, suggested, manual) declares its own
+   *  label and click/remove behaviour at the call site. */
+  private renderContextCard(
+    parent: HTMLElement,
+    path: string,
+    spec: { label: string; suggested?: boolean; onClick: () => void; onRemove: () => void }
+  ): void {
     const external = Composer.isExternalPath(path);
-    const isActive = kind !== "manual";
-    const card = parent.createDiv({ cls: kind === "suggested" ? "mva-doc-card is-suggested" : "mva-doc-card" });
+    const card = parent.createDiv({ cls: spec.suggested ? "mva-doc-card is-suggested" : "mva-doc-card" });
     const thumb = card.createDiv({ cls: "mva-doc-thumb" });
     if (external) {
       thumb.addClass("is-icon");
@@ -1580,23 +1589,14 @@ export class Composer {
     }
     const body = card.createDiv({ cls: "mva-doc-body" });
     body.createDiv({ cls: "mva-doc-title", text: noteBasename(path), attr: { title: path } });
-    const kindText = kind === "suggested" ? "Open note · click to attach" : isActive ? "Current Document" : external ? "External" : "Document";
-    body.createDiv({ cls: "mva-doc-kind", text: kindText });
+    body.createDiv({ cls: "mva-doc-kind", text: spec.label });
     const x = card.createSpan({ cls: "mva-doc-x", attr: { "aria-label": "Remove from context" } });
     setIcon(x, "x");
     clickable(x, (e) => {
       e.stopPropagation();
-      if (isActive) this.dismissedActive = path;
-      else this.manualAttached = this.manualAttached.filter((p) => p !== path);
-      this.refreshContext();
+      spec.onRemove();
     });
-    clickable(card, () => {
-      if (kind === "suggested") {
-        this.manualAttached = [...this.manualAttached, path];
-        this.refreshContext();
-      } else if (external) this.host.openArtifact(path);
-      else this.host.openNote(path);
-    });
+    clickable(card, () => spec.onClick());
   }
 
   private pickNote(): void {

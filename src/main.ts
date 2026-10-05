@@ -29,7 +29,7 @@ import { registerExoIcons } from "./ui/icons";
 import { AgentPicker, PlaybookPicker } from "./ui/pickers";
 import * as convoBridge from "./ui/convo-bridge";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
-import { stripObsoleteSettings } from "./settings-schema";
+import { defaultModel, stripObsoleteSettings } from "./settings-schema";
 import { pluginMemoryCaps, registerMemory, undoMemoryWrite } from "./obsidian/memory-wiring";
 import type { MemoryHarvester } from "./obsidian/memory-harvest";
 import type { HarvestLog } from "./obsidian/harvest-log";
@@ -880,7 +880,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    */
   async askExo(query: string, autoSend = true, opts?: { source?: string }): Promise<void> {
     await this.activateView();
-    convoBridge.chatView(this.app)?.askInNewConversation(query, autoSend, { sendPrefix: handoffPrefix(opts?.source), reuseUntouched: true });
+    convoBridge.chatView(this.app)?.askInFreshChat(query, autoSend, handoffPrefix(opts?.source));
   }
 
   private vaultPath(): string {
@@ -1165,7 +1165,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     const cli = await resolveCli(provider, bin);
     const session = ADAPTERS[provider].createSession({
       cli,
-      model: provider === "claude" ? this.settings.claudeModel : this.settings.codexModel,
+      model: defaultModel(this.settings, provider),
       effort: "default",
       cwd: this.vaultPath(),
       permissionMode: "default",

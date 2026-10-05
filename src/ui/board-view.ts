@@ -15,6 +15,7 @@
  * nothing — which is the point, since the driver used to live and die with this
  * tab and `spawn_task` was silently inert whenever it was closed.
  */
+import { defaultModel } from "../settings-schema";
 import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type ExoPlugin from "../main";
 import { ADAPTERS } from "../providers/registry";
@@ -697,7 +698,7 @@ export class BoardView extends ItemView {
 
   private defaultModel(): string {
     const s = this.plugin.settings;
-    return this.currentProvider() === "claude" ? s.claudeModel : s.codexModel;
+    return defaultModel(s, this.currentProvider());
   }
 
   /** Same list as settings and the composer: the live Codex catalog (or the

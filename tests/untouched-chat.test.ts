@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { isUntouchedChat } from "../src/core/untouched-chat";
 
-const chat = (over = {}) => ({ messages: [], streaming: false, queue: [], ...over });
+const chat = (over = {}) => ({ messages: [], streaming: false, queue: [], researchMode: { enabled: false }, ...over });
 const draft = (over = {}) => ({ text: "", images: [], attached: [], ...over });
 
 describe("isUntouchedChat", () => {
@@ -15,7 +15,7 @@ describe("isUntouchedChat", () => {
     ["has a queued message", chat({ queue: [{}] }), draft()],
     ["has an agent bound", chat({ agent: "writer" }), draft()],
     ["has a goal", chat({ goal: {} }), draft()],
-    ["is in research mode", chat({ researchMode: {} }), draft()],
+    ["is in research mode", chat({ researchMode: { enabled: true } }), draft()],
     ["has draft text", chat(), draft({ text: "half a thought" })],
     ["has a pasted image", chat(), draft({ images: [{}] })],
     ["has an attached note", chat(), draft({ attached: ["A.md"] })],

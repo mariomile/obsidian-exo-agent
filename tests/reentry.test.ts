@@ -880,8 +880,11 @@ describe("the re-entry band's wiring", () => {
     // `switchTo` is a CHANGE of conversation, and Exo lives in a collapsed
     // right sidebar — so the ordinary way back in never changes the active
     // chat, and nothing on that path used to reveal anything.
-    expect(view).toMatch(/reenterActive\(this\.active/);
-    expect(view).toMatch(/"layout-change", \(\) => reenterActive/);
+    // layout-change runs the same debounced refresh as a leaf change, and that
+    // refresh is where the re-entry lives.
+    const refresh = view.slice(view.indexOf("const refreshForLeafChange = debounce("), view.indexOf("}, 120, true);"));
+    expect(refresh).toMatch(/reenterActive\(this\.active/);
+    expect(view).toMatch(/"layout-change", \(\) => \{[^}]*refreshForLeafChange\(\)/);
   });
 
   it("re-enters every path through the same visibility gate", () => {
@@ -891,7 +894,7 @@ describe("the re-entry band's wiring", () => {
     expect(view).not.toMatch(/revealReentry\(/);
     // Every re-entry goes through the one host, so the band and the verbs
     // cannot end up answering different events again.
-    expect(view.match(/reenterActive\(\w+(?:\.\w+)*, this\.reentryHost\)/g)).toHaveLength(5);
+    expect(view.match(/reenterActive\(\w+(?:\.\w+)*, this\.reentryHost\)/g)).toHaveLength(4);
     expect(view).not.toMatch(/reenterActive\([^)]*containerEl/);
   });
 

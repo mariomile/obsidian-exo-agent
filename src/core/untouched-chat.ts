@@ -5,7 +5,7 @@
  * of leaving it behind as an empty "New chat" tab.
  */
 export function isUntouchedChat(
-  c: { messages: unknown[]; streaming: boolean; queue: unknown[]; agent?: string; goal?: unknown; researchMode?: unknown },
+  c: { messages: unknown[]; streaming: boolean; queue: unknown[]; agent?: string; goal?: unknown; researchMode: { enabled: boolean } },
   draft: { text: string; images: unknown[]; attached: string[] }
 ): boolean {
   return (
@@ -14,7 +14,7 @@ export function isUntouchedChat(
     !c.queue.length &&
     !c.agent &&
     !c.goal &&
-    !c.researchMode &&
+    !c.researchMode.enabled &&
     !draft.text.trim() &&
     !draft.images.length &&
     !draft.attached.length
