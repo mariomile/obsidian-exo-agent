@@ -880,7 +880,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    */
   async askExo(query: string, autoSend = true, opts?: { source?: string }): Promise<void> {
     await this.activateView();
-    convoBridge.chatView(this.app)?.askInNewConversation(query, autoSend, { sendPrefix: handoffPrefix(opts?.source) });
+    convoBridge.chatView(this.app)?.askInNewConversation(query, autoSend, { sendPrefix: handoffPrefix(opts?.source), reuseUntouched: true });
   }
 
   private vaultPath(): string {

@@ -39,6 +39,9 @@ import { buildOptionRows, type SelectOption } from "../core/option-filter";
 import { queryWords, matchesWords } from "../core/ac-token";
 import { selectionPreview } from "../core/selection-preview";
 import { clampEffort, effortOptionsFor } from "../core/model-tuning";
+import { activeNoteState, type ActiveNoteState } from "../core/active-note";
+import { isNoteVisible } from "../obsidian/note-visibility";
+import { fillThumb } from "./context-thumb";
 import { statSync } from "node:fs";
 
 /** Semantic risk modifier class for a toolbar selector option/chip ("" = neutral). */
@@ -116,7 +119,8 @@ export interface ComposerDraft {
   text: string;
   images: ImageAttachment[];
   attached: string[];
-  excludeActiveNote: boolean;
+  /** The active note the user dismissed with ×; only that note stays off. */
+  dismissedActive: string | null;
 }
 
 /** Collapsed growth cap for the input (px) — past this the expand affordance appears. */
@@ -154,7 +158,7 @@ export class Composer {
    *  by `takePendingAgent()`; a `/as` binding lives on the Convo instead. */
   private pendingAgent: string | null = null;
   private contextEl!: HTMLElement;
-  private excludeActiveNote = false;
+  private dismissedActive: string | null = null;
   private manualAttached: string[] = [];
   /** The active editor's current selection, mirrored ambiently into the composer. */
   private currentSelection: { text: string; path: string } | null = null;
@@ -209,14 +213,14 @@ export class Composer {
       text: this.inputEl.value,
       images: this.pendingImages,
       attached: this.manualAttached,
-      excludeActiveNote: this.excludeActiveNote,
+      dismissedActive: this.dismissedActive,
     };
   }
   /** Restore a conversation's draft (undefined → pristine empty composer). */
   setDraft(d: ComposerDraft | undefined): void {
     this.pendingImages = d?.images ?? [];
     this.manualAttached = d?.attached ?? [];
-    this.excludeActiveNote = d?.excludeActiveNote ?? false;
+    this.dismissedActive = d?.dismissedActive ?? null;
     this.renderImageStrip();
     this.refreshContext();
     this.setInputValue(d?.text ?? ""); // re-runs autoGrow → expand state follows the draft
@@ -1357,14 +1361,20 @@ export class Composer {
     return "";
   }
 
+  private activeNote(): ActiveNoteState {
+    const p = this.app.workspace.getActiveFile()?.path ?? null;
+    return activeNoteState(p, !!p && isNoteVisible(this.app, p), this.dismissedActive);
+  }
+
+  /** The active note when it rides along with the message, else null. */
   private activeNotePath(): string | null {
-    const f = this.app.workspace.getActiveFile();
-    return f ? f.path : null;
+    const a = this.activeNote();
+    return a.kind === "attached" ? a.path : null;
   }
 
   contextPaths(): string[] {
     const out: string[] = [];
-    const active = this.excludeActiveNote ? null : this.activeNotePath();
+    const active = this.activeNotePath();
     if (active) out.push(active);
     for (const p of this.manualAttached) if (!out.includes(p)) out.push(p);
     return out;
@@ -1381,7 +1391,7 @@ export class Composer {
   /** Debug snapshot of the context chips (active doc + manual attachments),
    *  for the `[Exo][ctx]` diagnostic line. */
   contextChips(): { doc: string | null; manual: string[] } {
-    const active = this.excludeActiveNote ? null : this.activeNotePath();
+    const active = this.activeNotePath();
     return { doc: active, manual: this.manualAttached.filter((p) => p !== active) };
   }
 
@@ -1393,8 +1403,11 @@ export class Composer {
     // The ADD affordances live inside the composer toolbar now (the "+" menu);
     // this row is purely the list of attached items — so when it's empty it
     // collapses entirely rather than leaving an empty bar.
-    const active = this.excludeActiveNote ? null : this.activeNotePath();
-    const items = active ? 1 : 0;
+    let state = this.activeNote();
+    // Once attached by hand, the hidden note shows as its own card, not twice.
+    if (state.kind === "suggested" && this.manualAttached.includes(state.path)) state = { kind: "none" };
+    const active = state.kind === "attached" ? state.path : null;
+    const items = state.kind === "none" ? 0 : 1;
     // The selection chip shows only while a live selection exists that isn't
     // already attached as its own text (once attached it becomes redundant with
     // the seeded excerpt in the input — see attachSelection).
@@ -1403,9 +1416,9 @@ export class Composer {
     this.contextEl.toggleClass("is-empty", !hasAny);
     if (!hasAny) return;
     const cards = this.contextEl.createDiv({ cls: "mva-doc-cards" });
-    if (active) this.renderContextCard(cards, active, true);
+    if (state.kind !== "none") this.renderContextCard(cards, state.path, state.kind);
     for (const p of this.manualAttached) {
-      if (p !== active) this.renderContextCard(cards, p, false);
+      if (p !== active) this.renderContextCard(cards, p, "manual");
     }
     if (sel) this.renderSelectionCard(cards, sel.text, sel.path, active);
   }
@@ -1541,10 +1554,13 @@ export class Composer {
   }
 
   /** A uniform context card: text thumbnail + title + kind ("Current Document" /
-   *  "Document" / "External"). External (absolute) paths open via the OS. */
-  private renderContextCard(parent: HTMLElement, path: string, isActive: boolean): void {
+   *  "Document" / "External"). External (absolute) paths open via the OS. A
+   *  "suggested" card is the active note hidden behind the chat: not sent until
+   *  clicked, which attaches it. */
+  private renderContextCard(parent: HTMLElement, path: string, kind: "attached" | "suggested" | "manual"): void {
     const external = Composer.isExternalPath(path);
-    const card = parent.createDiv({ cls: "mva-doc-card" });
+    const isActive = kind !== "manual";
+    const card = parent.createDiv({ cls: kind === "suggested" ? "mva-doc-card is-suggested" : "mva-doc-card" });
     const thumb = card.createDiv({ cls: "mva-doc-thumb" });
     if (external) {
       thumb.addClass("is-icon");
@@ -1556,68 +1572,27 @@ export class Composer {
       }
       setIcon(thumb, isDir ? "folder" : "file");
     } else {
-      void this.fillThumb(thumb, path);
+      void fillThumb(this.app, thumb, path);
     }
     const body = card.createDiv({ cls: "mva-doc-body" });
     body.createDiv({ cls: "mva-doc-title", text: noteBasename(path), attr: { title: path } });
-    body.createDiv({ cls: "mva-doc-kind", text: isActive ? "Current Document" : external ? "External" : "Document" });
+    const kindText = kind === "suggested" ? "Open note · click to attach" : isActive ? "Current Document" : external ? "External" : "Document";
+    body.createDiv({ cls: "mva-doc-kind", text: kindText });
     const x = card.createSpan({ cls: "mva-doc-x", attr: { "aria-label": "Remove from context" } });
     setIcon(x, "x");
     clickable(x, (e) => {
       e.stopPropagation();
-      if (isActive) this.excludeActiveNote = true;
+      if (isActive) this.dismissedActive = path;
       else this.manualAttached = this.manualAttached.filter((p) => p !== path);
       this.refreshContext();
     });
-    clickable(card, () => (external ? this.host.openArtifact(path) : this.host.openNote(path)));
-  }
-
-  private static readonly IMAGE_EXT = /^(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
-
-  /**
-   * Fill a card thumbnail: image files get a real image preview, markdown gets a
-   * tiny text preview ("document" look), everything else gets a file-type icon.
-   */
-  private async fillThumb(el: HTMLElement, path: string): Promise<void> {
-    const f = this.app.vault.getAbstractFileByPath(path);
-    if (!(f instanceof TFile)) {
-      el.addClass("is-icon");
-      setIcon(el, "file");
-      return;
-    }
-    if (Composer.IMAGE_EXT.test(f.extension)) {
-      el.addClass("is-image");
-      const img = el.createEl("img");
-      img.src = this.app.vault.getResourcePath(f);
-      img.onerror = () => {
-        el.empty();
-        el.removeClass("is-image");
-        el.addClass("is-icon");
-        setIcon(el, "image");
-      };
-      return;
-    }
-    if (f.extension !== "md") {
-      el.addClass("is-icon");
-      setIcon(el, "file");
-      return;
-    }
-    try {
-      const txt = (await this.app.vault.cachedRead(f))
-        .replace(/^---\n[\s\S]*?\n---\n?/, "") // drop frontmatter
-        .replace(/!?\[\[[^\]]*\]\]/g, " ") // drop embeds / wikilinks
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // md links → their text
-        .replace(/[#>*_`~]/g, "")
-        .trim();
-      if (txt) el.setText(txt.slice(0, 260));
-      else {
-        el.addClass("is-icon");
-        setIcon(el, "file-text");
-      }
-    } catch {
-      el.addClass("is-icon");
-      setIcon(el, "file-text");
-    }
+    clickable(card, () => {
+      if (kind === "suggested") {
+        this.manualAttached = [...this.manualAttached, path];
+        this.refreshContext();
+      } else if (external) this.host.openArtifact(path);
+      else this.host.openNote(path);
+    });
   }
 
   private pickNote(): void {

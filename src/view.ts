@@ -41,6 +41,7 @@ import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
 import { effortFor } from "./core/model-tuning";
 import { sessionSignature } from "./core/session-signature";
+import { isUntouchedChat } from "./core/untouched-chat";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
 import { renderRecallRow } from "./ui/recall-row";
@@ -483,8 +484,9 @@ export class ChatView extends ItemView {
         // active-leaf-change — this leaf was already active, only its location
         // moved — so the debounced handler above can miss it and the "Current
         // Document" card is left showing the note active in the pane Exo just
-        // left. Cheap and idempotent to re-run here on every layout-change.
-        this.composer.refreshContext();
+        // left. Debounced like the leaf-change path: layout-change streams during
+        // splitter drags, and the context row now measures leaf visibility.
+        refreshForLeafChange();
       })
     );
     // Strip density: the same debounce shape as the two observers above, for the
@@ -956,7 +958,7 @@ export class ChatView extends ItemView {
     this.provider = next;
     this.model = explicitModel ?? (next === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel);
     this.active.provider = next;
-    this.persistModel(); // writes this.model into the right provider's settings slot + active.model
+    this.persistModel(); // records the pick on this chat only
     this.active.sessionId = undefined;
     this.active.allow.clear();
     this.dropSession(this.active, "provider-change");
@@ -992,11 +994,12 @@ export class ChatView extends ItemView {
     this.composer.refreshModel();
   }
 
+  /** A composer pick belongs to the chat it was made in. The defaults in
+   *  settings stay what the user set there: new chats, the agent-folder seed
+   *  and headless runs read them, so a one-off Haiku pick can't leak into them. */
   private persistModel(): void {
     if (this.active) this.active.model = this.model;
-    if (this.provider === "claude") this.plugin.settings.claudeModel = this.model;
-    else this.plugin.settings.codexModel = this.model;
-    void this.plugin.saveSettings();
+    this.persist();
   }
 
   /* ------------------------- persistence ---------------------------- */
@@ -1284,8 +1287,9 @@ export class ChatView extends ItemView {
       id: `c${++convoSeed}`,
       listEl: createDiv({ cls: "mva-list" }),
       title: "New chat",
-      provider: this.provider,
-      model: this.model,
+      // New chats start from the defaults in settings, not from the open chat.
+      provider: this.plugin.settings.provider,
+      model: this.plugin.settings.provider === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel,
       allow: new Set(),
       messages: [],
       session: null,
@@ -1454,6 +1458,7 @@ export class ChatView extends ItemView {
    *  that is the only thing that keeps the two doors from drifting again. */
   private syncActiveSurfaces(c: Convo): void {
     this.refreshProviderUI();
+    this.composer.refreshPerm(); // permission modes are per provider, and chats can differ
     this.syncSendButton();
     this.composer.updateUsage(c.usage ?? null);
     this.composer.setDraft(c.draft);
@@ -2008,7 +2013,7 @@ export class ChatView extends ItemView {
   askInNewConversation(
     text: string,
     autoSend = true,
-    opts?: { model?: string; sendPrefix?: string }
+    opts?: { model?: string; sendPrefix?: string; reuseUntouched?: boolean }
   ): string {
     const q = text.trim();
     if (!q) return "";
@@ -2016,7 +2021,15 @@ export class ChatView extends ItemView {
     const model =
       opts?.model ??
       (provider === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel);
-    this.newConversation({ provider, model });
+    // External prompts (askExo) fill an untouched chat instead of leaving it as
+    // an empty tab. Opt-in: task spawns rely on getting a NEW convo back.
+    const a = this.active;
+    if (opts?.reuseUntouched && a && isUntouchedChat(a, this.composer.getDraft())) {
+      this.provider = a.provider = provider; // session is keyed on provider + model: respawns on send
+      this.model = a.model = model;
+      this.syncActiveSurfaces(a);
+      this.persist();
+    } else this.newConversation({ provider, model });
     const id = this.active.id;
     this.composer.setInputValue(q);
     this.composer.autoGrow();
@@ -5806,7 +5819,7 @@ export class ChatView extends ItemView {
         if (elapsed > 5000) {
           ctx.el
             .createDiv({ cls: "mva-turn-meta" })
-            .createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
+            .createSpan({ cls: "mva-turn-duration", text: `${poisoned ? "Failed after" : c.stopped ? "Stopped after" : "Done in"} ${this.fmtDuration(elapsed)}` });
         }
         if (!c.stopped && !poisoned) {
           // Workflow Foundry records privacy-safe deterministic metadata and,

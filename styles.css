@@ -2067,6 +2067,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-color: var(--background-modifier-border-hover);
   background: var(--background-modifier-hover);
 }
+.mva-doc-card.is-suggested { border-style: dashed; background: transparent; } /* active note hidden behind a full-page chat: offered, not attached */
+.mva-doc-card.is-suggested :is(.mva-doc-thumb, .mva-doc-title) { opacity: 0.6; }
 /* tiny text preview that reads like a document thumbnail */
 .mva-doc-thumb {
   flex: 0 0 auto;
@@ -4941,8 +4943,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* ---------------------- turn duration (F2) ---------------------------- */
 /* Always visible — completion feedback lives outside the hover-gated actions bar. */
 .mva-turn-meta {
-  font-size: 11px;
-  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
   text-align: right;
   padding: 2px 0;
 }

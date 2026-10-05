@@ -94,7 +94,13 @@ const CEILINGS: Record<string, number> = {
   // sopra. 2 righe sono il margine dichiarato per il prossimo provider di
   // autocomplete, non un permesso di ricrescita — il prossimo candidato
   // all'estrazione è il blocco `atItems` (ricerca note + agenti).
-  "src/ui/composer.ts": 1720,
+  //
+  // Abbassato il 2026-10-05: la miniatura delle card del contesto
+  // (`fillThumb`, legge solo il vault) vive ora in `ui/context-thumb.ts`, e la
+  // regola "nota attiva allegata solo se visibile" in `core/active-note.ts` +
+  // `obsidian/note-visibility.ts`. 1735 -> 1690 righe reali. Tetto a 1700:
+  // 10 righe di margine, come sugli altri file.
+  "src/ui/composer.ts": 1700,
   // Abbassato il 2026-08-11: `BACKGROUND_MODEL_OPTIONS` è tornato a casa in
   // `core/model-options.ts`, il modulo che possiede già il catalogo dei modelli
   // per i picker — qui era un catalogo di prodotto parcheggiato in un file di
