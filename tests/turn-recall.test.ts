@@ -68,6 +68,19 @@ describe("matchPastChats", () => {
   it("needs two keyword hits: one shared word is noise", () => {
     expect(matchPastChats(chats, ["tiers", "wedding2"], { excludeId: "current", now: NOW }).map((c) => c.title)).toEqual([]);
   });
+  it("only the message's rarest keywords count: common words never match a chat", () => {
+    const line = (id: string, text: string): ChatRecord => ({
+      id,
+      title: id,
+      messages: [{ role: "user", text, at: NOW - DAY }],
+    });
+    const corpus: ChatRecord[] = [
+      ...Array.from({ length: 6 }, (_, i) => line(`common${i}`, "prima devo sistemare il product backlog")),
+      line("interview", "preparare interview revolut con esempi STAR"),
+    ];
+    const keywords = ["devo", "preparare", "prima", "interview", "revolut", "conversazione", "product"];
+    expect(matchPastChats(corpus, keywords, { excludeId: "x", now: NOW }).map((c) => c.title)).toEqual(["interview"]);
+  });
   it("returns at most two chats", () => {
     const many: ChatRecord[] = Array.from({ length: 5 }, (_, i) => ({
       id: `m${i}`,

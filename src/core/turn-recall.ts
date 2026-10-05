@@ -16,6 +16,8 @@ export const RECALL_MAX_CHATS = 2;
 export const RECALL_EXCERPT_CHARS = 300;
 /** How far back past chats are matched. */
 export const RECALL_CHAT_WINDOW_DAYS = 60;
+/** How many of the message's rarest keywords decide a chat match. */
+export const RECALL_CHAT_KEYWORDS = 4;
 const MIN_WORDS = 4;
 const MAX_KEYWORDS = 10;
 
@@ -82,8 +84,10 @@ const flat = (s: string, n: number): string => {
 /**
  * Lexical match over past conversations: every chat except `excludeId` with
  * messages in the window, scored by how many distinct keywords its best line
- * contains. A chat needs at least two keyword hits (one when the message has a
- * single keyword) to count: one shared common word is noise.
+ * contains. Only the message's {@link RECALL_CHAT_KEYWORDS} rarest keywords
+ * (fewest chats containing them) count: words like "prima" or "product" sit in
+ * most chats and match anything. A chat needs two of those hits (one when the
+ * message has a single keyword): one shared word is noise.
  */
 export function matchPastChats(
   chats: readonly ChatRecord[],
@@ -92,15 +96,22 @@ export function matchPastChats(
 ): ChatRecall[] {
   if (!keywords.length) return [];
   const since = opts.now - RECALL_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-  const need = Math.min(2, keywords.length);
+  const candidates = chats
+    .filter((chat) => chat.id !== opts.excludeId)
+    .map((chat) => ({
+      chat,
+      lines: chatLines(chat.messages)
+        .filter((l) => l.at !== undefined && l.at >= since && l.text)
+        .map((l) => ({ text: l.text, at: l.at ?? 0, present: new Set(words(l.text)) })),
+    }));
+  const df = new Map(keywords.map((k) => [k, candidates.filter((c) => c.lines.some((l) => l.present.has(k))).length]));
+  const rare = [...keywords].sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0)).slice(0, RECALL_CHAT_KEYWORDS);
+  const need = Math.min(2, rare.length);
   const scored: { recall: ChatRecall; score: number; at: number }[] = [];
-  for (const chat of chats) {
-    if (chat.id === opts.excludeId) continue;
+  for (const { chat, lines } of candidates) {
     let best: { text: string; score: number; at: number } | null = null;
-    for (const line of chatLines(chat.messages)) {
-      if (line.at === undefined || line.at < since || !line.text) continue;
-      const present = new Set(words(line.text));
-      const score = keywords.filter((k) => present.has(k)).length;
+    for (const line of lines) {
+      const score = rare.filter((k) => line.present.has(k)).length;
       if (score >= need && (!best || score > best.score)) best = { text: line.text, score, at: line.at };
     }
     if (!best) continue;
