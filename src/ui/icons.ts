@@ -26,12 +26,16 @@ import { HUB_ICON } from "./hub/hub-view";
 const SOLAR = '<g transform="scale(4.166667)">';
 
 export function registerExoIcons(): void {
-  // Exo brand mark — a concave 4-point star (matches the product logo).
-  // Authored directly on the 100x100 grid, so no scale wrapper. This is
-  // Exo's own mark, not a library glyph, so it stays outside the Solar set.
+  // Exo brand mark: two interlocking chevrons forming an X (matches the
+  // product logo, `assets/exo-logo.svg`). Authored on a 1254 grid; the mark's
+  // 628-unit bounding box is cropped and scaled onto 3..97 of addIcon's 100x100
+  // viewBox. Exo's own mark, not a library glyph, so it stays outside the Solar set.
   addIcon(
     EXO_ICON,
-    '<path fill="currentColor" d="M50 3 Q 50 50 97 50 Q 50 50 50 97 Q 50 50 3 50 Q 50 50 50 3 Z"/>',
+    '<g transform="translate(3 3) scale(0.149669) translate(-312.96 -312.5)" fill="currentColor">' +
+      '<path d="M312.96 312.5L424.47 312.5L691.96 584.17L691.96 450.28L832.24 312.5L940.7 312.5L940.94 421.77L729.16 632.5L711.46 632.5L626.96 548L559.46 615.5L507.77 615.5L312.96 421.76Z"/>' +
+      '<path d="M313.76 831.21L512.46 632.5L546.46 632.5L629.78 715.82L697.8 649.37L757.2 649.58L941.04 832.89L940.83 941.5L827.88 941.5L561.96 677.51L561.96 804.07L420.61 941.5L313.43 941.5Z"/>' +
+      "</g>",
   );
 
   // Orchestration board — Solar "structure" (bold duotone): four connected nodes.
