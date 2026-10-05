@@ -7,6 +7,7 @@ import {
   setTooltip,
   Notice,
 } from "obsidian";
+import { filePath, partitionFiles, pickedFolderRoot } from "./file-paths";
 import { Autocomplete, type AcItem } from "./autocomplete";
 import { buildDescIndex, codexSkillNames, type DescIndex } from "../core/capability-desc";
 import { mergeSlashEntries } from "../core/slash";
@@ -409,21 +410,27 @@ export class Composer {
 
   private onPaste(e: ClipboardEvent): void {
     const files = Array.from(e.clipboardData?.items ?? [])
-      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+      .filter((it) => it.kind === "file")
       .map((it) => it.getAsFile())
       .filter((f): f is File => !!f);
     if (files.length) {
       e.preventDefault();
-      void this.attachImages(files);
+      this.attachFiles(files);
     }
   }
 
   private onDrop(e: DragEvent): void {
-    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length) {
       e.preventDefault();
-      void this.attachImages(files);
+      this.attachFiles(files);
     }
+  }
+
+  private attachFiles(files: File[]): void {
+    const { images, paths } = partitionFiles(files);
+    if (images.length) void this.attachImages(images);
+    for (const p of paths) this.addExternalPath(p);
   }
 
   private async attachImages(files: Blob[]): Promise<void> {
@@ -1506,27 +1513,22 @@ export class Composer {
   }
 
   /** Electron file picker for paths OUTSIDE the vault. A hidden <input type=file>
-   *  is enough — in Electron, picked File objects expose an absolute `.path`
-   *  (no @electron/remote needed). Folder mode uses webkitdirectory and derives
-   *  the folder root from the first entry's path minus its relative suffix. */
+   *  is enough: `webUtils.getPathForFile` resolves the absolute path (Electron 32+
+   *  dropped `File.path`). Folder mode uses webkitdirectory and derives the folder
+   *  root from the first entry's path minus its relative suffix. */
   private pickExternal(directory: boolean): void {
     const input = createEl("input");
     input.type = "file";
     if (directory) input.webkitdirectory = true;
     else input.multiple = true;
     input.onchange = () => {
-      const files = Array.from(input.files ?? []) as Array<File & { path?: string; webkitRelativePath?: string }>;
+      const files = Array.from(input.files ?? []);
       if (!files.length) return;
       if (directory) {
-        const first = files[0];
-        const abs = first.path ?? "";
-        const rel = first.webkitRelativePath ?? "";
-        if (!abs || !rel) return;
-        // abs = /Users/x/proj/sub/file.ts, rel = proj/sub/file.ts → root = /Users/x/proj
-        const root = abs.slice(0, abs.length - rel.length) + rel.split("/")[0];
-        this.addExternalPath(root);
+        const root = pickedFolderRoot(files[0]);
+        if (root) this.addExternalPath(root);
       } else {
-        for (const f of files) if (f.path) this.addExternalPath(f.path);
+        for (const p of files.map(filePath)) if (p) this.addExternalPath(p);
       }
     };
     input.click();
