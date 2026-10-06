@@ -25,6 +25,8 @@
 import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-cards";
 import { groupByTime, type TimeGroupLabel } from "./history";
 import { groupAcrossHomes, groupByParent, type GroupedConvo } from "./child-tree";
+import { findInChat, fold } from "./chat-search";
+import type { ChatMessage } from "./recent-chats";
 import {
   autoSettleMs,
   returnedAt,
@@ -93,6 +95,9 @@ export interface ChatRowSource {
   pendingReport?: boolean;
   /** The agent's checklist, shown on a running row. */
   planProgress?: PlanProgress;
+  /** The conversation itself, by reference, for searching what was said
+   *  (core/chat-search). Read only while a query is typed. */
+  messages?: readonly ChatMessage[];
 }
 
 export interface ChatRow {
@@ -273,8 +278,6 @@ export function relativeTime(ts: number, now: number): string {
  * reachable by typing `pero`. Italian titles are full of accents nobody types
  * into a filter box, and an accent-sensitive search silently hides them.
  */
-const fold = (s: string): string =>
-  s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
 /**
  * Does this conversation match the query? EVERY whitespace-separated token has
@@ -485,7 +488,17 @@ export function buildChatList(
   const mode = opts.mode ?? "activity";
   const visible = sources.filter((s) => !s.archived && deriveLane(s).lane !== "idle");
   const searching = opts.query.trim().length > 0;
-  const matched = searching ? visible.filter((s) => matchesQuery(s, opts.query)) : visible;
+  // Title and preview first; then what was said in the chat (core/chat-search),
+  // whose matching line replaces the preview so the row shows WHY it matched.
+  const snippets = new Map<string, string>();
+  const matched = searching
+    ? visible.filter((s) => {
+        if (matchesQuery(s, opts.query)) return true;
+        const hit = s.messages ? findInChat({ id: s.id, title: s.title, messages: s.messages }, opts.query) : null;
+        if (hit) snippets.set(s.id, hit.snippet);
+        return hit !== null;
+      })
+    : visible;
 
   // Semantic hits only ever ADD to a search, never reorder or replace it. The
   // literal filter is the contract — if you typed a word, rows containing it
@@ -505,7 +518,12 @@ export function buildChatList(
 
   const rows: ChatRow[] = [];
   const quietMs = autoSettleMs(opts.autoSettleDays ?? 3);
-  for (const s of matched) rows.push(stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now, quietMs));
+  for (const s of matched) {
+    const row = stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now, quietMs);
+    const snippet = snippets.get(s.id);
+    if (snippet) row.preview = snippet;
+    rows.push(row);
+  }
 
   // The needs-you strip, over `visible` rather than `matched` — see `blocked`
   // on ChatListVM for why it is built here, off to the side, instead of being

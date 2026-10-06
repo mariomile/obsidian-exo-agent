@@ -106,7 +106,7 @@ describe("recent_chats tool", () => {
       { surface: "headless" },
     );
     const tools = buildMemoryTools(app, caps);
-    expect(tools.map((t) => t.name)).toEqual(["recent_chats"]); // headless: read tool only
+    expect(tools.map((t) => t.name)).toEqual(["recent_chats", "search_chats"]); // headless: read tools only
     const handler = (tools[0] as unknown as { handler: (a: unknown, e: unknown) => Promise<{ content: { text: string }[] }> }).handler;
     const week = (await handler({}, {})).content[0].text;
     expect(week).toContain("Yesterday");

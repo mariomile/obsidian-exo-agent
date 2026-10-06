@@ -2200,6 +2200,7 @@ export class ChatView extends ItemView {
       planProgress: c.streaming ? (planProgress(c.messages) ?? undefined) : undefined,
       snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt,
       settledOverride: c.settledOverride, settledAt: c.settledAt, unsettledAt: c.unsettledAt,
+      messages: c.messages, // by reference: searched only while a query is typed
     }));
   }
 
