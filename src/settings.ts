@@ -512,7 +512,7 @@ export class MVASettingTab extends PluginSettingTab {
     this.toggleSetting(
       el,
       "Suggestion inbox",
-      "Keep typed suggestions inert until you explicitly accept or dismiss them. Turning this off hides the inbox and stops all proposal routing without deleting retained suggestions.",
+      "Open loops and decisions are recorded directly and can be reviewed afterwards; tasks and playbooks wait in the inbox until you accept or dismiss them. Turning this off hides the inbox and stops all proposal routing without deleting retained suggestions.",
       "proposalKernelEnabled"
     );
 

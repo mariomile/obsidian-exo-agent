@@ -23,7 +23,8 @@ import { type Cadence, cadenceLabel, parseCadenceInput } from "./automations";
 export type AgentAutonomy =
   /** Write a report note; touch nothing else. */
   | "notify"
-  /** Route every change through the Proposal Kernel (inert until accepted). */
+  /** Route changes through the Proposal Kernel: loops and decisions are recorded
+   *  directly, tasks and playbooks stay inert until accepted. */
   | "propose"
   /** Write directly, checkpointed and restorable. */
   | "act";
@@ -753,7 +754,7 @@ export function buildAgentBindingOutbound(def: AgentDef, visibleText: string): s
     contract.autonomy === "act"
       ? ""
       : contract.autonomy === "propose"
-        ? "Its autonomy tier is `propose`: present changes for approval before writing."
+        ? "Its autonomy tier is `propose`: it may record loops and decisions directly; any other change is presented for approval before it is made."
         : "Its autonomy tier is `notify`: report only, change nothing.",
     "If that subagent is unavailable, say so plainly and answer directly instead of silently substituting another agent.",
     "Treat this block as provider-only instructions, not as user-authored visible text.",

@@ -29,7 +29,7 @@ import {
 
 /* ------------------------------- types ------------------------------- */
 
-/** What a run may do: read-only report, inert proposals, or direct writes. */
+/** What a run may do: read-only report, proposals (loops and decisions recorded directly, the rest inert until accepted), or direct writes. */
 export type AutomationMode = "report" | "propose" | "act";
 
 export const AUTOMATION_MODES: readonly AutomationMode[] = ["report", "propose", "act"];

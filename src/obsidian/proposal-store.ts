@@ -51,7 +51,10 @@ export interface ProposalFileAdapter {
 }
 
 export type AppendProposalResult =
-  | { status: "appended"; record: ProposalRecord }
+  /** Waiting in the inbox: an action kind, or a memory kind whose routing failed. */
+  | { status: "appended"; record: ProposalRecord; routeError?: string }
+  /** A memory kind (loop, decision) already written to its target. */
+  | { status: "applied"; record: ProposalRecord; target: string }
   | { status: "duplicate"; duplicateOf: ProposalRecord }
   | { status: "invalid"; errors: ProposalValidationError[] };
 
@@ -150,6 +153,7 @@ function parseRecord(value: unknown): ProposalRecord | undefined {
       createdAt: source.createdAt,
     },
     ...(object.status !== "pending" ? { resolvedAt: resolvedAt as number } : {}),
+    ...(object.status === "pending" && typeof object.lastError === "string" ? { lastError: object.lastError } : {}),
   };
 }
 
@@ -244,8 +248,8 @@ export class ProposalStore {
   constructor(
     private readonly files: ProposalFileAdapter,
     private readonly queue: WriteQueue,
-    /** Routes memory kinds (loop, decision) the moment they are appended. */
-    private readonly autoRoute?: (record: ProposalRecord) => Promise<ProposalRouteResult>
+    /** Writes a record to its target. Memory kinds route on append; the rest on accept. */
+    private readonly route: (record: ProposalRecord) => Promise<ProposalRouteResult>
   ) {}
 
   async load(): Promise<ProposalStoreSnapshot> {
@@ -268,7 +272,7 @@ export class ProposalStore {
       return Promise.resolve({ status: "invalid", errors: validated.errors });
     }
     const clean = validated.value[0];
-    return this.mutate<AppendProposalResult>(({ data }) => {
+    return this.mutate<AppendProposalResult>(async ({ data }) => {
       data.metrics.generated += 1;
       const duplicate = evaluateProposal(clean, data.records, source.createdAt);
       if (duplicate.status === "duplicate") {
@@ -286,27 +290,17 @@ export class ProposalStore {
         source: { ...source },
       };
       data.records.push(record);
-      return { status: "appended", record };
-    }).then((result) => this.routeMemoryRecord(result));
+      // Memory kinds skip the pending step. A failed route leaves the record
+      // pending with its error, so the inbox still offers Retry.
+      if (!isMemoryProposalKind(record.kind)) return { status: "appended", record };
+      const routed = await this.applyRoute(data, record);
+      return routed.ok
+        ? { status: "applied", record, target: routed.target }
+        : { status: "appended", record, routeError: routed.error };
+    });
   }
 
-  /**
-   * Memory kinds skip the pending step: accept through the normal route right
-   * after the append commits (never inside its queue turn). A failed route leaves
-   * the record pending, so the inbox still offers Retry.
-   */
-  private async routeMemoryRecord(result: AppendProposalResult): Promise<AppendProposalResult> {
-    if (result.status !== "appended" || !this.autoRoute || !isMemoryProposalKind(result.record.kind)) {
-      return result;
-    }
-    const accepted = await this.accept(result.record.id, this.autoRoute);
-    return { status: "appended", record: accepted.record };
-  }
-
-  accept(
-    id: string,
-    route: (record: ProposalRecord) => Promise<ProposalRouteResult>
-  ): Promise<ProposalAcceptResult> {
+  accept(id: string): Promise<ProposalAcceptResult> {
     const active = this.acceptFlights.get(id);
     if (active) return active;
     const flight = this.mutate<ProposalAcceptResult>(async ({ data }) => {
@@ -317,20 +311,10 @@ export class ProposalStore {
       }
       if (record.status === "dismissed") throw new Error(`Proposal already dismissed: ${id}`);
 
-      let routed: ProposalRouteResult;
-      try {
-        routed = await route(record);
-      } catch (error) {
-        routed = { ok: false, error: message(error) };
-      }
-      if (!routed.ok) {
-        data.metrics.routeErrors += 1;
-        return { ok: false, error: routed.error, record };
-      }
-      record.status = "accepted";
-      record.resolvedAt = Date.now();
-      data.metrics.accepted += 1;
-      return { ok: true, target: routed.target, record };
+      const routed = await this.applyRoute(data, record);
+      return routed.ok
+        ? { ok: true, target: routed.target, record }
+        : { ok: false, error: routed.error, record };
     });
     this.acceptFlights.set(id, flight);
     const clearFlight = () => {
@@ -338,6 +322,26 @@ export class ProposalStore {
     };
     void flight.then(clearFlight, clearFlight);
     return flight;
+  }
+
+  /** Route one record and book the outcome. Runs inside the caller's queue turn. */
+  private async applyRoute(data: ProposalStoreData, record: ProposalRecord): Promise<ProposalRouteResult> {
+    let routed: ProposalRouteResult;
+    try {
+      routed = await this.route(record);
+    } catch (error) {
+      routed = { ok: false, error: message(error) };
+    }
+    if (!routed.ok) {
+      data.metrics.routeErrors += 1;
+      record.lastError = routed.error;
+      return routed;
+    }
+    record.status = "accepted";
+    record.resolvedAt = Date.now();
+    delete record.lastError;
+    data.metrics.accepted += 1;
+    return routed;
   }
 
   dismiss(id: string, now = Date.now()): Promise<ProposalRecord> {
@@ -348,6 +352,7 @@ export class ProposalStore {
       if (record.status === "accepted") throw new Error(`Proposal already accepted: ${id}`);
       record.status = "dismissed";
       record.resolvedAt = now;
+      delete record.lastError;
       data.metrics.dismissed += 1;
       return record;
     }, now);

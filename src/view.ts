@@ -35,8 +35,8 @@ import {
 import { adaptAppToTaskVault, createBacklogTask } from "./obsidian/task-store";
 import { browserBridgeFor } from "./obsidian/browser-controller";
 import { AgentFolder, type BlockWrite } from "./obsidian/agent-folder";
-import { planRethink } from "./core/agent-self";
 import { BootPreambleCache } from "./obsidian/memory";
+import type { SavedMemory } from "./obsidian/proposal-producer";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
 import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
 import { setProviderMark } from "./ui/provider-mark";
@@ -2746,24 +2746,18 @@ export class ChatView extends ItemView {
 
   /**
    * Enact a `rethink_memory` tool call for conversation `c` (design §3). The
-   * tier is resolved purely by {@link planRethink}:
-   *  - `NOW.md`   → write freely, render the diff + undo row into the turn.
-   *  - `USER.md` → write, render the diff + undo row WITH the rationale surfaced.
-   *  - `SOUL.md` → same as USER.md: written directly, rationale surfaced, undo available.
+   * tool has already enforced the rationale rule, so every block is written
+   * directly and the diff + undo row is rendered into the turn, with the
+   * rationale surfaced when one was given.
    * Returns the short status line the tool reports back to the model.
    */
   private async rethinkBridge(c: Convo, req: RethinkRequest): Promise<string> {
     const ctx = c.currentCtx;
     if (!ctx) throw new Error("no active turn");
     const block = req.block;
-    const plan = planRethink(block);
-    const agent = this.agent();
-    if (plan.requireRationale && !req.rationale?.trim()) {
-      return `Not written: ${block}.md needs a rationale. Call rethink_memory again with one.`;
-    }
 
     // Every block — governed direct write with feed diff + undo.
-    const write = await agent.writeBlock(block, req.content);
+    const write = await this.agent().writeBlock(block, req.content);
     // Identity edits nudge the git-autocommit debounce like any other vault
     // write (integration audit 2026-07-10): without this, a rethink followed by
     // a crash inside the 15-min cadence window would leave the identity change
@@ -2771,7 +2765,7 @@ export class ChatView extends ItemView {
     // periodic fallback.
     this.plugin.noteVaultWrite([write.path]);
     this.renderBlockDiff(ctx.bodyEl, write, req.rationale);
-    return plan.requireRationale
+    return req.rationale?.trim()
       ? `Rewrote ${block}.md (rationale surfaced in the change). Review · undo shown in the feed.`
       : `Rewrote ${block}.md. Review · undo shown in the feed.`;
   }
@@ -5935,7 +5929,9 @@ export class ChatView extends ItemView {
         responseText: ctx.fullText,
         source: { convoId: c.id, turnId: String(turnStart), createdAt: turnStart },
       }).then((result) => {
-        if (result.status !== "generated" || result.appended < 1 || !ctx.el.isConnected) return;
+        if (result.status !== "generated" || !ctx.el.isConnected) return;
+        this.renderSavedMemory(ctx.el, result.saved);
+        if (result.appended < 1) return;
         const summary = ctx.el.createEl("button", {
           cls: "mva-proposal-summary",
           attr: { type: "button", "aria-label": "Review suggestions" },
@@ -5981,6 +5977,21 @@ export class ChatView extends ItemView {
         // active convo (prewarm targets it) with nothing queued behind the stop.
         if (c.stopped && c === this.active) this.prewarm();
       }
+    }
+  }
+
+  /** One quiet "Saved: <title>" row per loop or decision the post-turn pass wrote
+   *  straight into the vault, linking to the note it landed in. */
+  private renderSavedMemory(el: HTMLElement, saved: readonly SavedMemory[]): void {
+    for (const item of saved) {
+      const path = item.kind === "loop" ? this.plugin.paths.openLoops : item.target;
+      const row = el.createDiv({ cls: "mva-proposal-saved" });
+      row.createSpan({ text: "Saved: " });
+      const link = row.createEl("a", { text: item.title, href: "#" });
+      this.clickable(link, (e) => {
+        e.preventDefault();
+        this.openNote(path);
+      });
     }
   }
 

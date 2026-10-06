@@ -15,6 +15,8 @@ import {
 } from "../src/obsidian/proposal-store";
 import { parseFoundryDistillation } from "../src/core/foundry-distill";
 
+type ProposalRoute = ConstructorParameters<typeof ProposalStore>[2];
+
 /**
  * End-to-end Workflow Foundry loop, wiring the real signal store, real proposal
  * store, and the pure distiller exactly as `view.ts` orchestrates them — but
@@ -33,14 +35,14 @@ function signalStore(): WorkflowSignalStore {
   return new WorkflowSignalStore(adapter, new WriteQueue());
 }
 
-function proposalStore(): ProposalStore {
+function proposalStore(route: ProposalRoute = async (record) => ({ ok: true, target: record.title })): ProposalStore {
   const files = new Map<string, string>();
   const adapter: ProposalFileAdapter = {
     read: async (path) => files.get(path) ?? null,
     write: async (path, content) => { files.set(path, content); },
   };
   void PROPOSALS_FILE;
-  return new ProposalStore(adapter, new WriteQueue());
+  return new ProposalStore(adapter, new WriteQueue(), route);
 }
 
 const distillReply = JSON.stringify({
@@ -120,7 +122,7 @@ describe("Workflow Foundry — end to end", () => {
 
     // Accept it, then a fifth run stays suppressed by the accepted signature.
     const pendingId = (await proposals.listPending()).records[0].id;
-    await proposals.accept(pendingId, async (record) => ({ ok: true, target: record.title }));
+    await proposals.accept(pendingId);
     expect(await runTurn(signals, proposals, "t5", t0 + 4 * MIN)).toBe("none");
     expect((await proposals.load()).data.records.filter((r) => r.status === "pending")).toHaveLength(0);
   });
@@ -169,18 +171,18 @@ describe("Workflow Foundry — end to end", () => {
 
   it("edits a distilled playbook before accepting and routes the edited values", async () => {
     const signals = signalStore();
-    const proposals = proposalStore();
+    const routed: { name: string; prompt: string }[] = [];
+    const proposals = proposalStore(async (record) => {
+      if (record.payload.kind === "playbook") routed.push({ name: record.payload.name, prompt: record.payload.prompt });
+      return { ok: true, target: record.title };
+    });
     await runTurn(signals, proposals, "t1", t0);
     await runTurn(signals, proposals, "t2", t0 + MIN);
     await runTurn(signals, proposals, "t3", t0 + 2 * MIN);
     const id = (await proposals.listPending()).records[0].id;
 
     await proposals.updatePendingPlaybook(id, { name: "Renamed scan", prompt: "A shorter reusable prompt for the scan." });
-    const routed: { name: string; prompt: string }[] = [];
-    const accepted = await proposals.accept(id, async (record) => {
-      if (record.payload.kind === "playbook") routed.push({ name: record.payload.name, prompt: record.payload.prompt });
-      return { ok: true, target: record.title };
-    });
+    const accepted = await proposals.accept(id);
     expect(accepted.ok).toBe(true);
     expect(routed).toEqual([{ name: "Renamed scan", prompt: "A shorter reusable prompt for the scan." }]);
   });

@@ -39,7 +39,7 @@ const AUTOMATION_ICONS = [
 
 const MODE_CHOICES: readonly { value: AutomationMode; label: string; hint: string }[] = [
   { value: "report", label: "Report", hint: "Reads the vault, writes only a report note." },
-  { value: "propose", label: "Propose", hint: "Suggests changes — inert until you accept them." },
+  { value: "propose", label: "Propose", hint: "Records loops and decisions directly. Tasks and playbooks wait until you accept them." },
   { value: "act", label: "Act", hint: "Edits notes directly. Every run is snapshotted and restorable." },
 ];
 

@@ -11,7 +11,7 @@
  * This module owns everything about identity that can be reasoned about without
  * Obsidian, so it is fully unit-testable:
  *
- *   - the block registry (names, advisory char limits, ownership tiers);
+ *   - the block registry (names, advisory char limits, rationale rule);
  *   - `parseManifest` — tolerant, hardcoded-default on corruption;
  *   - `compileIdentity(blocks, opts)` — assembles the identity SECTION prepended
  *     to the boot preamble: order SOUL → USER → NOW, each headed and stamped
@@ -30,34 +30,25 @@ import { exoPaths, LEGACY_MEMORY_ROOT } from "./paths";
 /** The three identity blocks, in the fixed compile order SOUL → USER → NOW. */
 export type BlockName = "SOUL" | "USER" | "NOW";
 
-/**
- * Ownership tier for a block's autonomous rewrite policy (design §3):
- *  - `rewrite`                — agent rewrites freely (low risk, high turnover). `NOW.md`.
- *  - `rewrite-with-rationale` — agent rewrites; the feed diff must surface the rationale. `SOUL.md`, `USER.md`.
- *
- * No tier waits on a human: review happens after the write, through the feed
- * diff, the git autocommit and undo.
- */
-export type BlockOwner = "rewrite" | "rewrite-with-rationale";
-
 /** Static registry entry for one block. */
 export interface BlockSpec {
   name: BlockName;
   /** Advisory char limit — overflow WARNS, never truncates (non-negotiable #2). */
   limit: number;
-  owner: BlockOwner;
+  /** A rewrite must carry a rationale, surfaced with the change in the feed diff. */
+  requiresRationale: boolean;
   /** The heading rendered above the block in the compiled identity section. */
   heading: string;
 }
 
 /**
  * The canonical block registry — the single source of truth for names, advisory
- * char limits, ownership tiers, and headings. Order here IS the compile order.
+ * char limits, rationale rule, and headings. Order here IS the compile order.
  */
 export const AGENT_BLOCKS: readonly BlockSpec[] = [
-  { name: "SOUL", limit: 1500, owner: "rewrite-with-rationale", heading: "Soul — how you behave" },
-  { name: "USER", limit: 2000, owner: "rewrite-with-rationale", heading: "User — who you work with" },
-  { name: "NOW", limit: 1500, owner: "rewrite", heading: "Now — what matters right now" },
+  { name: "SOUL", limit: 1500, requiresRationale: true, heading: "Soul — how you behave" },
+  { name: "USER", limit: 2000, requiresRationale: true, heading: "User — who you work with" },
+  { name: "NOW", limit: 1500, requiresRationale: false, heading: "Now — what matters right now" },
 ] as const;
 
 /** Block names in compile order — `["SOUL", "USER", "NOW"]`. */
@@ -120,38 +111,6 @@ export function isAgentBlock(s: string): s is BlockName {
   return (AGENT_BLOCK_NAMES as readonly string[]).includes(s);
 }
 
-/** The rewrite policy for a block — the tier `rethink_memory` enforces. */
-export function rethinkPolicy(name: BlockName): BlockOwner {
-  return blockSpec(name).owner;
-}
-
-/* ---------------------------- rethink plan ------------------------------ */
-
-/**
- * The action `rethink_memory` should take for a block, decided purely from its
- * ownership tier (design §3). The Obsidian tool enacts the plan; this keeps the
- * tier policy fully unit-testable and impossible to drift per call-site:
- *  - `write`        — rewrite `NOW.md` freely; render a feed diff + undo.
- *  - `write`+rationale — rewrite `SOUL.md` / `USER.md`; the feed diff must surface the rationale.
- */
-export type RethinkAction =
-  | { verb: "write"; block: BlockName; requireRationale: false }
-  | { verb: "write"; block: BlockName; requireRationale: true };
-
-/**
- * Map a target block to its rethink action from the registry's ownership tier.
- * Unknown block names are rejected upstream by {@link isAgentBlock}; this assumes
- * a valid block.
- */
-export function planRethink(block: BlockName): RethinkAction {
-  switch (rethinkPolicy(block)) {
-    case "rewrite":
-      return { verb: "write", block, requireRationale: false };
-    case "rewrite-with-rationale":
-      return { verb: "write", block, requireRationale: true };
-  }
-}
-
 /* ------------------------------ manifest -------------------------------- */
 
 /** The parsed manifest contract. */
@@ -165,7 +124,7 @@ export function defaultManifest(): Manifest {
   return { version: AGENT_FORMAT_VERSION, blocks: AGENT_BLOCKS.map((b) => ({ ...b })) };
 }
 
-/** Parse one `| block | limit | owner |` table row into a spec override, or null. */
+/** Parse one `| block | limit | … |` table row into a spec override, or null. */
 function parseManifestRow(line: string): Partial<BlockSpec> & { name: BlockName } | null {
   const cells = line.split("|").map((c) => c.trim()).filter((_, i, arr) => i > 0 && i < arr.length - 1);
   if (cells.length < 1) return null;
@@ -179,11 +138,11 @@ function parseManifestRow(line: string): Partial<BlockSpec> & { name: BlockName 
 
 /**
  * Tolerant manifest parser. Reads a `version:` line and an optional
- * `| block | limit | owner |` table, merging any well-formed rows over the
+ * `| block | limit | … |` table, merging any well-formed rows over the
  * canonical defaults. ANY corruption (empty input, no rows, garbage) degrades to
- * {@link defaultManifest} — never throws (§8). Owners are NOT taken from the file:
- * ownership tiers are a code-level invariant (the truth firewall of identity), so
- * a hand-edit can nudge a limit but can never widen a block's write policy.
+ * {@link defaultManifest}, never throws (§8). The rationale rule is NOT taken from
+ * the file: it is a code-level invariant (the truth firewall of identity), so a
+ * hand-edit can nudge a limit but can never loosen a block's write policy.
  */
 export function parseManifest(content: string): Manifest {
   const base = defaultManifest();
@@ -294,7 +253,7 @@ export function parseSeedBlocks(raw: string): Partial<Record<BlockName, string>>
 /** The `manifest.md` contract document written by the seeder (design §1/§7). */
 export function manifestContent(): string {
   const rows = AGENT_BLOCKS.map(
-    (b) => `| ${b.name}.md | ${b.limit} | ${b.owner} |`
+    (b) => `| ${b.name}.md | ${b.limit} | ${b.requiresRationale ? "rationale required" : "free rewrite"} |`
   ).join("\n");
   return [
     "---",
@@ -313,7 +272,7 @@ export function manifestContent(): string {
     "",
     "## Blocks",
     "",
-    "| block | char limit | owner policy |",
+    "| block | char limit | rewrite policy |",
     "|---|---|---|",
     rows,
     "",

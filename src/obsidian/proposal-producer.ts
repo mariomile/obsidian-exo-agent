@@ -49,6 +49,14 @@ export type ProposalProducerFailureReason =
   | "utility_error"
   | "store_error";
 
+/** A memory proposal that was written straight to its target. */
+export interface SavedMemory {
+  kind: ProposalRecord["kind"];
+  title: string;
+  /** The route's target: a loop id or a decision note path. */
+  target: string;
+}
+
 export type ProposalProducerResult =
   | { status: "skipped"; reason: ProposalProducerSkipReason }
   | {
@@ -56,8 +64,8 @@ export type ProposalProducerResult =
       candidates: number;
       /** New suggestions waiting in the inbox. */
       appended: number;
-      /** Memory records (loop, decision) written with no human gate. */
-      autoApplied: number;
+      /** Memory records (loop, decision) written directly, ready to show as saved. */
+      saved: SavedMemory[];
       duplicates: number;
       invalid: number;
     }
@@ -155,14 +163,20 @@ async function recordParseFailure(
   diagnose(deps, message, error ?? metricError);
 }
 
-function countAppend(
-  result: AppendProposalResult,
-  totals: { appended: number; autoApplied: number; duplicates: number; invalid: number }
-): void {
+interface AppendTotals {
+  appended: number;
+  saved: SavedMemory[];
+  duplicates: number;
+  invalid: number;
+}
+
+function countAppend(result: AppendProposalResult, totals: AppendTotals): void {
   switch (result.status) {
     case "appended":
-      if (result.record.status === "accepted") totals.autoApplied += 1;
-      else totals.appended += 1;
+      totals.appended += 1;
+      break;
+    case "applied":
+      totals.saved.push({ kind: result.record.kind, title: result.record.title, target: result.target });
       break;
     case "duplicate":
       totals.duplicates += 1;
@@ -211,7 +225,7 @@ export async function produceTurnProposals(
     return { status: "failed", reason: "invalid_output" };
   }
 
-  const totals = { appended: 0, autoApplied: 0, duplicates: 0, invalid: 0 };
+  const totals: AppendTotals = { appended: 0, saved: [], duplicates: 0, invalid: 0 };
   try {
     for (const candidate of parsed.value) {
       countAppend(await deps.store.append(candidate, input.source), totals);

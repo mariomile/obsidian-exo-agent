@@ -37,6 +37,7 @@ import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools"
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
 import { buildCollaboTools, COLLABO_READ_TOOLS, collaboBridgeFrom } from "./collabo-tools";
 import { toSdkTools, type AnyTool } from "./sdk-tool";
+import { blockSpec } from "../core/agent-self";
 import { memoryCaps, type MemoryCaps } from "../core/memory-caps";
 import { DEFAULT_SETTINGS } from "../settings-schema";
 import { buildMemoryTools, MEMORY_READ_TOOLS } from "./memory-tools";
@@ -56,10 +57,10 @@ interface AskQuestion {
   multiSelect?: boolean;
 }
 
-/** A `rethink_memory` request handed to the view-side bridge. The tool has NOT
- *  yet decided the tier — the bridge resolves `planRethink`, enacts the write
- *  (now/human) or records a pending proposal card (persona), and returns a short
- *  status line for the model. Kept minimal to avoid a tools→view import cycle. */
+/** A `rethink_memory` request handed to the view-side bridge. The tool has
+ *  already enforced the block's rationale rule; the bridge enacts the write,
+ *  renders the diff and undo row, and returns a short status line for the model.
+ *  Kept minimal to avoid a tools→view import cycle. */
 export interface RethinkRequest {
   block: "SOUL" | "USER" | "NOW";
   content: string;
@@ -206,9 +207,8 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
      *  a headless run, which must not drive a surface whose whole point is that
      *  Mario watches it. */
     browserBridge,
-    /** View-side bridge that enacts a `rethink_memory` request: resolves the tier,
-     *  writes the block directly (rationale surfaced for SOUL/USER), and renders
-     *  the feed diff+undo. Absent → the tool is not registered. */
+    /** View-side bridge that enacts a `rethink_memory` request: writes the block
+     *  directly and renders the feed diff+undo. Absent → the tool is not registered. */
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
     agentCaller = EXO_CALLER,
@@ -687,6 +687,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     },
     async (args) => {
       if (!rethinkBridge) return err("The agent identity layer is off.");
+      if (blockSpec(args.block).requiresRationale && !args.rationale?.trim()) {
+        return err(`Not written: ${args.block}.md needs a rationale. Call rethink_memory again with one.`);
+      }
       try {
         const status = await rethinkBridge({
           block: args.block,

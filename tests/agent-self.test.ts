@@ -5,8 +5,6 @@ import {
   isAgentBlock,
   parseManifest,
   compileIdentity,
-  rethinkPolicy,
-  planRethink,
   buildSeedPrompt,
   parseSeedBlocks,
   manifestContent,
@@ -28,10 +26,10 @@ describe("AGENT_BLOCKS registry", () => {
     expect(blockSpec("NOW").limit).toBe(1500);
   });
 
-  it("assigns the spec ownership tiers", () => {
-    expect(blockSpec("NOW").owner).toBe("rewrite");
-    expect(blockSpec("USER").owner).toBe("rewrite-with-rationale");
-    expect(blockSpec("SOUL").owner).toBe("rewrite-with-rationale");
+  it("requires a rationale for SOUL and USER only", () => {
+    expect(blockSpec("NOW").requiresRationale).toBe(false);
+    expect(blockSpec("USER").requiresRationale).toBe(true);
+    expect(blockSpec("SOUL").requiresRationale).toBe(true);
   });
 
   it("recognizes only the three block names", () => {
@@ -40,28 +38,6 @@ describe("AGENT_BLOCKS registry", () => {
     expect(isAgentBlock("NOW")).toBe(true);
     expect(isAgentBlock("nope")).toBe(false);
     expect(isAgentBlock("")).toBe(false);
-  });
-});
-
-describe("rethinkPolicy", () => {
-  it("maps each block to its write policy", () => {
-    expect(rethinkPolicy("NOW")).toBe("rewrite");
-    expect(rethinkPolicy("USER")).toBe("rewrite-with-rationale");
-    expect(rethinkPolicy("SOUL")).toBe("rewrite-with-rationale");
-  });
-});
-
-describe("planRethink", () => {
-  it("NOW.md → free write, no rationale required", () => {
-    expect(planRethink("NOW")).toEqual({ verb: "write", block: "NOW", requireRationale: false });
-  });
-
-  it("USER.md → write that requires the rationale surfaced", () => {
-    expect(planRethink("USER")).toEqual({ verb: "write", block: "USER", requireRationale: true });
-  });
-
-  it("SOUL.md → direct write with the rationale surfaced (no human gate)", () => {
-    expect(planRethink("SOUL")).toEqual({ verb: "write", block: "SOUL", requireRationale: true });
   });
 });
 

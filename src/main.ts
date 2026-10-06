@@ -303,7 +303,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   proposalStore!: ProposalStore;
   workflowSignalStore!: WorkflowSignalStore;
   private proposalAcceptanceDeps!: ProposalAcceptanceDeps;
-  private readonly proposalRouteErrors = new Map<string, string>();
   private readonly proposalAbort = new AbortController();
   /** Signatures whose distillation is in flight; guards the record→append window. */
   private readonly distillingSignatures = new Set<string>();
@@ -393,7 +392,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;
-    // The 3rd arg routes memory kinds (loop, decision) on append: no human gate.
+    // The route is lazy: the acceptance deps are built right after, and it writes
+    // loops and decisions on append, tasks and playbooks on accept.
     this.proposalStore = new ProposalStore({
       read: async (relativePath) => {
         const path = `${proposalRoot}/${relativePath}`;
@@ -2175,17 +2175,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     return this.proposalStore.listPending();
   }
 
-  lastProposalRouteError(id: string): string | undefined {
-    return this.proposalRouteErrors.get(id);
-  }
-
   async acceptProposal(id: string): Promise<ProposalAcceptResult> {
     if (!this.settings.proposalKernelEnabled) throw new Error("Suggestion inbox is disabled.");
-    const result = await this.proposalStore.accept(id, (record) =>
-      routeAcceptedProposal(record, this.proposalAcceptanceDeps)
-    );
-    if (result.ok) this.proposalRouteErrors.delete(id);
-    else this.proposalRouteErrors.set(id, result.error);
+    const result = await this.proposalStore.accept(id);
     void this.refreshCockpit();
     return result;
   }
@@ -2193,7 +2185,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   async dismissProposal(id: string) {
     if (!this.settings.proposalKernelEnabled) throw new Error("Suggestion inbox is disabled.");
     const record = await this.proposalStore.dismiss(id);
-    this.proposalRouteErrors.delete(id);
     void this.refreshCockpit();
     return record;
   }
@@ -2217,7 +2208,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       accept: (id) => this.acceptProposal(id),
       dismiss: (id) => this.dismissProposal(id),
       sourceTitle: (convoId) => titles.get(convoId) ?? "Conversation",
-      lastRouteError: (id) => this.lastProposalRouteError(id),
       updatePlaybook: (id, patch) => this.updateProposalPlaybook(id, patch),
     }).open();
   }
@@ -2248,7 +2238,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         return output;
       },
     });
-    if (result.status === "generated" && result.appended + result.autoApplied > 0) void this.refreshCockpit();
+    if (result.status === "generated" && result.appended + result.saved.length > 0) void this.refreshCockpit();
     return result;
   }
 
@@ -2874,9 +2864,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *
    * This is what makes the `propose` tier worth having: instead of reading a
    * report and re-doing the work by hand, the run's conclusions land in the
-   * existing proposals inbox with one-click accept — routed through the same
-   * validated, deduplicated, inert channel as every other producer. The kernel
-   * still disposes; the agent only proposes.
+   * existing proposals inbox with one-click accept (tasks, playbooks), while
+   * loops and decisions are recorded directly, all through the same validated,
+   * deduplicated channel as every other producer.
    *
    * The extraction/validation/persistence itself is `collectRunProposals`
    * (core/agent-runs.ts). Called only for a `proposeEligible` run, the same

@@ -43,7 +43,7 @@ function fakeVault(initial: Record<string, string> = {}) {
 describe("OpenLoopProposalTarget", () => {
   it("serializes concurrent creates without losing entries and makes same-millisecond ids unique", async () => {
     const { adapter, files, folders } = fakeVault();
-    const target = new OpenLoopProposalTarget(adapter, new WriteQueue(), () => 1_720_000_000_000);
+    const target = new OpenLoopProposalTarget(adapter, new WriteQueue(), vi.fn(), () => 1_720_000_000_000);
 
     const created = await Promise.all([
       target.create({ proposalId: "proposal-one", title: "One", note: "First" }),
@@ -67,13 +67,16 @@ describe("OpenLoopProposalTarget", () => {
 
   it("returns the existing loop when the same proposal is retried", async () => {
     const { adapter, files } = fakeVault();
-    const target = new OpenLoopProposalTarget(adapter, new WriteQueue(), () => 1_720_000_000_000);
+    const noteWrite = vi.fn();
+    const target = new OpenLoopProposalTarget(adapter, new WriteQueue(), noteWrite, () => 1_720_000_000_000);
     const input = { proposalId: "proposal-loop", title: "One", note: "First" };
 
     const first = await target.create(input);
     const second = await target.create(input);
 
     expect(second).toEqual(first);
+    expect(noteWrite).toHaveBeenCalledTimes(1);
+    expect(noteWrite).toHaveBeenCalledWith([OPEN_LOOPS_PATH]);
     expect(parseLoopsFile(files.get(OPEN_LOOPS_PATH)!)).toHaveLength(1);
   });
 });
@@ -81,7 +84,7 @@ describe("OpenLoopProposalTarget", () => {
 describe("DecisionProposalTarget", () => {
   it("creates the dated slug path with raw-patched frontmatter and decision body", async () => {
     const { adapter, files, folders } = fakeVault();
-    const target = new DecisionProposalTarget(adapter, () => new Date(2026, 6, 20, 23, 30));
+    const target = new DecisionProposalTarget(adapter, vi.fn(), () => new Date(2026, 6, 20, 23, 30));
 
     const result = await target.captureRawPreserving({
       proposalId: "proposal-decision",
@@ -107,7 +110,7 @@ describe("DecisionProposalTarget", () => {
   it("fails on a collision instead of overwriting the existing decision", async () => {
     const path = `${DECISIONS_DIR}/2026-07-20-same.md`;
     const { adapter, files } = fakeVault({ [path]: "keep me" });
-    const target = new DecisionProposalTarget(adapter, () => new Date(2026, 6, 20));
+    const target = new DecisionProposalTarget(adapter, vi.fn(), () => new Date(2026, 6, 20));
 
     await expect(target.captureRawPreserving({
       proposalId: "another-proposal",
@@ -121,7 +124,8 @@ describe("DecisionProposalTarget", () => {
 
   it("returns the existing decision when the same proposal is retried", async () => {
     const { adapter, files } = fakeVault();
-    const target = new DecisionProposalTarget(adapter, () => new Date(2026, 6, 20));
+    const noteWrite = vi.fn();
+    const target = new DecisionProposalTarget(adapter, noteWrite, () => new Date(2026, 6, 20));
     const input = {
       proposalId: "proposal-decision",
       title: "Same",
@@ -135,6 +139,8 @@ describe("DecisionProposalTarget", () => {
 
     expect(second).toEqual(first);
     expect([...files.keys()].filter((path) => path.startsWith(DECISIONS_DIR))).toHaveLength(1);
+    expect(noteWrite).toHaveBeenCalledTimes(1);
+    expect(noteWrite).toHaveBeenCalledWith([first.path]);
   });
 });
 
@@ -225,6 +231,7 @@ describe("createProposalAcceptanceDeps", () => {
         settings: () => ({ customPrompts: [] }),
         saveSettings: async () => undefined,
       },
+      noteWrite: vi.fn(),
     });
     await expect(deps.tasks.create({
       proposalId: "proposal-task",
@@ -251,6 +258,7 @@ describe("createProposalAcceptanceDeps", () => {
         settings: () => ({ customPrompts: [] }),
         saveSettings: async () => undefined,
       },
+      noteWrite: vi.fn(),
     });
     const record = {
       id: "proposal-loop",

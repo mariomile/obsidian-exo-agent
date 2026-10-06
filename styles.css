@@ -6069,6 +6069,13 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-radius: var(--radius-s);
 }
 .mva-proposal-summary-icon svg { width: 13px; height: 13px; }
+.mva-proposal-saved {
+  margin: 6px 0 0 28px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+.mva-proposal-saved a { color: var(--text-muted); text-decoration: none; }
+.mva-proposal-saved a:hover { color: var(--text-normal); text-decoration: underline; }
 
 .mva-proposals-window { width: min(760px, 92vw); }
 .mva-proposals-layout {

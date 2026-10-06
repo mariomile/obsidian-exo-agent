@@ -5,14 +5,14 @@ import { AGENT_DIR, isAgentBlock, type BlockName } from "../core/agent-self";
 /**
  * The Agent Is the Folder — Obsidian-side block IO for the agent folder.
  *
- * The pure identity logic (registry, manifest parse, `compileIdentity`,
- * `planRethink`) lives in `src/core/agent-self.ts`. This module is the thin,
+ * The pure identity logic (registry, manifest parse, `compileIdentity`)
+ * lives in `src/core/agent-self.ts`. This module is the thin,
  * impure glue that reads and writes the three block files through the SHARED
  * store write-queue, capturing a before-image so every governed write surfaces a
  * diff-with-undo in the activity feed (non-negotiable #4). It never decides
- * policy: the caller (the `rethink_memory` tool) has already resolved the tier
- * via `planRethink`; this just enacts a block replacement and hands back the
- * undo snapshot.
+ * policy: the `rethink_memory` tool has already enforced the block's
+ * rationale rule; this just enacts a block replacement and hands back the undo
+ * snapshot.
  */
 
 /** Snapshot of a block file taken immediately BEFORE a governed write — the

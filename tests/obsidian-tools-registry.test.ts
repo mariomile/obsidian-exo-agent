@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { App } from "obsidian";
 import { buildObsidianTools } from "../src/obsidian/tools";
 import { memoryCaps, type MemorySettings } from "../src/core/memory-caps";
@@ -153,5 +153,47 @@ describe("ask_user handler contract", () => {
     const res = await t.handler(QUESTIONS, {});
     expect(res.isError).toBeFalsy();
     expect(res.content[0]?.text).toMatch(/dismissed/i);
+  });
+});
+
+describe("rethink_memory rationale rule", () => {
+  type ToolResult = { isError?: boolean; content: Array<{ text?: string }> };
+  function rethink(bridge: (req: unknown) => Promise<string>) {
+    const tools = buildObsidianTools(app, {
+      memory: memory({ agentFolderEnabled: true }),
+      rethinkBridge: bridge,
+    });
+    const t = tools.find((x) => x.name === "rethink_memory");
+    if (!t) throw new Error("rethink_memory not registered");
+    return t as unknown as { handler: (args: unknown, extra: unknown) => Promise<ToolResult> };
+  }
+
+  it.each(["SOUL", "USER"])("refuses %s without a rationale and never calls the bridge", async (block) => {
+    const bridge = vi.fn(async () => "Rewrote");
+    const res = await rethink(bridge).handler({ block, new_content: "new" }, {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain(`${block}.md needs a rationale`);
+    expect(bridge).not.toHaveBeenCalled();
+  });
+
+  it("treats a blank rationale as missing", async () => {
+    const bridge = vi.fn(async () => "Rewrote");
+    const res = await rethink(bridge).handler({ block: "USER", new_content: "new", rationale: "   " }, {});
+    expect(res.isError).toBe(true);
+    expect(bridge).not.toHaveBeenCalled();
+  });
+
+  it("writes SOUL and USER when a rationale is given", async () => {
+    const bridge = vi.fn(async () => "Rewrote");
+    const res = await rethink(bridge).handler({ block: "SOUL", new_content: "new", rationale: "shifted" }, {});
+    expect(res.isError).toBeFalsy();
+    expect(bridge).toHaveBeenCalledWith({ block: "SOUL", content: "new", rationale: "shifted" });
+  });
+
+  it("writes NOW without a rationale", async () => {
+    const bridge = vi.fn(async () => "Rewrote NOW.md");
+    const res = await rethink(bridge).handler({ block: "NOW", new_content: "new" }, {});
+    expect(res.isError).toBeFalsy();
+    expect(bridge).toHaveBeenCalledWith({ block: "NOW", content: "new" });
   });
 });
