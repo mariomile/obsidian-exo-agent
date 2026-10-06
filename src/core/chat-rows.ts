@@ -24,6 +24,7 @@
 import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-cards";
 import { groupByTime, type TimeGroupLabel } from "./history";
 import { groupAcrossHomes, groupByParent, type GroupedConvo } from "./child-tree";
+import { effectiveSnoozed, snoozeWakeLabel } from "./snooze";
 
 /** The per-conversation facts the list needs. Structural, not `Convo` — this
  *  module stays ignorant of the view's types, the enumerator adapts. */
@@ -68,6 +69,10 @@ export interface ChatRowSource {
    *  the transcript. Absent unless a permission card is open on this
    *  conversation. */
   permRule?: string;
+  /** Snooze overlay (core/snooze). Persisted on the conversation; whether it
+   *  still hides the row is decided here, against `now`. */
+  snoozedUntil?: number;
+  snoozedAt?: number;
 }
 
 export interface ChatRow {
@@ -115,6 +120,9 @@ export interface ChatRow {
    *  (`reason === "perm"`). An open question has no rule to grant, so the row
    *  offers no inline decision. */
   permRule?: string;
+  /** Wake time, present only while the snooze is still in force: not elapsed
+   *  and no raised hand. Its presence is what files the row under Snoozed. */
+  snoozedUntil?: number;
 }
 
 /**
@@ -138,7 +146,7 @@ export type ChatListMode = "activity" | "days";
  * label being reworded or localized — a section keyed by its display text
  * loses its collapsed state the day someone renames "Settled".
  *
- * `day:` sections only exist in `days` mode; the five state sections only in
+ * `day:` sections only exist in `days` mode; the six state sections only in
  * `activity`. `related` can appear in either, and is always last.
  */
 export type ChatSectionKey =
@@ -146,6 +154,7 @@ export type ChatSectionKey =
   | "running"
   | "open"
   | "pinned"
+  | "snoozed"
   | "settled"
   | "related"
   | `day:${TimeGroupLabel}`;
@@ -163,7 +172,7 @@ export interface ChatListVM {
    * rather than named fields: the renderer's job is to iterate and paint, and
    * a fixed set of fields would make each new section a change in three files.
    *
-   * In `activity` mode: `needsYou`, `running`, `open`, `pinned`, `settled`.
+   * In `activity` mode: `needsYou`, `running`, `open`, `pinned`, `snoozed`, `settled`.
    * In `days` mode: one `day:` section per non-empty bucket, in time order.
    * Either way `related` comes last when a semantic pass supplied hits — rows
    * that do NOT contain what you typed, which is why they are a section of
@@ -200,6 +209,7 @@ const ACTIVITY_SECTIONS = [
   ["running", "Running"],
   ["open", "Open"],
   ["pinned", "Pinned"],
+  ["snoozed", "Snoozed"],
   ["settled", "Settled"],
 ] as const satisfies readonly (readonly [ChatSectionKey, string])[];
 
@@ -217,7 +227,9 @@ type ActivityKey = (typeof ACTIVITY_SECTIONS)[number][0];
  *  2. `running` — a turn is actually executing.
  *  3. `open` — in the tab strip, so deliberately kept to hand, but idle.
  *  4. `pinned` — kept across sessions, and not already above.
- *  5. `settled` — everything else, by recency, with no day sub-buckets.
+ *  5. `snoozed` — hidden until a wake time (core/snooze). Checked right after
+ *     a blocked lane, so a snooze outranks running, open, pinned and a badge.
+ *  6. `settled` — everything else, by recency, with no day sub-buckets.
  *
  * `lane` and `badge` are mutually exclusive by construction (`deriveLane`
  * only attaches a badge on the idle branch), so 1 and 2 cannot both apply.
@@ -234,6 +246,10 @@ type ActivityKey = (typeof ACTIVITY_SECTIONS)[number][0];
 export const needsYou = (r: ChatRow): boolean => r.lane === "needs-input" || !!r.badge;
 
 const activityKey = (r: ChatRow): ActivityKey => {
+  // A blocked chat never stays snoozed (it raised its hand, see core/snooze),
+  // but a badge does: snoozing a stopped chat is the user saying "seen, later".
+  if (r.lane === "needs-input") return "needsYou";
+  if (r.snoozedUntil !== undefined) return "snoozed";
   if (needsYou(r)) return "needsYou";
   if (r.lane === "running") return "running";
   if (r.open) return "open";
@@ -316,7 +332,18 @@ export function modelLabel(provider: string, model: string): string {
     .join(" ");
 }
 
+/** The age slot of a row: when it wakes while snoozed, how old it is
+ *  otherwise. One function so the signature and both row densities agree. */
+export function rowAge(r: Pick<ChatRow, "updatedAt" | "snoozedUntil">, now: number): string {
+  if (r.snoozedUntil !== undefined) return `wakes ${snoozeWakeLabel(r.snoozedUntil, now)}`;
+  return r.updatedAt ? relativeTime(r.updatedAt, now) : "";
+}
+
 const byRecency = (a: ChatRow, b: ChatRow): number => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+
+/** Snoozed shelf order: soonest wake first, it is the next one coming back. */
+const bySoonestWake = (a: ChatRow, b: ChatRow): number =>
+  (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0);
 
 /** Ordering inside `needsYou`: something blocked right now, waiting on an
  *  answer, outranks something that already finished badly. Then recency. */
@@ -335,6 +362,7 @@ const RANKED_SORT = (rank: (r: ChatRow) => number) => (a: ChatRow, b: ChatRow): 
 const SECTION_SORT: Partial<Record<ActivityKey, (a: ChatRow, b: ChatRow) => number>> = {
   needsYou: RANKED_SORT(NEEDS_YOU_RANK),
   open: RANKED_SORT(OPEN_RANK),
+  snoozed: bySoonestWake,
 };
 
 /**
@@ -461,7 +489,11 @@ export function buildChatList(
   }
 
   const rows: ChatRow[] = [];
-  for (const s of matched) rows.push(stampLive(toRow(s), s, deriveLane(s)));
+  for (const s of matched) {
+    const row = stampLive(toRow(s), s, deriveLane(s));
+    if (s.snoozedUntil !== undefined && effectiveSnoozed(s, opts.now)) row.snoozedUntil = s.snoozedUntil;
+    rows.push(row);
+  }
 
   // The needs-you strip, over `visible` rather than `matched` — see `blocked`
   // on ChatListVM for why it is built here, off to the side, instead of being

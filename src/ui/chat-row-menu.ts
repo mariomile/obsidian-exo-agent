@@ -14,7 +14,8 @@ import { App, Menu, Modal, Notice } from "obsidian";
 import type ExoPlugin from "../main";
 import type { ChatRow } from "../core/chat-rows";
 import { canSettleRow } from "../core/settle-note";
-import { settleToNote } from "./convo-bridge";
+import { setConvoSnoozed, settleToNote } from "./convo-bridge";
+import { snoozePresets } from "../core/snooze";
 
 /** What the menu needs from whoever opened it: the two hosts it calls into,
  *  and a way to ask for a repaint once a mutation lands. */
@@ -72,6 +73,23 @@ armed = false,
         ctx.repaint();
       }),
   );
+  // Absent on a blocked row, same reason as Settle below: a prompt hidden
+  // under a shelf is a prompt nobody answers.
+  if (r.snoozedUntil !== undefined) {
+    menu.addItem((i) =>
+      i.setTitle("Unsnooze").setIcon("alarm-clock-off").onClick(() => {
+        setConvoSnoozed(ctx.app, r.id, null);
+        ctx.repaint();
+      }),
+    );
+  } else if (r.lane !== "needs-input") {
+    menu.addItem((i) =>
+      i.setTitle("Snooze…").setIcon("alarm-clock").onClick(() => {
+        // Same re-open trick as Delete: Menu has no typed submenu API.
+        window.setTimeout(() => openSnoozeMenu(e, r, ctx), 0);
+      }),
+    );
+  }
   // Settled chats only. Not greyed out but ABSENT on a running or blocked
   // row: a chat mid-turn has no outcome to write down yet, and an item that
   // is permanently there and permanently dead teaches the user to ignore it.
@@ -130,6 +148,26 @@ armed = false,
         ctx.repaint();
       }),
   );
+  menu.showAtMouseEvent(e);
+}
+
+/** The snooze presets, as a second menu under the cursor. */
+function openSnoozeMenu(e: MouseEvent, r: ChatRow, ctx: ChatRowMenuContext): void {
+  const menu = new Menu();
+  for (const p of snoozePresets(new Date())) {
+    const when = new Date(p.until).toLocaleString(undefined, {
+      weekday: "short", hour: "numeric", minute: "2-digit",
+    });
+    menu.addItem((i) =>
+      i.setTitle(`${p.label} · ${when}`).onClick(() => {
+        if (!setConvoSnoozed(ctx.app, r.id, p.until)) {
+          new Notice("Couldn't snooze this chat. It is waiting on you, or Exo is not open.");
+          return;
+        }
+        ctx.repaint();
+      }),
+    );
+  }
   menu.showAtMouseEvent(e);
 }
 

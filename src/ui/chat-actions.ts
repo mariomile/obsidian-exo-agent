@@ -16,6 +16,7 @@ import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import { looksAutoTitled } from "../core/title-ownership";
 import { canSettle, type SettleSource } from "../core/settle-note";
+import { canSnooze } from "../core/snooze";
 import { adaptAppToSettleVault, settleConversationToNote } from "../obsidian/settle-note";
 import { ADAPTERS } from "../providers/registry";
 
@@ -34,6 +35,26 @@ export function setConvoPinned(view: ChatView, id: string, pinned: boolean): boo
   const c = find(view, id);
   if (!c) return false;
   if (c.pinned !== pinned) view.togglePin(c);
+  return true;
+}
+
+/**
+ * Snooze or wake (core/snooze). Refused while the chat waits on the user: an
+ * open prompt hidden under a shelf is a prompt nobody answers. Waking clears
+ * both fields, so a later snooze starts its "something happened" clock fresh.
+ */
+export function setConvoSnoozed(view: ChatView, id: string, until: number | null): boolean {
+  const c = find(view, id);
+  if (!c) return false;
+  if (until === null) {
+    c.snoozedUntil = undefined;
+    c.snoozedAt = undefined;
+  } else {
+    if (!canSnooze({ pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null })) return false;
+    c.snoozedUntil = until;
+    c.snoozedAt = Date.now();
+  }
+  view.persist();
   return true;
 }
 

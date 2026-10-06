@@ -43,6 +43,13 @@ export function setConvoPinned(app: App, convoId: string, pinned: boolean): bool
   return view ? actions.setConvoPinned(view, convoId, pinned) : false;
 }
 
+/** Snooze until `until`, or wake now with `null`. False when the chat is
+ *  blocked on the user, unknown, or Exo is not mounted. */
+export function setConvoSnoozed(app: App, convoId: string, until: number | null): boolean {
+  const view = chatView(app);
+  return view ? actions.setConvoSnoozed(view, convoId, until) : false;
+}
+
 /** Answer a conversation's open permission prompt from the chats sidebar. This
  *  is the ONLY route the pane has to a verdict: it never holds a `ChatView`. */
 export function decidePermission(app: App, convoId: string, verdict: "allow" | "deny"): boolean {

@@ -29,7 +29,7 @@ import type ExoPlugin from "../main";
 import {
   buildChatList,
   needsYou,
-  relativeTime,
+  rowAge,
   modelLabel,
   type ChatRow,
   type ChatSection,
@@ -653,7 +653,7 @@ export class ChatListView extends ItemView {
     const rich = r.lane != null || r.open || r.pinned;
     // The rendered AGE LABEL, not the raw `updatedAt` — see `chatRowSig`, which
     // owns the rest of that argument and everything a painted row depends on.
-    const age = r.updatedAt ? relativeTime(r.updatedAt, now) : "";
+    const age = rowAge(r, now);
     return {
       key: r.id,
       sig: chatRowSig(r, { rich, age }),
@@ -694,7 +694,7 @@ export class ChatListView extends ItemView {
     // trailing markers and age.
     if (r.pinned) setIcon(head.createSpan({ cls: "mva-chats-pin", attr: { "aria-label": "Pinned" } }), "pin");
     this.kidsToggleInto(head, r);
-    head.createSpan({ cls: "mva-chats-age", text: r.updatedAt ? relativeTime(r.updatedAt, now) : "" });
+    head.createSpan({ cls: "mva-chats-age", text: rowAge(r, now) });
 
     // The preview line carries the last exchange — or, while a tool is actually
     // running, what that tool is doing ("Searching the vault"). Same line, so a
@@ -813,7 +813,7 @@ export class ChatListView extends ItemView {
     if (r.pinned) setIcon(row.createSpan({ cls: "mva-chats-pin", attr: { "aria-label": "Pinned" } }), "pin");
     this.badgeInto(row, r);
     this.kidsToggleInto(row, r);
-    row.createSpan({ cls: "mva-chats-age", text: r.updatedAt ? relativeTime(r.updatedAt, now) : "" });
+    row.createSpan({ cls: "mva-chats-age", text: rowAge(r, now) });
     row.dataset.id = r.id;
     this.wireRow(row, r);
     return row;

@@ -1048,6 +1048,8 @@ export class ChatView extends ItemView {
         retiredAt: d.retiredAt,
         lastActiveAt: d.lastActiveAt,
         boardStatus: d.boardStatus,
+        snoozedUntil: d.snoozedUntil,
+        snoozedAt: d.snoozedAt,
         parentConvoId: d.parentConvoId,
         pendingChildReports: reviveChildReports(d.pendingChildReports),
         titleLocked: d.titleLocked === true,
@@ -1130,6 +1132,7 @@ export class ChatView extends ItemView {
       ...(c.retiredAt ? { retiredAt: c.retiredAt } : {}),
       ...(c.lastActiveAt ? { lastActiveAt: c.lastActiveAt } : {}),
       ...(c.boardStatus ? { boardStatus: c.boardStatus } : {}),
+      ...(c.snoozedUntil ? { snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt } : {}),
       ...(c.parentConvoId ? { parentConvoId: c.parentConvoId } : {}),
       // Capped at the queue itself (core/child-reports), so this writes exactly
       // what the parent is holding. An unread child report that did not survive
@@ -2181,6 +2184,8 @@ export class ChatView extends ItemView {
       // rows are allowed to show them.
       activity: c.activity,
       permRule: c.pendingDecision?.rule,
+      // The chat in front of you never hides behind a shelf (core/snooze).
+      ...(c !== this.active && c.snoozedUntil ? { snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt } : {}),
     }));
   }
 
