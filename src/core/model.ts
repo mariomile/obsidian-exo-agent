@@ -26,7 +26,9 @@ export type Segment =
 export type Checkpoint = Map<string, string | null>;
 
 export type Message =
-  | { role: "user"; text: string; at?: number }
+  /** `auto`: written by Exo, not typed by the user (a delegated task's report
+   *  waking its parent). Shown as a system line; never read as the user's words. */
+  | { role: "user"; text: string; at?: number; auto?: true }
   | {
       role: "assistant";
       segments: Segment[];
@@ -38,7 +40,7 @@ export type Message =
 /** On-disk form of a message: the checkpoint Map is stored as [path, content] entries.
  *  `at` (epoch ms) is optional — messages persisted before 0.14.0 don't carry it. */
 export type PersistedMessage =
-  | { role: "user"; text: string; at?: number }
+  | { role: "user"; text: string; at?: number; auto?: true }
   | {
       role: "assistant";
       segments: Segment[];

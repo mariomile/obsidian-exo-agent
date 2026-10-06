@@ -228,6 +228,8 @@ export interface Convo {
     researchMode?: ResearchModeState;
     /** Agent slug bound to this queued message (`@agent` picked before send). */
     agent?: string;
+    /** Written by Exo, not the user (core/model.ts `Message.auto`). */
+    auto?: true;
   }[];
   pendingEl: HTMLElement | null; // container for queued-message chips
   /** The in-flight assistant turn of THIS conversation (null when idle) — the

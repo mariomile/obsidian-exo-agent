@@ -10,6 +10,8 @@ import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import type { ConvoStateEvent } from "../core/convo-state";
 import {
+  MAX_AGENT_HOPS,
+  nextHop,
   formatTaskStatus,
   openChildTasks,
   ownedTask,
@@ -24,10 +26,22 @@ import { chatView } from "./convo-bridge";
 
 const byId = (view: ChatView, id: string): Convo | undefined => view.allConvos().find((c) => c.id === id);
 
+/** Agent-to-agent hop depth per chat (core/delegation.ts `nextHop`). Runtime
+ *  only: a restart is a fresh start, like a message from the user. */
+const agentHops = new Map<string, number>();
+
+/** The user wrote in this chat: whatever agents sent before no longer chains. */
+export function resetAgentChain(id: string): void {
+  agentHops.delete(id);
+}
+
 /** Send `text` into chat `id` as a user turn. Null when the chat is gone. */
-export function sendToConvo(view: ChatView, id: string, text: string, mode: SendMode): SendOutcome | null {
+export function sendToConvo(view: ChatView, id: string, text: string, mode: SendMode): SendOutcome | "stopping" | null {
   const c = byId(view, id);
   if (!c) return null;
+  // Stopped while its turn was still preparing: that turn ends without
+  // draining the queue, so a queued message would sit there unrun.
+  if (c.stopped && c.turnClaimed && !c.streaming) return "stopping";
   const canSteer = !c.researchMode.enabled && !!c.session?.steer;
   let outcome = planSend(mode, c.streaming, canSteer, !!c.turnClaimed);
   if (outcome === "steered") {
@@ -70,10 +84,10 @@ export function stopChildren(view: ChatView, parent: Convo): void {
  *  The report itself rides that turn (drainReportsForParent). */
 export function wakeParent(view: ChatView, parent: Convo, outcome: string): void {
   if (!shouldWakeParent(parent, outcome, view.openTabs.includes(parent.id))) return;
-  if (parent.streaming) {
-    parent.queue.push({ text: WAKE_TEXT });
+  if (parent.streaming || parent.turnClaimed) {
+    parent.queue.push({ text: WAKE_TEXT, auto: true });
     view.renderQueue(parent);
-  } else void view.runTurn(parent, WAKE_TEXT);
+  } else void view.runTurn(parent, WAKE_TEXT, undefined, { auto: true });
 }
 
 const blockCards = new Map<string, HTMLElement>();
@@ -146,7 +160,11 @@ export function sendToChat(plugin: ExoPlugin, fromId: string, id: string, text: 
   // A child talks to its parent through its report, never by sending: two
   // chats sending to each other would run turns with no human in the loop.
   if (byId(view, fromId)?.parentConvoId === id) return "That is the chat that delegated to you: your result reaches it when you finish.";
+  const hop = nextHop(agentHops, fromId);
+  if (hop === null) return `Refused: ${MAX_AGENT_HOPS} agent-to-agent messages in a row without the user. Ask the user before sending more.`;
   const outcome = sendToConvo(view, id, text, mode);
   if (!outcome) return `No open chat ${id}.`;
+  if (outcome === "stopping") return `Not sent: ${id} was just stopped. Try again in a moment.`;
+  agentHops.set(id, hop);
   return outcome === "sent" ? `Sent to ${id}; it is running now.` : outcome === "steered" ? `Folded into ${id}'s running turn.` : `Queued in ${id}; it runs after the current turn.`;
 }

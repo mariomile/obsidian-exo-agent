@@ -103,7 +103,7 @@ function renderCard(
 
   const meta = card.createDiv({ cls: "mva-card-meta" });
   meta.createSpan({ text: ADAPTERS[c.provider].displayName });
-  const count = c.messages.filter((m) => m.role === "user").length;
+  const count = c.messages.filter((m) => m.role === "user" && !m.auto).length;
   meta.createSpan({ text: `${count} message${count === 1 ? "" : "s"}` });
   if (c.updatedAt) meta.createSpan({ text: formatCompactDate(c.updatedAt) });
   // Only inside the retired group: elsewhere the retirement date answers a

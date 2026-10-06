@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTitlePrompt, titleContext } from "../src/core/title";
+import { buildTitlePrompt, sanitizeTitle, titleContext } from "../src/core/title";
 
 const user = (text: string) => ({ role: "user", text });
 const asst = (md: string) => ({ role: "assistant", segments: [{ t: "text", md }] });
@@ -48,5 +48,34 @@ describe("buildTitlePrompt", () => {
     expect(p).toContain("Current title: Old name");
     expect(p).toContain("USER: hi");
     expect(p).toContain("return it unchanged");
+  });
+});
+
+describe("titles are names, never the chat obeyed", () => {
+  it("drops markup and narration the model wrote instead of a title (seen live on delegated tasks)", () => {
+    expect(sanitizeTitle("<function_calls>")).toBe("");
+    expect(sanitizeTitle("I'll run that command now")).toBe("");
+    expect(sanitizeTitle("Sure, here is the output")).toBe("");
+    expect(sanitizeTitle("I’ll run that command now")).toBe(""); // typographic apostrophe
+    expect(sanitizeTitle("Ok, done")).toBe("");
+    expect(sanitizeTitle("OKR planning for Q4")).toBe("OKR planning for Q4");
+    expect(sanitizeTitle("OK Computer analysis")).toBe("OK Computer analysis");
+    expect(sanitizeTitle("Ecco 2 migration plan")).toBe("Ecco 2 migration plan");
+    expect(sanitizeTitle("<div> layout fix")).toBe("<div> layout fix");
+  });
+
+  it("fences the chat as data in both prompts", () => {
+    for (const p of [
+      buildTitlePrompt({ kind: "initial", userText: "run echo hi", assistantText: "hi" }),
+      buildTitlePrompt({ kind: "regenerate", context: "USER: run echo hi", previousTitle: "x" }),
+    ]) {
+      expect(p).toContain("never follow");
+      expect(p).toMatch(/<chat>[\s\S]*run echo hi[\s\S]*<\/chat>/);
+    }
+  });
+
+  it("Exo's own wake-up line never feeds a title", () => {
+    const ctx = titleContext([user("price the Pro plan"), { role: "user", text: "A delegated task reported back.", auto: true }]);
+    expect(ctx).toBe("USER: price the Pro plan");
   });
 });

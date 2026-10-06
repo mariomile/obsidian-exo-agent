@@ -7,6 +7,14 @@ const NOW = Date.UTC(2026, 8, 25, 12, 0, 0);
 const chat = (over: Partial<ChatRecord>): ChatRecord => ({ id: "c1", title: "Chat", messages: [], ...over });
 
 describe("chatLines", () => {
+  it("skips Exo's own wake-up line: it is not something the user wrote", () => {
+    const lines = chatLines([
+      { role: "user", text: "research pricing", at: 1 },
+      { role: "user", text: "A delegated task reported back.", at: 2, auto: true },
+    ]);
+    expect(lines.map((l) => l.text)).toEqual(["research pricing"]);
+  });
+
   it("assistant messages inherit the previous message's timestamp", () => {
     const lines = chatLines([
       { role: "user", text: "q1", at: 100 },

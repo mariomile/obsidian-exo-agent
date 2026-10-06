@@ -6,7 +6,7 @@ import type { Segment } from "./model";
 
 /** The slice of a message these helpers read: both the live `Message` and the
  *  on-disk `PersistedMessage` satisfy it. */
-export type ChatMessage = { role: "user"; text: string; at?: number } | { role: "assistant"; segments: Segment[] };
+export type ChatMessage = { role: "user"; text: string; at?: number; auto?: true } | { role: "assistant"; segments: Segment[] };
 
 /** The slice of a conversation these helpers read. */
 export interface ChatRecord {
@@ -41,6 +41,7 @@ export function chatLines(messages: readonly ChatMessage[]): ChatLine[] {
   for (const m of messages) {
     if (m.role === "user") {
       if (typeof m.at === "number") last = m.at;
+      if (m.auto) continue; // Exo's own line (a child's report waking its parent), not the user's words
       out.push({ role: "user", at: last, text: m.text, artifacts: [] });
       continue;
     }

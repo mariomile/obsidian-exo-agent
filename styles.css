@@ -1086,6 +1086,9 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-radius: var(--mva-r3);
   border-bottom-right-radius: var(--mva-r1);
 }
+/* Exo's own line (a child's report waking its parent): a note, not your bubble. */
+.mva-user.is-auto { align-items: center; }
+.mva-user.is-auto .mva-bubble { background: none; border: none; padding: 0; color: var(--text-faint); font-size: var(--font-ui-small); }
 .mva-assistant .mva-bubble {
   padding: 2px 0;
 }

@@ -154,7 +154,7 @@ function lastExchange(c: Convo): { userText: string; assistantText: string } | n
   if (!assistantText) return null;
   for (let j = i - 1; j >= 0; j--) {
     const m = msgs[j];
-    if (m.role === "user" && (m.text ?? "").trim()) {
+    if (m.role === "user" && !m.auto && (m.text ?? "").trim()) {
       return { userText: (m.text ?? "").trim(), assistantText };
     }
   }

@@ -126,11 +126,12 @@ export function resumeRows(convos: ResumeConvo[], now: number, cap = 5): Cockpit
 /** One-line preview from a persisted transcript: the last non-empty text
  *  (user text or assistant text segments), whitespace-collapsed, capped. */
 export function previewFromMessages(
-  messages: Array<{ role: string; text?: string; segments?: Array<{ t: string; md?: string }> }>,
+  messages: Array<{ role: string; text?: string; auto?: true; segments?: Array<{ t: string; md?: string }> }>,
   max = 70
 ): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
+    if (m.auto) continue; // Exo's own wake-up line, not what the chat is about
     const raw =
       m.role === "user"
         ? (m.text ?? "")

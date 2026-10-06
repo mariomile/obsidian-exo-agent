@@ -51,7 +51,8 @@ import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { retitleWithNotice } from "./ui/chat-commands";
-import { clearChildBlock, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
+import { clearChildBlock, resetAgentChain, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
+import { PARENT_STOPPED, spawnCancelledByStop } from "./core/delegation";
 import { addBuildInNewChat, renderImplementedLink } from "./ui/plan-handoff";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
@@ -1983,7 +1984,7 @@ export class ChatView extends ItemView {
    *  existing quick-add/task-store path. */
   async cmdPromoteToTask(): Promise<void> {
     const lastUser = [...this.active.messages].reverse().find((m): m is Extract<Message, { role: "user" }> =>
-      m.role === "user" && m.text.trim().length > 0
+      m.role === "user" && !m.auto && m.text.trim().length > 0
     );
     if (!lastUser) {
       new Notice("No user message in this conversation to promote yet.");
@@ -2073,6 +2074,7 @@ export class ChatView extends ItemView {
    * writing it after the send is safe.
    */
   startTaskConversation(prompt: string, opts?: { model?: string; parent?: string }): string {
+    if (opts?.parent && spawnCancelledByStop(this.allConvos().find((c) => c.id === opts.parent), Date.now())) throw new Error(PARENT_STOPPED);
     const prev = this.active ?? null;
     const id = this.askInNewConversation(prompt, true, opts);
     if (id && prev && prev.id !== id && this.convos.includes(prev)) this.switchTo(prev);
@@ -2180,7 +2182,7 @@ export class ChatView extends ItemView {
       archived: !!c.archived,
       open: open.has(c.id),
       pinned: c.pinned === true,
-      messageCount: c.messages.filter((m) => m.role === "user").length,
+      messageCount: c.messages.filter((m) => m.role === "user" && !m.auto).length,
       parentConvoId: c.parentConvoId,
       // "Finished while you were elsewhere", with no new persisted state:
       // lastActiveAt moves on focus, updatedAt on every turn. Active excluded —
@@ -2537,7 +2539,7 @@ export class ChatView extends ItemView {
     for (const m of c.messages) {
       const part =
         m.role === "user"
-          ? m.text
+          ? (m.auto ? "" : m.text)
           : m.segments
               .map((seg) =>
                 seg.t === "text"
@@ -2652,7 +2654,7 @@ export class ChatView extends ItemView {
       // `data-msg` = the MESSAGE index, which is what the re-entry band anchors on: a `.mva-turn` does NOT always have a message behind it (`ui/reentry.ts` `anchorTurn`).
       if (m.role === "user") {
         lastUser = m.text;
-        const el = c.listEl.createDiv({ cls: "mva-turn mva-user", attr: { "data-msg": i } });
+        const el = c.listEl.createDiv({ cls: m.auto ? "mva-turn mva-user is-auto" : "mva-turn mva-user", attr: { "data-msg": i } });
         void MarkdownRenderer.render(this.app, m.text, el.createDiv({ cls: "mva-bubble mva-type-body markdown-rendered" }), "", this);
         this.appendMsgTime(el, m.at);
       } else {
@@ -2883,7 +2885,7 @@ export class ChatView extends ItemView {
     return recall;
   }
 
-  addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): HTMLElement {
+  addUserTurn(c: Convo, text: string, images?: ImageAttachment[], auto?: true): HTMLElement {
     this.clearEmptyState(c);
     // Derive the tab title from the first message; canAutoTitle (core/title-ownership) decides what's untitled and whether it's locked.
     if (canAutoTitle(c, "first-message")) {
@@ -2892,8 +2894,8 @@ export class ChatView extends ItemView {
       this.refreshTabs(); // the title is a rendered fact: a state transition
     }
     const at = Date.now();
-    c.messages.push({ role: "user", text, at });
-    const el = c.listEl.createDiv({ cls: "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
+    c.messages.push(auto ? { role: "user", text, at, auto } : { role: "user", text, at });
+    const el = c.listEl.createDiv({ cls: auto ? "mva-turn mva-user is-auto" : "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
     const bubble = el.createDiv({ cls: "mva-bubble mva-type-body" });
     if (images?.length) {
       const strip = bubble.createDiv({ cls: "mva-bubble-images" });
@@ -4813,6 +4815,7 @@ export class ChatView extends ItemView {
     this.handoffPrefix = null;
     const c = this.active;
     if (!text && pendingImages.length === 0) return;
+    resetAgentChain(c.id); // a message from the user ends any agent-to-agent chain
     // `/compact [instructions]` is a local slash command, not a chat turn: route
     // it to compaction (mirrors the CLI, which intercepts /compact client-side)
     // instead of sending it to the model. Matches exactly "/compact" or
@@ -5001,7 +5004,7 @@ export class ChatView extends ItemView {
       new Notice("Wait for the current turn to finish, then set a goal.");
       return;
     }
-    c.goal = setGoal(arg, this.plugin.settings.goalMaxIterations, Date.now());
+    c.goal = setGoal(arg, this.plugin.settings.goalMaxIterations, Date.now()); resetAgentChain(c.id);
     this.composer.refreshGoal(c);
     // Kick off the first working turn toward the condition.
     void this.runTurn(c, arg);
@@ -5038,7 +5041,7 @@ export class ChatView extends ItemView {
       new Notice("Wait for the current turn to finish, then continue the goal.");
       return;
     }
-    c.goal = resumeGoal(c.goal);
+    c.goal = resumeGoal(c.goal); resetAgentChain(c.id);
     this.composer.refreshGoal(c);
     void this.runTurn(c, buildContinuationPrompt(c.goal.condition));
   }
@@ -5049,6 +5052,7 @@ export class ChatView extends ItemView {
    *  the composer (which just hands over the resolved steps). */
   submitWorkflow(c: Convo, steps: string[]): void {
     if (steps.length === 0) return;
+    resetAgentChain(c.id); // the user acted in this chat
     const [first, ...rest] = steps;
     for (const s of rest) c.queue.push({ text: s });
     if (c.streaming) {
@@ -5116,7 +5120,7 @@ export class ChatView extends ItemView {
       isRecoveryRetry?: boolean;
       reuseUserTurn?: boolean;
       researchMode?: ResearchModeState;
-      agent?: string;
+      agent?: string; auto?: true;
     }
   ): Promise<void> {
     if (c.turnClaimed) {
@@ -5124,6 +5128,7 @@ export class ChatView extends ItemView {
       return;
     }
     c.turnClaimed = true;
+    c.stopped = false; c.stopRequestedAt = undefined; // the turn starts at its claim: a Stop from here on is for it
     const myClaim = (c.turnClaimGen = (c.turnClaimGen ?? 0) + 1);
     try {
       await this.runTurnBody(c, text, images, opts);
@@ -5142,7 +5147,7 @@ export class ChatView extends ItemView {
       reuseUserTurn?: boolean;
       researchMode?: ResearchModeState;
       /** Agent slug bound to THIS turn (a `@agent` pick), overriding `c.agent`. */
-      agent?: string;
+      agent?: string; auto?: true;
     }
   ): Promise<void> {
     const researchMode = opts?.researchMode ?? c.researchMode;
@@ -5215,7 +5220,7 @@ export class ChatView extends ItemView {
     // only "user" entry in c.messages for this turn.
     const turnFrom = c.messages.length; // where THIS turn starts; the stretch before it is not its to mark read
     if (!opts?.isRecoveryRetry && !opts?.reuseUserTurn) {
-      const userEl = this.addUserTurn(c, text, imgs);
+      const userEl = this.addUserTurn(c, text, imgs, opts?.auto);
       // Quiet "Recalled N" row under the bubble: the trust surface, so the
       // injection is never invisible. Only when there was any.
       if (recalled) renderRecallRow(userEl, recalled, (p) => void this.app.workspace.openLinkText(p, "", "tab"));
@@ -5232,11 +5237,11 @@ export class ChatView extends ItemView {
     // Exo being stuck. Same idiom as the caret sweep in finalizeTurn: only this
     // new turn's own row can legitimately exist from here.
     c.listEl.querySelectorAll(".mva-working").forEach((el) => el.remove());
+    // Stopped while still preparing (recall, vault reads): no model call at all.
+    if (c.stopped) { c.updatedAt = Date.now(); this.refreshTabs(); return void this.plugin.emitConvoState(c.id, "stopped", { reason: "stopped" }); }
     const ctx = this.addAssistantTurn(c, text);
     c.currentCtx = ctx; // target for this conversation's ask_user cards
     this.reconcileLiveTasks(c); // drop orphaned/faded entries before this turn adds new ones
-    c.stopped = false;
-    c.stopRequestedAt = undefined;
     this.setStreaming(c, true);
 
     // Working indicator (Feature 1): a persistent Claude-Code-style row so the
@@ -5997,12 +6002,12 @@ export class ChatView extends ItemView {
         const next = c.queue.shift()!;
         this.renderQueue(c);
         const retryOpts =
-          next.isRecoveryRetry || next.sendPrefix || next.researchMode || next.agent
+          next.isRecoveryRetry || next.sendPrefix || next.researchMode || next.agent || next.auto
             ? {
                 sendPrefix: next.sendPrefix,
                 isRecoveryRetry: next.isRecoveryRetry,
                 researchMode: next.researchMode,
-                agent: next.agent,
+                agent: next.agent, auto: next.auto,
               }
             : undefined;
         // Hand the claim to the continuation (release + immediate re-claim
