@@ -185,6 +185,14 @@ describe("queueReportForParent — routing", () => {
     ...over,
   });
 
+  it("one report per task: a newer outcome replaces the older (blocked, then done)", () => {
+    const parent = holder("convo-parent");
+    queueReportForParent([parent], report({ outcome: "blocked", at: 1 }));
+    queueReportForParent([parent], report({ taskId: "task-2", at: 2 }));
+    queueReportForParent([parent], report({ outcome: "done", at: 3 }));
+    expect(parent.pendingChildReports!.map((r) => `${r.taskId}:${r.outcome}`)).toEqual(["task-2:done", "task-1:done"]);
+  });
+
   it("queues onto the conversation named by parentConvoId", () => {
     const parent = holder("convo-parent");
     const other = holder("convo-other");

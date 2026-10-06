@@ -37,6 +37,7 @@ import {
 import type { ConvoStateEvent, ConvoStateListener, Unsubscribe } from "../core/convo-state";
 import type { TaskEntry, TaskPatch, TaskStatus } from "../core/tasks";
 import { buildExcerpt, outcomeFromState, REPORT_DEBOUNCE_MS, type ChildReport } from "../core/child-reports";
+import { PARENT_STOPPED } from "../core/delegation";
 
 /** The driver-facing slice of the B3 `TaskStore` (kept structural so tests can
  *  inject a fake without the real store / WriteQueue). */
@@ -443,11 +444,21 @@ export class OrchestratorDriver {
       // surface a Notice + (implicitly) a badge on the card via the state.
       const msg = err instanceof Error ? err.message : String(err);
       const failedTask = this.tasks.find((t) => t.id === effect.taskId);
+      // Its parent was stopped mid-spawn: the stop meant this task too.
+      // Archived quietly, never shown as a failure (core/delegation.ts).
+      const cancelled = msg === PARENT_STOPPED;
       this.tasks = this.tasks.map((t) =>
-        t.id === effect.taskId ? { ...t, status: "needs-input", inputReason: "error", chatMissing: undefined } : t
+        t.id !== effect.taskId
+          ? t
+          : cancelled
+            ? { ...t, status: "archived", chatMissing: undefined }
+            : { ...t, status: "needs-input", inputReason: "error", chatMissing: undefined }
       );
-      await this.deps.store.update(effect.taskId, { status: "needs-input" }).catch(() => undefined);
-      this.deps.notify(`Couldn't start task: ${msg}`);
+      if (cancelled) await this.deps.store.archive(effect.taskId).catch(() => undefined);
+      else {
+        await this.deps.store.update(effect.taskId, { status: "needs-input" }).catch(() => undefined);
+        this.deps.notify(`Couldn't start task: ${msg}`);
+      }
       this.emitChange();
 
       // A child that never got a convo never emits a convo-state event, so
@@ -455,7 +466,7 @@ export class OrchestratorDriver {
       // forever on a report that can never arrive. Queue one directly, through
       // the SAME batched/debounced path (keyed by task id), so a parent with
       // several children in flight still gets one message, not a partial set.
-      if (this.deps.onChildReport && failedTask?.parent) {
+      if (!cancelled && this.deps.onChildReport && failedTask?.parent) {
         this.pendingReports.set(failedTask.id, {
           taskId: failedTask.id,
           // No convo was ever created — hence `parentConvoId` on the report:

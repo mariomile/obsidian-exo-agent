@@ -70,6 +70,11 @@ export function queueReportForParent<T extends ReportHolder>(
   const parent = convos.find((c) => c.id === report.parentConvoId);
   if (!parent) return undefined;
   const queued = (parent.pendingChildReports ??= []);
+  // One report per task: a newer outcome replaces the older one, so a child
+  // that was "blocked" on an approval and then finished reaches its parent as
+  // "done", not as both.
+  const same = queued.findIndex((r) => r.taskId === report.taskId);
+  if (same >= 0) queued.splice(same, 1);
   queued.push(report);
   // Drop the OLDEST past the cap: a stale report is the one whose news has
   // least chance of still mattering to the next turn.

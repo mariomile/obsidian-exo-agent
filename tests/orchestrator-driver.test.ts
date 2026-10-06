@@ -3,6 +3,7 @@ import { OrchestratorDriver, type DriverDeps } from "../src/obsidian/orchestrato
 import type { ConvoStateEvent, ConvoStateListener, Unsubscribe } from "../src/core/convo-state";
 import type { TaskEntry, TaskStatus, TaskPatch } from "../src/core/tasks";
 import type { ConvoSnapshot } from "../src/core/orchestrator";
+import { PARENT_STOPPED } from "../src/core/delegation";
 import {
   REPORT_DEBOUNCE_MS,
   queueReportForParent,
@@ -295,6 +296,23 @@ describe("OrchestratorDriver — spawn failure", () => {
     const t = driver.snapshot().find((x) => x.id === "task-1")!;
     expect(t.status).toBe("needs-input");
     expect(deps.notify).toHaveBeenCalled();
+  });
+
+  it("a child whose parent was stopped mid-spawn is archived quietly: no notice, no report", async () => {
+    const { deps, backing } = makeDeps([task({ id: "task-1", order: 0, parent: "P" })]);
+    deps.spawn = vi.fn(async () => {
+      throw new Error(PARENT_STOPPED);
+    });
+    deps.onChildReport = vi.fn();
+    const driver = new OrchestratorDriver(deps);
+    await driver.start();
+    await driver.enqueue("task-1");
+    await flush();
+    await new Promise((r) => setTimeout(r, REPORT_DEBOUNCE_MS + 50));
+    expect(driver.snapshot().find((x) => x.id === "task-1")!.status).toBe("archived");
+    expect(backing.store.archive).toHaveBeenCalledWith("task-1");
+    expect(deps.notify).not.toHaveBeenCalled();
+    expect(deps.onChildReport).not.toHaveBeenCalled();
   });
 
   it("spawn resolving to an empty convo id is a failure: parks in needs-input(error) + notifies", async () => {

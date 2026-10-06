@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  MAX_AGENT_HOPS,
+  nextHop,
   formatChatTranscript,
   formatTaskStatus,
   openChildTasks,
@@ -39,6 +41,9 @@ describe("shouldWakeParent", () => {
   });
   it("a stopped child's report waits for the parent's next turn, even after the user typed again", () => {
     expect(shouldWakeParent(idle, "stopped", true)).toBe(false);
+  });
+  it("a blocked child does not wake the parent: its card is already there", () => {
+    expect(shouldWakeParent(idle, "blocked", true)).toBe(false);
   });
   it("never runs a turn in a parent that was closed or archived", () => {
     expect(shouldWakeParent(idle, "done", false)).toBe(false);
@@ -86,5 +91,27 @@ describe("formatChatTranscript", () => {
     ];
     const out = formatChatTranscript({ id: "c1", title: "Pricing", messages }, 1000);
     expect(out).toBe("Pricing (id c1)\n\n[Earlier messages omitted]\n\nASSISTANT: answer\n\nUSER: latest ask");
+  });
+});
+
+describe("nextHop (send_to_chat loop guard)", () => {
+  it("allows a chain up to the cap, then refuses, even if every send is approved", () => {
+    const depths = new Map<string, number>();
+    let from = "A";
+    const hops: (number | null)[] = [];
+    for (let i = 0; i < MAX_AGENT_HOPS + 1; i++) {
+      const to = from === "A" ? "B" : "A";
+      const h = nextHop(depths, from);
+      hops.push(h);
+      if (h !== null) depths.set(to, h);
+      from = to;
+    }
+    expect(hops).toEqual([1, 2, 3, null]);
+  });
+  it("a chat the user just wrote in starts again from zero", () => {
+    const depths = new Map([["A", 3]]);
+    expect(nextHop(depths, "A")).toBeNull();
+    depths.delete("A");
+    expect(nextHop(depths, "A")).toBe(1);
   });
 });
