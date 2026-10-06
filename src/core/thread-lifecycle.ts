@@ -32,6 +32,15 @@ const MORNING_HOUR = 9;
 /** T3's default for `sidebarAutoSettleAfterDays`. */
 export const AUTO_SETTLE_AFTER_MS = 3 * DAY;
 
+/** The auto-settle choices offered in the chats sidebar menu, in days. 0 = off. */
+export const AUTO_SETTLE_DAY_CHOICES = [0, 1, 3, 7, 14, 30] as const;
+
+/** The setting (days, 0 = off) as the quiet time `effectiveSettled` takes.
+ *  Anything that is not a positive finite number reads as off. */
+export function autoSettleMs(days: number | undefined): number | null {
+  return typeof days === "number" && Number.isFinite(days) && days > 0 ? days * DAY : null;
+}
+
 /** The persisted lifecycle fields of one conversation. */
 export interface LifecycleFields {
   snoozedUntil?: number;
@@ -181,10 +190,15 @@ export function returnedAt(s: Pick<LifecycleShell, "updatedAt" | "unsettledAt" |
 /**
  * Is this chat on the Settled shelf right now? Never while it is in front of
  * you, pinned, running, or waiting on you. By hand: settled until a turn lands
- * after the settle. Automatically: after `AUTO_SETTLE_AFTER_MS` of quiet, unless
- * it is an open tab, has news waiting, or the user took it back out by hand.
+ * after the settle. Automatically: after `quietMs` of quiet (null = never),
+ * unless it is an open tab, has news waiting, or the user took it back out by
+ * hand.
  */
-export function effectiveSettled(s: LifecycleShell, now: number): boolean {
+export function effectiveSettled(
+  s: LifecycleShell,
+  now: number,
+  quietMs: number | null = AUTO_SETTLE_AFTER_MS,
+): boolean {
   if (s.focused || s.pinned || s.streaming || blockedOnUser(s)) return false;
   if (s.settledOverride === "active") return false;
   if (s.settledOverride === "settled") {
@@ -193,8 +207,8 @@ export function effectiveSettled(s: LifecycleShell, now: number): boolean {
     // Activity after the settle brought it back; from here it ages like any
     // other chat, which is what T3 does once the run clears the override.
   }
-  if (s.open || s.pendingReport) return false;
-  return returnedAt(s, now) < now - AUTO_SETTLE_AFTER_MS;
+  if (quietMs === null || s.open || s.pendingReport) return false;
+  return returnedAt(s, now) < now - quietMs;
 }
 
 /**
@@ -208,10 +222,10 @@ export function canSettleThread(s: Pick<LifecycleShell, "streaming" | "pendingPe
 
 /** Which shelf. Pinned first (it overrides everything), then the two ways a
  *  chat is put away, then the inbox. */
-export function shelfOf(s: LifecycleShell, now: number): Shelf {
+export function shelfOf(s: LifecycleShell, now: number, quietMs: number | null = AUTO_SETTLE_AFTER_MS): Shelf {
   if (s.pinned) return "pinned";
   if (!s.focused && effectiveSnoozed(s, now)) return "snoozed";
-  if (effectiveSettled(s, now)) return "settled";
+  if (effectiveSettled(s, now, quietMs)) return "settled";
   return "inbox";
 }
 

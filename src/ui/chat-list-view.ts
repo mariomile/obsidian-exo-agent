@@ -37,6 +37,7 @@ import {
 } from "../core/chat-rows";
 import type { ChatSectionKey } from "../core/chat-rows";
 import { openChatRowMenu } from "./chat-row-menu";
+import { addAutoSettleItems } from "./auto-settle-menu";
 import {
   chatDot,
   chatRowSig,
@@ -248,6 +249,11 @@ export class ChatListView extends ItemView {
       );
     pick("activity", "Group by activity", "layers");
     pick("days", "Group by day", "calendar-days");
+    addAutoSettleItems(menu, this.plugin.settings.chatsAutoSettleDays, (days) => {
+      this.plugin.settings.chatsAutoSettleDays = days;
+      void this.plugin.saveSettings();
+      this.paint();
+    });
     menu.showAtMouseEvent(e);
   }
 
@@ -308,6 +314,7 @@ export class ChatListView extends ItemView {
       query: this.query,
       now,
       mode: this.mode(),
+      autoSettleDays: this.plugin.settings.chatsAutoSettleDays,
       // Only feed the ranking back in if it answered the query on screen.
       semanticIds: this.semanticFor === this.query.trim() ? this.semanticIds : [],
     });

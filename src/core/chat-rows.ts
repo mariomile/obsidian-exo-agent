@@ -26,6 +26,7 @@ import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-
 import { groupByTime, type TimeGroupLabel } from "./history";
 import { groupAcrossHomes, groupByParent, type GroupedConvo } from "./child-tree";
 import {
+  autoSettleMs,
   returnedAt,
   shelfOf,
   snoozeWakeLabel,
@@ -415,8 +416,8 @@ function stampLive(row: ChatRow, s: ChatRowSource, d: ReturnType<typeof deriveLa
  * the woke marker, which rides on `unseen` (a chat that came back from a snooze
  * since you last looked is news, exactly like a reply you have not read).
  */
-function stampShelf(row: ChatRow, s: ChatRowSource, now: number): ChatRow {
-  row.shelf = shelfOf({ ...s, focused: s.focused === true }, now);
+function stampShelf(row: ChatRow, s: ChatRowSource, now: number, quietMs: number | null): ChatRow {
+  row.shelf = shelfOf({ ...s, focused: s.focused === true }, now, quietMs);
   row.returnedAt = returnedAt(s, now);
   if (row.shelf === "snoozed") row.snoozedUntil = s.snoozedUntil;
   if (row.shelf === "settled" && s.settledOverride === "settled" && s.settledAt !== undefined) {
@@ -472,7 +473,14 @@ function stampNesting(grouped: readonly GroupedConvo<ChatRow>[]): ChatRow[] {
  */
 export function buildChatList(
   sources: readonly ChatRowSource[],
-  opts: { query: string; now: number; mode?: ChatListMode; semanticIds?: readonly string[] },
+  opts: {
+    query: string;
+    now: number;
+    mode?: ChatListMode;
+    semanticIds?: readonly string[];
+    /** Auto-settle after this many quiet days; 0 = never. Default 3. */
+    autoSettleDays?: number;
+  },
 ): ChatListVM {
   const mode = opts.mode ?? "activity";
   const visible = sources.filter((s) => !s.archived && deriveLane(s).lane !== "idle");
@@ -496,7 +504,8 @@ export function buildChatList(
   }
 
   const rows: ChatRow[] = [];
-  for (const s of matched) rows.push(stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now));
+  const quietMs = autoSettleMs(opts.autoSettleDays ?? 3);
+  for (const s of matched) rows.push(stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now, quietMs));
 
   // The needs-you strip, over `visible` rather than `matched` — see `blocked`
   // on ChatListVM for why it is built here, off to the side, instead of being

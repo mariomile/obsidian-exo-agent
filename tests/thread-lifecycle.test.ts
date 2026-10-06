@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   AUTO_SETTLE_AFTER_MS,
+  autoSettleMs,
   canSettleThread,
   canSnooze,
   effectiveSettled,
@@ -287,5 +288,29 @@ describe("chats sidebar: an errored child is never folded away", () => {
       ["inbox", ["c"]],
       ["settled", ["p"]],
     ]);
+  });
+});
+
+describe("auto-settle setting", () => {
+  it("reads days as quiet time, and 0 or garbage as never", () => {
+    expect(autoSettleMs(7)).toBe(7 * DAY);
+    expect(autoSettleMs(0)).toBeNull();
+    expect(autoSettleMs(undefined)).toBeNull();
+    expect(autoSettleMs(NaN)).toBeNull();
+  });
+
+  it("is honoured by the sidebar: off keeps old chats in the inbox, 7 days waits longer", () => {
+    const old = src({ id: "old", updatedAt: NOON - 4 * DAY });
+    const at = (autoSettleDays?: number) =>
+      buildChatList([old], { query: "", now: NOON, autoSettleDays }).sections.map((x) => x.key);
+    expect(at()).toEqual(["settled"]);
+    expect(at(0)).toEqual(["inbox"]);
+    expect(at(7)).toEqual(["inbox"]);
+    expect(at(1)).toEqual(["settled"]);
+  });
+
+  it("never touches a chat settled by hand", () => {
+    const byHand = src({ id: "h", settledOverride: "settled", settledAt: NOON - 1 });
+    expect(buildChatList([byHand], { query: "", now: NOON, autoSettleDays: 0 }).sections[0].key).toBe("settled");
   });
 });
