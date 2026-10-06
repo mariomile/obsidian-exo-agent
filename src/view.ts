@@ -51,7 +51,7 @@ import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { retitleWithNotice } from "./ui/chat-commands";
-import { stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
+import { clearChildBlock, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
@@ -2117,7 +2117,7 @@ export class ChatView extends ItemView {
     parent.unread = true;
     this.refreshTabs();
     this.persist();
-    wakeParent(this, parent); // T3: a child's report wakes its parent, no polling
+    wakeParent(this, parent, report.outcome); // T3: a child's report wakes its parent, no polling
   }
 
   /**
@@ -4643,6 +4643,7 @@ export class ChatView extends ItemView {
     if (kind === "perm") c.pendingPerm = cancel;
     else c.pendingAsk = cancel;
     if (kind === "perm" && !cancel) c.pendingDecision = null;
+    if (!cancel) clearChildBlock(c.id); // its card in the parent, if it is a delegated child
     this.refreshTabs();
   }
 

@@ -74,7 +74,7 @@ export function buildChatTools(app: App, convoId: string, orchestration: boolean
       if (!p) return err("Exo isn't loaded.");
       if (args.chat_id === convoId) return err("That is this chat.");
       if (!args.message.trim()) return err("The message is empty.");
-      return ok((await delegation()).sendToChat(p, args.chat_id, args.message, args.mode ?? "auto"));
+      return ok((await delegation()).sendToChat(p, convoId, args.chat_id, args.message, args.mode ?? "auto"));
     },
   );
 

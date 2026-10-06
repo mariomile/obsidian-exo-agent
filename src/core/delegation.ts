@@ -15,7 +15,11 @@ export type SendMode = "auto" | "queue" | "steer";
 export type SendOutcome = "sent" | "queued" | "steered";
 
 /** Pure choice of what a send does, given the target chat's state. */
-export function planSend(mode: SendMode, streaming: boolean, canSteer: boolean): SendOutcome {
+export function planSend(mode: SendMode, streaming: boolean, canSteer: boolean, claimed = false): SendOutcome {
+  // A claimed turn still in its preamble (recall, vault reads) is not
+  // streaming yet, but a second runTurn would be declined and the message lost.
+  // It cannot be steered either: there is no live turn to fold into.
+  if (claimed && !streaming) return "queued";
   if (!streaming) return "sent";
   return mode === "steer" && canSteer ? "steered" : "queued";
 }
@@ -24,12 +28,20 @@ export function planSend(mode: SendMode, streaming: boolean, canSteer: boolean):
  *  reports themselves ride the same turn (drainReportsForParent). */
 export const WAKE_TEXT = "A delegated task reported back. Continue with its result.";
 
-/** Should a report start (or queue) a parent turn? Not when the user stopped
- *  the parent: a stop also stops its children, and their "stopped" reports must
- *  not restart what the user just stopped. Not twice: one wake carries every
- *  report waiting at that point. */
-export function shouldWakeParent(p: { stopped: boolean; queue: readonly { text: string }[] }): boolean {
-  return !p.stopped && !p.queue.some((q) => q.text === WAKE_TEXT);
+/** Should a report start (or queue) a parent turn?
+ *  - Not for a "stopped" child: a stop usually came from the user (often via
+ *    the parent's own Stop), and restarting the parent over it would undo the
+ *    stop. That report rides the parent's next turn instead.
+ *  - Not when the user stopped the parent and has not spoken since.
+ *  - Not for a parent that was closed or archived: a turn nobody can see.
+ *  - Not twice: one wake carries every report waiting at that point. */
+export function shouldWakeParent(
+  p: { stopped: boolean; archived?: boolean; queue: readonly { text: string }[] },
+  outcome: string,
+  open: boolean,
+): boolean {
+  if (outcome === "stopped" || p.stopped || p.archived || !open) return false;
+  return !p.queue.some((q) => q.text === WAKE_TEXT);
 }
 
 /** A child task the asking chat owns, or a refusal it can read. */

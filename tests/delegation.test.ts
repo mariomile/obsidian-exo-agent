@@ -23,15 +23,26 @@ describe("planSend", () => {
     expect(planSend("steer", true, true)).toBe("steered");
     expect(planSend("steer", true, false)).toBe("queued");
   });
+  it("a turn still in its preamble counts as busy, so the message is queued, not lost", () => {
+    for (const m of ["auto", "queue", "steer"] as const) expect(planSend(m, false, true, true)).toBe("queued");
+  });
 });
 
 describe("shouldWakeParent", () => {
-  it("wakes an idle or busy parent once", () => {
-    expect(shouldWakeParent({ stopped: false, queue: [] })).toBe(true);
-    expect(shouldWakeParent({ stopped: false, queue: [{ text: WAKE_TEXT }] })).toBe(false);
+  const idle = { stopped: false, queue: [] };
+  it("wakes an open parent once", () => {
+    expect(shouldWakeParent(idle, "done", true)).toBe(true);
+    expect(shouldWakeParent({ stopped: false, queue: [{ text: WAKE_TEXT }] }, "done", true)).toBe(false);
   });
   it("never restarts a parent the user stopped", () => {
-    expect(shouldWakeParent({ stopped: true, queue: [] })).toBe(false);
+    expect(shouldWakeParent({ stopped: true, queue: [] }, "done", true)).toBe(false);
+  });
+  it("a stopped child's report waits for the parent's next turn, even after the user typed again", () => {
+    expect(shouldWakeParent(idle, "stopped", true)).toBe(false);
+  });
+  it("never runs a turn in a parent that was closed or archived", () => {
+    expect(shouldWakeParent(idle, "done", false)).toBe(false);
+    expect(shouldWakeParent({ ...idle, archived: true }, "done", true)).toBe(false);
   });
 });
 

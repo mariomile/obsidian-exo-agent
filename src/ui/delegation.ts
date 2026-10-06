@@ -29,7 +29,7 @@ export function sendToConvo(view: ChatView, id: string, text: string, mode: Send
   const c = byId(view, id);
   if (!c) return null;
   const canSteer = !c.researchMode.enabled && !!c.session?.steer;
-  let outcome = planSend(mode, c.streaming, canSteer);
+  let outcome = planSend(mode, c.streaming, canSteer, !!c.turnClaimed);
   if (outcome === "steered") {
     let steered = false;
     try {
@@ -58,7 +58,7 @@ export function sendToConvo(view: ChatView, id: string, text: string, mode: Send
  *  `stop()`, which recurses through it for grandchildren. */
 export function stopChildren(view: ChatView, parent: Convo): void {
   for (const k of view.allConvos()) {
-    if (k.parentConvoId === parent.id && (k.streaming || k.queue.length) && !k.stopped) view.stop("button", k);
+    if (k.parentConvoId === parent.id && (k.streaming || k.turnClaimed || k.queue.length) && !k.stopped) view.stop("button", k);
   }
   const orch = view.plugin.orchestration;
   for (const t of openChildTasks(orch.snapshot(), parent.id)) {
@@ -68,8 +68,8 @@ export function stopChildren(view: ChatView, parent: Convo): void {
 
 /** A child reported back: run the parent now, or right after its current turn.
  *  The report itself rides that turn (drainReportsForParent). */
-export function wakeParent(view: ChatView, parent: Convo): void {
-  if (!shouldWakeParent(parent)) return;
+export function wakeParent(view: ChatView, parent: Convo, outcome: string): void {
+  if (!shouldWakeParent(parent, outcome, view.openTabs.includes(parent.id))) return;
   if (parent.streaming) {
     parent.queue.push({ text: WAKE_TEXT });
     view.renderQueue(parent);
@@ -78,6 +78,13 @@ export function wakeParent(view: ChatView, parent: Convo): void {
 
 const blockCards = new Map<string, HTMLElement>();
 
+/** The child's approval card in its parent goes when the child's prompt
+ *  closes, wherever it was answered (setPendingCard calls this). */
+export function clearChildBlock(childId: string): void {
+  blockCards.get(childId)?.remove();
+  blockCards.delete(childId);
+}
+
 /**
  * Convo-state listener: when a child stops on a permission or a question, the
  * parent's transcript gets a card naming the child, with Allow/Deny for a
@@ -85,8 +92,7 @@ const blockCards = new Map<string, HTMLElement>();
  * on, whoever answered.
  */
 export function surfaceChildBlock(view: ChatView, e: ConvoStateEvent): void {
-  blockCards.get(e.convoId)?.remove();
-  blockCards.delete(e.convoId);
+  clearChildBlock(e.convoId);
   if (e.state !== "needs-input" || (e.reason !== "perm" && e.reason !== "ask")) return;
   const child = byId(view, e.convoId);
   const parent = child?.parentConvoId ? byId(view, child.parentConvoId) : undefined;
@@ -101,14 +107,9 @@ export function surfaceChildBlock(view: ChatView, e: ConvoStateEvent): void {
   const decision = e.reason === "perm" ? child.pendingDecision : null;
   if (decision?.rule) card.createDiv({ cls: "mva-perm-detail", text: decision.rule });
   const actions = card.createDiv({ cls: "mva-perm-actions" });
-  const answer = (fn: () => void) => () => {
-    fn();
-    card.remove();
-    blockCards.delete(child.id);
-  };
   if (decision) {
-    actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Allow once" }).onclick = answer(decision.allow);
-    actions.createEl("button", { cls: "mva-btn", text: "Deny" }).onclick = answer(decision.deny);
+    actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Allow once" }).onclick = () => decision.allow();
+    actions.createEl("button", { cls: "mva-btn", text: "Deny" }).onclick = () => decision.deny();
   }
   actions.createEl("button", { cls: "mva-btn", text: "Open" }).onclick = () => view.openConvoById(child.id);
   blockCards.set(child.id, card);
@@ -139,9 +140,12 @@ export async function cancelTask(plugin: ExoPlugin, parentId: string, taskId: st
   return `Cancelled ${t.id}: ${t.title}.`;
 }
 
-export function sendToChat(plugin: ExoPlugin, id: string, text: string, mode: SendMode): string {
+export function sendToChat(plugin: ExoPlugin, fromId: string, id: string, text: string, mode: SendMode): string {
   const view = viewOf(plugin);
   if (!view) return "Exo's chat view isn't open.";
+  // A child talks to its parent through its report, never by sending: two
+  // chats sending to each other would run turns with no human in the loop.
+  if (byId(view, fromId)?.parentConvoId === id) return "That is the chat that delegated to you: your result reaches it when you finish.";
   const outcome = sendToConvo(view, id, text, mode);
   if (!outcome) return `No open chat ${id}.`;
   return outcome === "sent" ? `Sent to ${id}; it is running now.` : outcome === "steered" ? `Folded into ${id}'s running turn.` : `Queued in ${id}; it runs after the current turn.`;
