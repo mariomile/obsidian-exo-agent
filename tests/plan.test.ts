@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planInputParts, planRecapLabel, planStateText } from "../src/core/plan";
+import { planInputParts, planRecapLabel, planStateText, planHandoffPrompt, PLAN_HANDOFF_DENY } from "../src/core/plan";
 
 describe("planInputParts", () => {
   it("extracts inline plan markdown + file path (verified ExitPlanMode shape)", () => {
@@ -41,5 +41,18 @@ describe("planStateText", () => {
     expect(planStateText(true, true)).toBe("Plan approved — building");
     expect(planStateText(false)).toBe("Revision requested");
     expect(planStateText(null)).toBe("Plan proposed");
+  });
+});
+
+describe("Build in new chat (T3 'Implement in new thread')", () => {
+  it("hands the new chat the plan and nothing else", () => {
+    expect(planHandoffPrompt("  ## Steps\n1. Do it\n")).toBe("Implement this plan.\n\n## Steps\n1. Do it");
+  });
+
+  it("tells the planning chat to stop, and its card says where the plan went", () => {
+    expect(PLAN_HANDOFF_DENY).toMatch(/do not implement it in this chat/);
+    expect(planStateText(true, true, true)).toBe("Implemented in");
+    expect(planStateText(true, false, true)).toBe("Implemented in");
+    expect(planStateText(true, true)).not.toBe("Implemented in");
   });
 });

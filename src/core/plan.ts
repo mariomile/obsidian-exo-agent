@@ -42,8 +42,22 @@ export function planRecapLabel(approved: boolean | null): string {
 
 /** Settled state line shown on a resolved plan card. `building` adds the live
  *  "— building" nuance right after approval; restored cards pass it false. */
-export function planStateText(approved: boolean | null, building = false): string {
+export function planStateText(approved: boolean | null, building = false, handedOff = false): string {
+  if (handedOff) return "Implemented in";
   if (approved === true) return building ? "Plan approved — building" : "Plan approved";
   if (approved === false) return "Revision requested";
   return "Plan proposed";
 }
+
+/**
+ * The first and only message of a "Build in new chat" child, as in T3 Code's
+ * "Implement in new thread": the approved plan, nothing of the conversation
+ * that produced it, so the build starts with a clean context.
+ */
+export function planHandoffPrompt(md: string): string {
+  return `Implement this plan.\n\n${md.trim()}`;
+}
+
+/** What the planning chat's agent is told when its plan leaves for a new chat. */
+export const PLAN_HANDOFF_DENY =
+  "The user approved this plan and is building it in a separate chat. Stop here: do not implement it in this chat.";

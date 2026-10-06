@@ -52,6 +52,7 @@ import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { retitleWithNotice } from "./ui/chat-commands";
 import { clearChildBlock, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
+import { addBuildInNewChat, renderImplementedLink } from "./ui/plan-handoff";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
@@ -2685,7 +2686,7 @@ export class ChatView extends ItemView {
             // as "proposed" but treated as not-approved for the state line.
             flushRun();
             const card = body.createDiv({ cls: "mva-plan-card" });
-            this.renderPlanSettled(card, s.md, s.approved === true);
+            this.renderPlanSettled(card, s.md, s.approved === true, false, s.implementedIn);
           } else if (s.t === "artifact") {
             flushRun();
             this.buildArtifactCard(body, s.path, m.checkpoint);
@@ -4176,7 +4177,7 @@ export class ChatView extends ItemView {
       this.setPendingCard(c, "perm", null);
       seg.approved = approved;
       // building=true only on a live approval — the historical/restored card omits it.
-      this.renderPlanSettled(card, md, approved, approved);
+      this.renderPlanSettled(card, md, approved, approved, seg.implementedIn);
       resolve(d);
     };
 
@@ -4185,19 +4186,22 @@ export class ChatView extends ItemView {
     this.plugin.emitConvoState(c.id, "needs-input", { reason: "perm" }); // fire-and-forget board hook (no-op when off; can't throw)
 
     const actions = card.createDiv({ cls: "mva-plan-actions" });
-    actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Approve & build" }).onclick = () => {
-      // Restore the pre-plan permission mode so subsequent build actions are
-      // gated normally (setting + live session + perm chip all in sync).
+    // Restore the pre-plan permission mode so subsequent build actions are
+    // gated normally (setting + live session + perm chip all in sync).
+    const leavePlanMode = () => {
       const s = this.plugin.settings;
-      if (s.permissionMode === "plan") {
-        const restore = this.prePlanMode ?? "default";
-        s.permissionMode = restore;
-        void this.plugin.saveSettings();
-        c.session?.setPermissionMode?.(restore);
-        this.composer.refreshPerm();
-      }
+      if (s.permissionMode !== "plan") return;
+      const restore = this.prePlanMode ?? "default";
+      s.permissionMode = restore;
+      void this.plugin.saveSettings();
+      c.session?.setPermissionMode?.(restore);
+      this.composer.refreshPerm();
+    };
+    actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Approve & build" }).onclick = () => {
+      leavePlanMode();
       finish(true, { behavior: "allow" });
     };
+    addBuildInNewChat(this, actions, seg, leavePlanMode, finish);
     const reviseBtn = actions.createEl("button", { cls: "mva-btn", text: "Revise" });
     reviseBtn.onclick = () => {
       if (card.querySelector(".mva-plan-revise")) return; // already revealed
@@ -4231,14 +4235,15 @@ export class ChatView extends ItemView {
   /** Settled read-only plan card: collapsed, expandable, with the approved/
    *  revised state line. Shared by live resolution and transcript restore so
    *  they render identically (mirrors renderAskSummary). */
-  private renderPlanSettled(card: HTMLElement, md: string, approved: boolean, building = false): void {
+  private renderPlanSettled(card: HTMLElement, md: string, approved: boolean, building = false, implementedIn?: string): void {
     card.empty();
     card.className = "mva-plan-card is-resolved is-collapsed";
     const head = card.createDiv({ cls: "mva-plan-head" });
     setIcon(head.createSpan({ cls: "mva-reason-chevron" }), "chevron-right");
     setIcon(head.createSpan({ cls: "mva-plan-icon" }), "clipboard-list");
     head.createSpan({ cls: "mva-plan-title", text: "Plan" });
-    head.createSpan({ cls: "mva-plan-state", text: planStateText(approved, building) });
+    head.createSpan({ cls: "mva-plan-state", text: planStateText(approved, building, !!implementedIn) });
+    if (implementedIn) renderImplementedLink(this, head, implementedIn);
     const body = card.createDiv({ cls: "mva-plan-body" });
     void MarkdownRenderer.render(this.app, md, body, "", this);
     this.clickable(head, () => card.toggleClass("is-collapsed", !card.hasClass("is-collapsed")));
