@@ -77,6 +77,7 @@ describe("OpenLoopProposalTarget", () => {
     expect(second).toEqual(first);
     expect(noteWrite).toHaveBeenCalledTimes(1);
     expect(noteWrite).toHaveBeenCalledWith([OPEN_LOOPS_PATH]);
+    expect(first.path).toBe(OPEN_LOOPS_PATH);
     expect(parseLoopsFile(files.get(OPEN_LOOPS_PATH)!)).toHaveLength(1);
   });
 });

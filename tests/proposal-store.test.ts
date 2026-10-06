@@ -346,11 +346,12 @@ describe("ProposalStore", () => {
   describe("memory kinds route with no human gate", () => {
     it("routes a loop immediately as accepted, with no pending step", async () => {
       const { adapter } = fakeFiles();
-      const route = vi.fn(async () => ({ ok: true as const, target: "loop-1" }));
+      const route = vi.fn(async () => ({ ok: true as const, target: "loop-1", path: "Memory/open-loops.md" }));
       const store = new ProposalStore(adapter, new WriteQueue(), route);
 
       const result = await store.append(loop("Call Anna"), source());
       if (result.status !== "applied") throw new Error("expected applied");
+      expect(result.path).toBe("Memory/open-loops.md");
 
       expect(route).toHaveBeenCalledTimes(1);
       expect(result.target).toBe("loop-1");
@@ -370,6 +371,7 @@ describe("ProposalStore", () => {
 
       expect(result.record.status).toBe("accepted");
       expect(result.target).toBe("Decisions/x.md");
+      expect(result.path).toBe("Decisions/x.md");
       expect(route).toHaveBeenCalledTimes(1);
     });
 
@@ -406,7 +408,6 @@ describe("ProposalStore", () => {
       const result = await store.append(loop("Call Anna"), source());
       if (result.status !== "appended") throw new Error("expected appended");
 
-      expect(result.routeError).toBe("vault is read-only");
       expect(result.record.status).toBe("pending");
       expect((await store.listPending()).records[0].lastError).toBe("vault is read-only");
       expect((await store.load()).data.metrics.routeErrors).toBe(1);

@@ -5984,13 +5984,12 @@ export class ChatView extends ItemView {
    *  straight into the vault, linking to the note it landed in. */
   private renderSavedMemory(el: HTMLElement, saved: readonly SavedMemory[]): void {
     for (const item of saved) {
-      const path = item.kind === "loop" ? this.plugin.paths.openLoops : item.target;
       const row = el.createDiv({ cls: "mva-proposal-saved" });
       row.createSpan({ text: "Saved: " });
       const link = row.createEl("a", { text: item.title, href: "#" });
       this.clickable(link, (e) => {
         e.preventDefault();
-        this.openNote(path);
+        this.openNote(item.path);
       });
     }
   }

@@ -51,15 +51,16 @@ export interface ProposalFileAdapter {
 }
 
 export type AppendProposalResult =
-  /** Waiting in the inbox: an action kind, or a memory kind whose routing failed. */
-  | { status: "appended"; record: ProposalRecord; routeError?: string }
+  /** Waiting in the inbox: an action kind, or a memory kind whose routing failed (see `record.lastError`). */
+  | { status: "appended"; record: ProposalRecord }
   /** A memory kind (loop, decision) already written to its target. */
-  | { status: "applied"; record: ProposalRecord; target: string }
+  | { status: "applied"; record: ProposalRecord; target: string; path: string }
   | { status: "duplicate"; duplicateOf: ProposalRecord }
   | { status: "invalid"; errors: ProposalValidationError[] };
 
 export type ProposalRouteResult =
-  | { ok: true; target: string }
+  /** `path` is the note the write landed in, when it differs from `target`. */
+  | { ok: true; target: string; path?: string }
   | { ok: false; error: string };
 
 export type ProposalAcceptResult =
@@ -295,8 +296,8 @@ export class ProposalStore {
       if (!isMemoryProposalKind(record.kind)) return { status: "appended", record };
       const routed = await this.applyRoute(data, record);
       return routed.ok
-        ? { status: "applied", record, target: routed.target }
-        : { status: "appended", record, routeError: routed.error };
+        ? { status: "applied", record, target: routed.target, path: routed.path ?? routed.target }
+        : { status: "appended", record };
     });
   }
 

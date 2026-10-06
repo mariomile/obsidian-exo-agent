@@ -53,8 +53,8 @@ export type ProposalProducerFailureReason =
 export interface SavedMemory {
   kind: ProposalRecord["kind"];
   title: string;
-  /** The route's target: a loop id or a decision note path. */
-  target: string;
+  /** The note the record was written to. */
+  path: string;
 }
 
 export type ProposalProducerResult =
@@ -176,7 +176,7 @@ function countAppend(result: AppendProposalResult, totals: AppendTotals): void {
       totals.appended += 1;
       break;
     case "applied":
-      totals.saved.push({ kind: result.record.kind, title: result.record.title, target: result.target });
+      totals.saved.push({ kind: result.record.kind, title: result.record.title, path: result.path });
       break;
     case "duplicate":
       totals.duplicates += 1;

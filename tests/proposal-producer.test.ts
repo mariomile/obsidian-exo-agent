@@ -213,13 +213,14 @@ describe("proposal producer extraction", () => {
         status: "applied",
         record: { kind: "decision", title: "Use Postgres", status: "accepted" } as ProposalRecord,
         target: "Decisions/2026-10-06-use-postgres.md",
+        path: "Decisions/2026-10-06-use-postgres.md",
       },
     ]);
     const result = await produceTurnProposals(eligible(), mocked.value);
     expect(result).toMatchObject({
       status: "generated",
       appended: 1,
-      saved: [{ kind: "decision", title: "Use Postgres", target: "Decisions/2026-10-06-use-postgres.md" }],
+      saved: [{ kind: "decision", title: "Use Postgres", path: "Decisions/2026-10-06-use-postgres.md" }],
     });
   });
 });

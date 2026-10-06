@@ -36,7 +36,7 @@ export interface ProposalAcceptanceDeps {
   };
   /** Production implementation must use the shared Open Loops WriteQueue. */
   loops: {
-    create(loop: OpenLoopCreateInput): Promise<{ id: string }>;
+    create(loop: OpenLoopCreateInput): Promise<{ id: string; path: string }>;
   };
   /** Production implementation must create the decision with raw-preserving frontmatter patching. */
   decisions: {
@@ -111,7 +111,7 @@ export async function routeAcceptedProposal(
           ...(payload.resurface ? { resurface: payload.resurface } : {}),
           ...(payload.tags?.length ? { tags: payload.tags } : {}),
         });
-        return { ok: true, target: created.id };
+        return { ok: true, target: created.id, path: created.path };
       }
       case "decision": {
         const created = await deps.decisions.captureRawPreserving({

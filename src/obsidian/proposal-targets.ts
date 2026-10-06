@@ -73,14 +73,14 @@ export class OpenLoopProposalTarget implements OpenLoopTarget {
     private readonly openLoopsPath: string = OPEN_LOOPS_PATH
   ) {}
 
-  create(input: OpenLoopCreateInput): Promise<{ id: string }> {
+  create(input: OpenLoopCreateInput): Promise<{ id: string; path: string }> {
     return this.queue.enqueue(async () => {
       const existing = this.vault.getFile(this.openLoopsPath);
       const current = existing ? await this.vault.read(this.openLoopsPath) : "";
       const entries = current ? parseLoopsFile(current) : [];
       const marker = proposalMarker(input.proposalId);
       const prior = entries.find(({ note }) => note.includes(marker));
-      if (prior) return { id: prior.id };
+      if (prior) return { id: prior.id, path: this.openLoopsPath };
 
       // Date.now() alone can collide when two proposals are accepted in the
       // same millisecond. Re-check against the freshly-read ledger while still
@@ -107,7 +107,7 @@ export class OpenLoopProposalTarget implements OpenLoopTarget {
         await this.vault.create(this.openLoopsPath, content);
       }
       this.noteWrite([this.openLoopsPath]);
-      return { id: entry.id };
+      return { id: entry.id, path: this.openLoopsPath };
     });
   }
 }
