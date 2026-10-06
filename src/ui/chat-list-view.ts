@@ -257,6 +257,8 @@ export class ChatListView extends ItemView {
     menu.showAtMouseEvent(e);
   }
 
+  focusSearch(): void { this.searchEl?.focus(); this.searchEl?.select(); }
+
   private mode(): ChatListMode {
     return this.plugin.settings.chatsMode === "days" ? "days" : "activity";
   }

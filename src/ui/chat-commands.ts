@@ -18,6 +18,13 @@ export function registerChatCommands(plugin: ExoPlugin): void {
     name: "Open chats",
     callback: () => void plugin.activateChats(),
   });
+  // Search across chats (core/chat-search): opens the sidebar with the cursor
+  // in its search field, which already looks inside what was said.
+  plugin.addCommand({
+    id: "search-chats",
+    name: "Search chats",
+    callback: () => void searchChatsCommand(plugin),
+  });
   plugin.addCommand({
     id: "retitle-chats",
     name: "Retitle auto-named chats",
@@ -96,4 +103,12 @@ function goToNextNeedsYou(plugin: ExoPlugin): void {
     return;
   }
   void plugin.revealConversation(next);
+}
+
+async function searchChatsCommand(plugin: ExoPlugin): Promise<void> {
+  await plugin.activateChats();
+  for (const leaf of plugin.app.workspace.getLeavesOfType("exo-chats")) {
+    const view = leaf.view as { focusSearch?: () => void };
+    view.focusSearch?.();
+  }
 }
