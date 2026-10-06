@@ -43,11 +43,12 @@ export function setConvoPinned(app: App, convoId: string, pinned: boolean): bool
   return view ? actions.setConvoPinned(view, convoId, pinned) : false;
 }
 
-/** Snooze until `until`, or wake now with `null`. False when the chat is
- *  blocked on the user, unknown, or Exo is not mounted. */
-export function setConvoSnoozed(app: App, convoId: string, until: number | null): boolean {
+/** Snooze, settle, or take a chat back out (core/thread-lifecycle). False
+ *  when the chat is blocked on the user, running (settle), unknown, or Exo is
+ *  not mounted. */
+export function applyLifecycle(app: App, convoId: string, v: actions.LifecycleVerb): boolean {
   const view = chatView(app);
-  return view ? actions.setConvoSnoozed(view, convoId, until) : false;
+  return view ? actions.applyLifecycle(view, convoId, v) : false;
 }
 
 /** Answer a conversation's open permission prompt from the chats sidebar. This

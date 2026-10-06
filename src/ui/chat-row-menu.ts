@@ -14,8 +14,8 @@ import { App, Menu, Modal, Notice } from "obsidian";
 import type ExoPlugin from "../main";
 import type { ChatRow } from "../core/chat-rows";
 import { canSettleRow } from "../core/settle-note";
-import { setConvoSnoozed, settleToNote } from "./convo-bridge";
-import { snoozePresets } from "../core/snooze";
+import { activeConvoId, applyLifecycle, settleToNote } from "./convo-bridge";
+import { snoozePresets } from "../core/thread-lifecycle";
 
 /** What the menu needs from whoever opened it: the two hosts it calls into,
  *  and a way to ask for a repaint once a mutation lands. */
@@ -73,12 +73,13 @@ armed = false,
         ctx.repaint();
       }),
   );
-  // Absent on a blocked row, same reason as Settle below: a prompt hidden
-  // under a shelf is a prompt nobody answers.
-  if (r.snoozedUntil !== undefined) {
+  // The lifecycle verbs, from T3 Code (core/thread-lifecycle). Absent where
+  // they would be refused: nothing is hidden while it waits on you, and nothing
+  // is settled while a turn runs.
+  if (r.shelf === "snoozed") {
     menu.addItem((i) =>
       i.setTitle("Unsnooze").setIcon("alarm-clock-off").onClick(() => {
-        setConvoSnoozed(ctx.app, r.id, null);
+        applyLifecycle(ctx.app, r.id, { verb: "unsnooze" });
         ctx.repaint();
       }),
     );
@@ -87,6 +88,25 @@ armed = false,
       i.setTitle("Snooze…").setIcon("alarm-clock").onClick(() => {
         // Same re-open trick as Delete: Menu has no typed submenu API.
         window.setTimeout(() => openSnoozeMenu(e, r, ctx), 0);
+      }),
+    );
+  }
+  if (r.shelf === "settled") {
+    menu.addItem((i) =>
+      i.setTitle("Unsettle").setIcon("inbox").onClick(() => {
+        applyLifecycle(ctx.app, r.id, { verb: "unsettle" });
+        ctx.repaint();
+      }),
+    );
+  } else if (!r.lane) {
+    menu.addItem((i) =>
+      i.setTitle("Settle").setIcon("check-check").onClick(() => {
+        if (!applyLifecycle(ctx.app, r.id, { verb: "settle" })) {
+          new Notice("Couldn't settle this chat. Let the running turn finish first.");
+          return;
+        }
+        if (activeConvoId(ctx.app) === r.id) new Notice("Settled. It moves to the shelf when you switch away.");
+        ctx.repaint();
       }),
     );
   }
@@ -160,10 +180,13 @@ function openSnoozeMenu(e: MouseEvent, r: ChatRow, ctx: ChatRowMenuContext): voi
     });
     menu.addItem((i) =>
       i.setTitle(`${p.label} · ${when}`).onClick(() => {
-        if (!setConvoSnoozed(ctx.app, r.id, p.until)) {
+        if (!applyLifecycle(ctx.app, r.id, { verb: "snooze", until: p.until })) {
           new Notice("Couldn't snooze this chat. It is waiting on you, or Exo is not open.");
           return;
         }
+        // The chat in front of you stays on screen until you leave it, so say
+        // where it went rather than leaving the click looking dead.
+        new Notice(`Snoozed until ${when}.`);
         ctx.repaint();
       }),
     );

@@ -49,8 +49,8 @@ const ANSWER_CHARS = 900;
 export type SettleOutcome = "settled" | "stopped" | "error";
 
 /** The live facts the gate reads. Same vocabulary as `deriveLane`'s snapshot,
- *  deliberately: "settled" here must mean exactly what the sidebar's Settled
- *  section means. */
+ *  and the same activity blockers as settling a chat onto the sidebar's
+ *  Settled shelf (`canSettleThread` in core/thread-lifecycle). */
 export interface SettleGate {
   streaming: boolean;
   pendingPerm: boolean;

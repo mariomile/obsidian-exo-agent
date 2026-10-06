@@ -51,24 +51,25 @@ describe("section collapse", () => {
   it("treats absent state as expanded", () => {
     // The no-migration guarantee: an install that never toggled anything opens
     // exactly as it did before the feature landed.
-    expect(isSectionCollapsed(undefined, "needsYou")).toBe(false);
-    expect(isSectionCollapsed([], "needsYou")).toBe(false);
+    expect(isSectionCollapsed(undefined, "inbox")).toBe(false);
+    expect(isSectionCollapsed([], "inbox")).toBe(false);
+    expect(isSectionCollapsed([], "pinned")).toBe(false);
   });
 
   it("reads a collapsed key back", () => {
-    expect(isSectionCollapsed(["settled"], "settled")).toBe(true);
-    expect(isSectionCollapsed(["settled"], "open")).toBe(false);
+    expect(isSectionCollapsed(["inbox"], "inbox")).toBe(true);
+    expect(isSectionCollapsed(["inbox"], "pinned")).toBe(false);
   });
 
   it("collapses by appending and expands by removing", () => {
-    expect(toggleSectionCollapsed([], "settled")).toEqual(["settled"]);
-    expect(toggleSectionCollapsed(["settled"], "settled")).toEqual([]);
-    expect(toggleSectionCollapsed(undefined, "open")).toEqual(["open"]);
+    expect(toggleSectionCollapsed([], "inbox")).toEqual(["inbox"]);
+    expect(toggleSectionCollapsed(["inbox"], "inbox")).toEqual([]);
+    expect(toggleSectionCollapsed(undefined, "pinned")).toEqual(["pinned"]);
   });
 
   it("leaves the other sections alone", () => {
-    expect(toggleSectionCollapsed(["open", "settled"], "open")).toEqual(["settled"]);
-    expect(toggleSectionCollapsed(["open"], "settled")).toEqual(["open", "settled"]);
+    expect(toggleSectionCollapsed(["pinned", "inbox"], "pinned")).toEqual(["inbox"]);
+    expect(toggleSectionCollapsed(["pinned"], "inbox")).toEqual(["pinned", "inbox"]);
   });
 
   it("round-trips a day-mode key", () => {
@@ -82,10 +83,48 @@ describe("section collapse", () => {
   it("never mutates the list it was given", () => {
     // The caller persists the RESULT; mutating in place would leave memory
     // ahead of disk the moment a save fails.
-    const before: string[] = ["settled"];
-    toggleSectionCollapsed(before, "open");
-    toggleSectionCollapsed(before, "settled");
-    expect(before).toEqual(["settled"]);
+    const before: string[] = ["inbox"];
+    toggleSectionCollapsed(before, "pinned");
+    toggleSectionCollapsed(before, "inbox");
+    expect(before).toEqual(["inbox"]);
+  });
+
+  /**
+   * The two shelves are folded until opened, as in T3: put-away chats are a
+   * click away, never in the way. What is stored is the user's choice to OPEN
+   * one, under `expanded:<key>`, so absent state still means "as shipped".
+   */
+  describe("the Snoozed and Settled shelves", () => {
+    it("start collapsed when nothing is stored", () => {
+      expect(isSectionCollapsed(undefined, "snoozed")).toBe(true);
+      expect(isSectionCollapsed([], "settled")).toBe(true);
+    });
+
+    it("open by storing an expanded token and fold again by removing it", () => {
+      expect(toggleSectionCollapsed([], "settled")).toEqual(["expanded:settled"]);
+      expect(isSectionCollapsed(["expanded:settled"], "settled")).toBe(false);
+      expect(toggleSectionCollapsed(["expanded:settled"], "settled")).toEqual([]);
+    });
+
+    it("keep their state independent of each other and of the other sections", () => {
+      const opened = toggleSectionCollapsed(["inbox"], "snoozed");
+      expect(opened).toEqual(["inbox", "expanded:snoozed"]);
+      expect(isSectionCollapsed(opened, "snoozed")).toBe(false);
+      expect(isSectionCollapsed(opened, "settled")).toBe(true);
+      expect(isSectionCollapsed(opened, "inbox")).toBe(true);
+    });
+
+    it("are not folded by a bare key: only the expanded token counts", () => {
+      expect(isSectionCollapsed(["settled"], "settled")).toBe(true);
+      expect(isSectionCollapsed(["snoozed", "settled"], "snoozed")).toBe(true);
+    });
+
+    it("never mutate the list they were given", () => {
+      const before: string[] = ["expanded:settled"];
+      toggleSectionCollapsed(before, "settled");
+      toggleSectionCollapsed(before, "snoozed");
+      expect(before).toEqual(["expanded:settled"]);
+    });
   });
 });
 
@@ -137,13 +176,13 @@ describe("parent collapse", () => {
     // The two lists are keyed in different namespaces. A conversation whose id
     // happens to read like a section key must not fold that section, and
     // collapsing a section must not fold a conversation of the same name.
-    const parents = toggleParentCollapsed([], "settled");
-    expect(isSectionCollapsed([], "settled")).toBe(false);
-    expect(isParentCollapsed(parents, "settled")).toBe(true);
+    const parents = toggleParentCollapsed([], "inbox");
+    expect(isSectionCollapsed([], "inbox")).toBe(false);
+    expect(isParentCollapsed(parents, "inbox")).toBe(true);
 
-    const sections = toggleSectionCollapsed([], "settled");
-    expect(isParentCollapsed([], "settled")).toBe(false);
-    expect(isSectionCollapsed(sections, "settled")).toBe(true);
+    const sections = toggleSectionCollapsed([], "inbox");
+    expect(isParentCollapsed([], "inbox")).toBe(false);
+    expect(isSectionCollapsed(sections, "inbox")).toBe(true);
   });
 });
 
@@ -242,6 +281,7 @@ const row = (over: Partial<ChatRow> = {}): ChatRow => ({
   messageCount: 3,
   depth: 0,
   hasChildren: false,
+  shelf: "settled",
   ...over,
 });
 
@@ -253,6 +293,10 @@ describe("rowStatusText", () => {
 
   it("falls back to Working for a running row with no phrase yet", () => {
     expect(rowStatusText(row({ lane: "running" }))).toBe("Working");
+  });
+
+  it("carries the checklist progress on a running row", () => {
+    expect(rowStatusText(row({ lane: "running", progress: { done: 3, total: 7 } }))).toBe("Working · 3/7");
   });
 
   it("says nothing when the live phrase is already on screen", () => {
@@ -272,6 +316,12 @@ describe("rowPreview", () => {
       text: "Searching the vault",
       live: true,
     });
+  });
+
+  it("appends the checklist progress to the live phrase", () => {
+    expect(
+      rowPreview(row({ lane: "running", activity: "Searching the vault", progress: { done: 1, total: 4 } })),
+    ).toEqual({ text: "Searching the vault · 1/4", live: true });
   });
 
   it("keeps the last exchange when nothing is running", () => {
@@ -306,6 +356,13 @@ describe("chatRowSig", () => {
     expect(sig(row({ lane: "needs-input", reason: "perm", permRule: "Bash(git)" }))).not.toBe(
       sig(row({ lane: "needs-input", reason: "perm", permRule: "Bash(rm)" })),
     );
+  });
+
+  it("moves when the checklist progress moves, so the row repaints as items complete", () => {
+    expect(sig(row({ lane: "running", progress: { done: 1, total: 4 } }))).not.toBe(
+      sig(row({ lane: "running", progress: { done: 2, total: 4 } })),
+    );
+    expect(sig(row({ lane: "running" }))).not.toBe(sig(row({ lane: "running", progress: { done: 0, total: 4 } })));
   });
 
   it("still moves on the axes it already owned", () => {

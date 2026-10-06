@@ -77,11 +77,15 @@ export function blockedReason(reason: ChatRow["reason"]): { short: string; long:
  *    one, and a "Working" chip stacked above "Searching the vault" spends a
  *    line of a 216px column saying the same thing twice.
  */
-export function rowStatusText(r: Pick<ChatRow, "lane" | "reason" | "activity">): string | null {
+export function rowStatusText(r: Pick<ChatRow, "lane" | "reason" | "activity" | "progress">): string | null {
   if (r.lane === "needs-input") return `Needs ${blockedReason(r.reason).long}`;
   if (r.lane !== "running") return null;
-  return r.activity ? null : "Working";
+  return r.activity ? null : `Working${progressSuffix(r)}`;
 }
+
+/** T3's `planProgress` on a running row: ` · 3/7` of the agent's checklist. */
+const progressSuffix = (r: Pick<ChatRow, "progress">): string =>
+  r.progress ? ` · ${r.progress.done}/${r.progress.total}` : "";
 
 /**
  * What the preview line carries: the live phrase while a tool is actually
@@ -91,9 +95,9 @@ export function rowStatusText(r: Pick<ChatRow, "lane" | "reason" | "activity">):
  * tool call.
  */
 export function rowPreview(
-  r: Pick<ChatRow, "preview" | "lane" | "activity">,
+  r: Pick<ChatRow, "preview" | "lane" | "activity" | "progress">,
 ): { text: string; live: boolean } {
-  if (r.lane === "running" && r.activity) return { text: r.activity, live: true };
+  if (r.lane === "running" && r.activity) return { text: `${r.activity}${progressSuffix(r)}`, live: true };
   return { text: r.preview, live: false };
 }
 
@@ -119,7 +123,7 @@ export function chatRowSig(r: ChatRow, o: { rich: boolean; age: string }): strin
     o.rich, r.title, r.preview, r.lane ?? "", r.reason ?? "", r.badge ?? "",
     // The two live strings. `activity` moves per tool call and never per token,
     // which is what makes it affordable here at all.
-    r.activity ?? "", r.permRule ?? "",
+    r.activity ?? "", r.permRule ?? "", r.progress ? `${r.progress.done}/${r.progress.total}` : "",
     r.provider, r.model, r.messageCount, r.open, r.pinned, r.unseen, o.age,
     // A row that gains or loses its parent changes shape, so it has to rebuild
     // rather than be patched in place at the wrong indent. Gaining or losing
@@ -183,6 +187,9 @@ export function isSectionCollapsed(
   collapsed: readonly string[] | undefined,
   key: ChatSectionKey,
 ): boolean {
+  // The two shelves start folded, as in T3: put-away chats are a click away,
+  // never in the way. The user's choice to OPEN one is what gets stored.
+  if (SHELVES.has(key)) return !isCollapsed(collapsed, `expanded:${key}`);
   return isCollapsed(collapsed, key);
 }
 
@@ -191,8 +198,11 @@ export function toggleSectionCollapsed(
   collapsed: readonly string[] | undefined,
   key: ChatSectionKey,
 ): string[] {
-  return flipCollapsed(collapsed, key);
+  return flipCollapsed(collapsed, SHELVES.has(key) ? `expanded:${key}` : key);
 }
+
+/** Sections that are folded until opened (see `isSectionCollapsed`). */
+const SHELVES: ReadonlySet<string> = new Set(["snoozed", "settled"]);
 
 /**
  * Has the user folded away the fan-out children of THIS conversation? Same

@@ -16,7 +16,7 @@ import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import { looksAutoTitled } from "../core/title-ownership";
 import { canSettle, type SettleSource } from "../core/settle-note";
-import { canSnooze } from "../core/snooze";
+import { canSettleThread, canSnooze, lifecycleWrites, type LifecycleFields } from "../core/thread-lifecycle";
 import { adaptAppToSettleVault, settleConversationToNote } from "../obsidian/settle-note";
 import { ADAPTERS } from "../providers/registry";
 
@@ -38,22 +38,35 @@ export function setConvoPinned(view: ChatView, id: string, pinned: boolean): boo
   return true;
 }
 
+/** The lifecycle verbs of the chats sidebar (core/thread-lifecycle). */
+export type LifecycleVerb =
+  | { verb: "snooze"; until: number }
+  | { verb: "unsnooze" }
+  | { verb: "settle" }
+  | { verb: "unsettle" };
+
 /**
- * Snooze or wake (core/snooze). Refused while the chat waits on the user: an
- * open prompt hidden under a shelf is a prompt nobody answers. Waking clears
- * both fields, so a later snooze starts its "something happened" clock fresh.
+ * Snooze, settle, or take a chat back out. Refused where T3 refuses: nothing
+ * is snoozed or settled while it waits on the user, and nothing is settled
+ * while a turn runs. The field writes come from `lifecycleWrites`, so the
+ * rules live in one pure place.
  */
-export function setConvoSnoozed(view: ChatView, id: string, until: number | null): boolean {
+export function applyLifecycle(view: ChatView, id: string, v: LifecycleVerb): boolean {
   const c = find(view, id);
   if (!c) return false;
-  if (until === null) {
-    c.snoozedUntil = undefined;
-    c.snoozedAt = undefined;
+  const live = { streaming: c.streaming, pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null };
+  const now = Date.now();
+  let writes: LifecycleFields;
+  if (v.verb === "snooze") {
+    if (!canSnooze(live)) return false;
+    writes = lifecycleWrites.snooze(v.until, now);
+  } else if (v.verb === "settle") {
+    if (!canSettleThread(live)) return false;
+    writes = lifecycleWrites.settle(now);
   } else {
-    if (!canSnooze({ pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null })) return false;
-    c.snoozedUntil = until;
-    c.snoozedAt = Date.now();
+    writes = v.verb === "unsettle" ? lifecycleWrites.unsettle(now) : lifecycleWrites.unsnooze();
   }
+  Object.assign(c, writes);
   view.persist();
   return true;
 }
