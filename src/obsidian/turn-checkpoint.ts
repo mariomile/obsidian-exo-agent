@@ -21,6 +21,9 @@ import {
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 20_000;
 const MAX_PATCH_BYTES = 2_000_000;
+/** Enough for any note a turn could have written; above it git fails loudly
+ *  rather than handing back a truncated file. */
+const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 
 /** The same author T3 stamps on its checkpoint commits, renamed. Set through
  *  the environment so a vault without a git identity can still checkpoint. */
@@ -39,7 +42,7 @@ function gitIn(cwd: string): Git {
       await execFileAsync("git", args, {
         cwd,
         timeout: GIT_TIMEOUT_MS,
-        maxBuffer: MAX_PATCH_BYTES * 2,
+        maxBuffer: MAX_OUTPUT_BYTES,
         env: { ...process.env, ...IDENTITY, ...env },
       })
     ).stdout;
@@ -81,7 +84,9 @@ async function commitFiles(
       if (content === null) continue;
       const blobFile = join(dir, `blob-${n++}`);
       await writeFile(blobFile, content, "utf8");
-      const sha = (await git(["hash-object", "-w", "--", blobFile])).trim();
+      // --no-filters: store the bytes as they are. With core.autocrlf a CRLF
+      // note would otherwise be stored as LF and never match on revert.
+      const sha = (await git(["hash-object", "-w", "--no-filters", "--", blobFile])).trim();
       await git(["update-index", "--add", "--cacheinfo", "100644", sha, prefix + path], env);
     }
     const tree = (await git(["write-tree"], env)).trim();
@@ -135,24 +140,34 @@ export async function readTurnDiff(
   try {
     const prefix = (await repoPrefix(git)) ?? "";
     const range = [`${ref}^`, ref];
-    const flags = ["--no-color", "--no-ext-diff", "--no-textconv"];
+    // --no-renames: a moved note is its two paths, deleted and created, which
+    // is what revert needs and what the file list should show.
+    const flags = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames"];
     const files = parseNumstat(await git(["diff", ...flags, "--numstat", "-z", ...range])).map((f) => ({
       ...f,
       path: f.path.startsWith(prefix) ? f.path.slice(prefix.length) : f.path,
     }));
     const patch = await git(["diff", ...flags, "--patch", ...range]);
-    return { files, patch: patch.length > MAX_PATCH_BYTES ? patch.slice(0, MAX_PATCH_BYTES) : patch };
+    return {
+      files,
+      patch: patch.length > MAX_PATCH_BYTES ? `${patch.slice(0, MAX_PATCH_BYTES)}\n[Patch truncated]` : patch,
+    };
   } catch {
     return null;
   }
 }
 
+/** The file at `rev`, or null when that side of the turn has no such path.
+ *  Only ABSENCE is null: any other git failure throws, so a revert never
+ *  mistakes "couldn't read the before" for "the turn created it" and trashes
+ *  the file. */
 async function blobAt(git: Git, rev: string, gitPath: string): Promise<string | null> {
   try {
-    return await git(["cat-file", "blob", `${rev}:${gitPath}`]);
+    await git(["cat-file", "-e", `${rev}:${gitPath}`]);
   } catch {
-    return null; // absent on that side of the turn
+    return null;
   }
+  return git(["cat-file", "blob", `${rev}:${gitPath}`]);
 }
 
 /**
@@ -167,7 +182,9 @@ export async function revertTurn(
   const git = gitIn(vault.basePath);
   try {
     const prefix = (await repoPrefix(git)) ?? "";
-    const names = (await git(["diff", "--name-only", "-z", `${ref}^`, ref])).split("\0").filter(Boolean);
+    const names = (await git(["diff", "--no-renames", "--name-only", "-z", `${ref}^`, ref]))
+      .split("\0")
+      .filter(Boolean);
     const entries = [];
     for (const gitPath of names) {
       const path = gitPath.startsWith(prefix) ? gitPath.slice(prefix.length) : gitPath;

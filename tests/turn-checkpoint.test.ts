@@ -25,6 +25,14 @@ describe("turn checkpoint rules", () => {
     expect(isCheckpointable("Knowledge/Note.md")).toBe(true);
   });
 
+  it("refuses paths outside the vault and excluded folders in any spelling", () => {
+    expect(isCheckpointable("/Users/x/other.md")).toBe(false);
+    expect(isCheckpointable("C:/x.md")).toBe(false);
+    expect(isCheckpointable("Notes/../../x.md")).toBe(false);
+    expect(isCheckpointable("input/readwise/x.md")).toBe(false);
+    expect(isCheckpointable("./Input//Readwise/x.md")).toBe(false);
+  });
+
   it("names one hidden ref per turn, ref-safe", () => {
     expect(checkpointRef("c-1", 42)).toBe("refs/exo/checkpoints/c-1/42");
     expect(checkpointRef("a b/c", 1)).toBe("refs/exo/checkpoints/a_b_c/1");
@@ -118,6 +126,24 @@ describe("turn checkpoint against a real git repo", () => {
     expect(readFileSync(file("other.md"), "utf8")).toBe("user edited after the turn\n");
     expect(r!.actions.find((a) => a.path === "other.md")?.kind).toBe("skip-changed");
     expect(readFileSync(file("keep.md"), "utf8")).toBe("untouched\n");
+  });
+
+  it("reverts a rename as two files: the new one goes, the old one comes back", async () => {
+    unlinkSync(file("note.md"));
+    put("moved.md", "before\n");
+    const ref = await captureTurnCheckpoint(vault, "c", new Map([["note.md", "before\n"], ["moved.md", null]]));
+    const d = await readTurnDiff(root, ref!);
+    expect(d!.files.map((f) => f.path).sort()).toEqual(["moved.md", "note.md"]);
+    await revertTurn(vault, ref!);
+    expect(readFileSync(file("note.md"), "utf8")).toBe("before\n");
+    expect(existsSync(file("moved.md"))).toBe(false);
+  });
+
+  it("keeps the rest of the turn when one path points outside the vault", async () => {
+    put("note.md", "after\n");
+    const ref = await captureTurnCheckpoint(vault, "c", new Map([["note.md", "before\n"], ["/etc/hosts", "x"]]));
+    expect(ref).not.toBeNull();
+    expect((await readTurnDiff(root, ref!))!.files.map((f) => f.path)).toEqual(["note.md"]);
   });
 
   it("skips excluded folders and returns null outside a git repo", async () => {

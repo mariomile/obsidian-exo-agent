@@ -25,8 +25,18 @@
  *  are append-only, runtime and attachments are not chat output). */
 export const CHECKPOINT_EXCLUDED_PREFIXES = ["Input/Readwise/", ".claude/", "_attachments/"] as const;
 
+/**
+ * May this path be captured or restored? Only plain vault-relative paths: an
+ * absolute path, a drive letter or a `..` segment points outside the vault.
+ * The exclusion check is case-insensitive and ignores `./` and doubled
+ * slashes, because macOS resolves `input/readwise/x.md` to the same file.
+ */
 export function isCheckpointable(path: string): boolean {
-  return !CHECKPOINT_EXCLUDED_PREFIXES.some((p) => path.startsWith(p));
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
+  const norm = path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(\.\/)+/, "");
+  if (norm.split("/").includes("..")) return false;
+  const lower = norm.toLowerCase();
+  return !CHECKPOINT_EXCLUDED_PREFIXES.some((p) => lower.startsWith(p.toLowerCase()));
 }
 
 /** Git ref name for one turn. `stamp` makes it unique without depending on a
