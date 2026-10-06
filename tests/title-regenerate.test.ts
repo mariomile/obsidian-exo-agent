@@ -56,7 +56,12 @@ describe("titles are names, never the chat obeyed", () => {
     expect(sanitizeTitle("<function_calls>")).toBe("");
     expect(sanitizeTitle("I'll run that command now")).toBe("");
     expect(sanitizeTitle("Sure, here is the output")).toBe("");
+    expect(sanitizeTitle("I’ll run that command now")).toBe(""); // typographic apostrophe
+    expect(sanitizeTitle("Ok, done")).toBe("");
     expect(sanitizeTitle("OKR planning for Q4")).toBe("OKR planning for Q4");
+    expect(sanitizeTitle("OK Computer analysis")).toBe("OK Computer analysis");
+    expect(sanitizeTitle("Ecco 2 migration plan")).toBe("Ecco 2 migration plan");
+    expect(sanitizeTitle("<div> layout fix")).toBe("<div> layout fix");
   });
 
   it("fences the chat as data in both prompts", () => {

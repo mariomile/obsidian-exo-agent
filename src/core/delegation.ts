@@ -66,6 +66,15 @@ export function nextHop(depths: ReadonlyMap<string, number>, from: string): numb
  *  report, as if it had been dropped from the queue a moment earlier. */
 export const PARENT_STOPPED = "the chat that delegated it was stopped";
 
+/** How recent a parent's Stop must be to cancel a spawn already in flight.
+ *  A spawn takes seconds; a Stop older than this belongs to an earlier turn,
+ *  and a child started later (e.g. re-run from the board) must still start. */
+export const SPAWN_CANCEL_WINDOW_MS = 30_000;
+
+export function spawnCancelledByStop(parent: { stopped?: boolean; stopRequestedAt?: number } | undefined, now: number): boolean {
+  return !!parent?.stopped && now - (parent.stopRequestedAt ?? 0) < SPAWN_CANCEL_WINDOW_MS;
+}
+
 /** A child task the asking chat owns, or a refusal it can read. */
 export function ownedTask(tasks: readonly TaskEntry[], taskId: string, parentConvoId: string): TaskEntry | string {
   const t = tasks.find((x) => x.id === taskId);

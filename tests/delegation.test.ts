@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  SPAWN_CANCEL_WINDOW_MS,
+  spawnCancelledByStop,
   MAX_AGENT_HOPS,
   nextHop,
   formatChatTranscript,
@@ -113,5 +115,15 @@ describe("nextHop (send_to_chat loop guard)", () => {
     expect(nextHop(depths, "A")).toBeNull();
     depths.delete("A");
     expect(nextHop(depths, "A")).toBe(1);
+  });
+});
+
+describe("spawnCancelledByStop", () => {
+  it("cancels a spawn only for a fresh Stop of the parent", () => {
+    expect(spawnCancelledByStop({ stopped: true, stopRequestedAt: 1_000 }, 1_000 + 5_000)).toBe(true);
+    // An old Stop belongs to an earlier turn: a child re-run later from the board still starts.
+    expect(spawnCancelledByStop({ stopped: true, stopRequestedAt: 1_000 }, 1_000 + SPAWN_CANCEL_WINDOW_MS + 1)).toBe(false);
+    expect(spawnCancelledByStop({ stopped: false, stopRequestedAt: 1_000 }, 1_001)).toBe(false);
+    expect(spawnCancelledByStop(undefined, 1)).toBe(false);
   });
 });

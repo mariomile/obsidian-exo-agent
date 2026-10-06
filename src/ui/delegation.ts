@@ -36,9 +36,12 @@ export function resetAgentChain(id: string): void {
 }
 
 /** Send `text` into chat `id` as a user turn. Null when the chat is gone. */
-export function sendToConvo(view: ChatView, id: string, text: string, mode: SendMode): SendOutcome | null {
+export function sendToConvo(view: ChatView, id: string, text: string, mode: SendMode): SendOutcome | "stopping" | null {
   const c = byId(view, id);
   if (!c) return null;
+  // Stopped while its turn was still preparing: that turn ends without
+  // draining the queue, so a queued message would sit there unrun.
+  if (c.stopped && c.turnClaimed && !c.streaming) return "stopping";
   const canSteer = !c.researchMode.enabled && !!c.session?.steer;
   let outcome = planSend(mode, c.streaming, canSteer, !!c.turnClaimed);
   if (outcome === "steered") {
@@ -161,6 +164,7 @@ export function sendToChat(plugin: ExoPlugin, fromId: string, id: string, text: 
   if (hop === null) return `Refused: ${MAX_AGENT_HOPS} agent-to-agent messages in a row without the user. Ask the user before sending more.`;
   const outcome = sendToConvo(view, id, text, mode);
   if (!outcome) return `No open chat ${id}.`;
+  if (outcome === "stopping") return `Not sent: ${id} was just stopped. Try again in a moment.`;
   agentHops.set(id, hop);
   return outcome === "sent" ? `Sent to ${id}; it is running now.` : outcome === "steered" ? `Folded into ${id}'s running turn.` : `Queued in ${id}; it runs after the current turn.`;
 }

@@ -27,11 +27,11 @@ export function sanitizeTitle(raw: string, maxLen = 60): string {
   // Not a title: the model followed the chat instead of naming it. Seen live on
   // delegated tasks whose first message is a command ("<function_calls>",
   // "I'll run that command now"). Empty = keep the placeholder.
-  if (/^</.test(s) || NOT_A_TITLE.test(s)) return "";
+  if (/^<[^>]*>?$/.test(s) || NOT_A_TITLE.test(s)) return "";
   return s;
 }
 
-const NOT_A_TITLE = /^(?:i'?ll|i will|i'?m going to|i am going to|let me|sure|okay|ok|here(?:'s| is)|certo|ecco)\b/i;
+const NOT_A_TITLE = /^(?:i['’]?ll\b|i will\b|i['’]?m going to\b|i am going to\b|let me\b|here['’]s\b|here is\b|(?:sure|okay|ok|certo|ecco)\s*(?:[,!:]|$))/i;
 
 /** How a `generateTitle` attempt ended — see main.ts for the instrumentation
  *  that computes these. Distinguishes the internal 90s ceiling firing ("timeout",

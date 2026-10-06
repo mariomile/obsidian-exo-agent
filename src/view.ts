@@ -52,7 +52,7 @@ import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { retitleWithNotice } from "./ui/chat-commands";
 import { clearChildBlock, resetAgentChain, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
-import { PARENT_STOPPED } from "./core/delegation";
+import { PARENT_STOPPED, spawnCancelledByStop } from "./core/delegation";
 import { addBuildInNewChat, renderImplementedLink } from "./ui/plan-handoff";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
@@ -1984,7 +1984,7 @@ export class ChatView extends ItemView {
    *  existing quick-add/task-store path. */
   async cmdPromoteToTask(): Promise<void> {
     const lastUser = [...this.active.messages].reverse().find((m): m is Extract<Message, { role: "user" }> =>
-      m.role === "user" && m.text.trim().length > 0
+      m.role === "user" && !m.auto && m.text.trim().length > 0
     );
     if (!lastUser) {
       new Notice("No user message in this conversation to promote yet.");
@@ -2074,7 +2074,7 @@ export class ChatView extends ItemView {
    * writing it after the send is safe.
    */
   startTaskConversation(prompt: string, opts?: { model?: string; parent?: string }): string {
-    if (opts?.parent && this.allConvos().find((c) => c.id === opts.parent)?.stopped) throw new Error(PARENT_STOPPED);
+    if (opts?.parent && spawnCancelledByStop(this.allConvos().find((c) => c.id === opts.parent), Date.now())) throw new Error(PARENT_STOPPED);
     const prev = this.active ?? null;
     const id = this.askInNewConversation(prompt, true, opts);
     if (id && prev && prev.id !== id && this.convos.includes(prev)) this.switchTo(prev);
@@ -2182,7 +2182,7 @@ export class ChatView extends ItemView {
       archived: !!c.archived,
       open: open.has(c.id),
       pinned: c.pinned === true,
-      messageCount: c.messages.filter((m) => m.role === "user").length,
+      messageCount: c.messages.filter((m) => m.role === "user" && !m.auto).length,
       parentConvoId: c.parentConvoId,
       // "Finished while you were elsewhere", with no new persisted state:
       // lastActiveAt moves on focus, updatedAt on every turn. Active excluded —
@@ -2539,7 +2539,7 @@ export class ChatView extends ItemView {
     for (const m of c.messages) {
       const part =
         m.role === "user"
-          ? m.text
+          ? (m.auto ? "" : m.text)
           : m.segments
               .map((seg) =>
                 seg.t === "text"
@@ -5004,7 +5004,7 @@ export class ChatView extends ItemView {
       new Notice("Wait for the current turn to finish, then set a goal.");
       return;
     }
-    c.goal = setGoal(arg, this.plugin.settings.goalMaxIterations, Date.now());
+    c.goal = setGoal(arg, this.plugin.settings.goalMaxIterations, Date.now()); resetAgentChain(c.id);
     this.composer.refreshGoal(c);
     // Kick off the first working turn toward the condition.
     void this.runTurn(c, arg);
@@ -5041,7 +5041,7 @@ export class ChatView extends ItemView {
       new Notice("Wait for the current turn to finish, then continue the goal.");
       return;
     }
-    c.goal = resumeGoal(c.goal);
+    c.goal = resumeGoal(c.goal); resetAgentChain(c.id);
     this.composer.refreshGoal(c);
     void this.runTurn(c, buildContinuationPrompt(c.goal.condition));
   }
@@ -5052,6 +5052,7 @@ export class ChatView extends ItemView {
    *  the composer (which just hands over the resolved steps). */
   submitWorkflow(c: Convo, steps: string[]): void {
     if (steps.length === 0) return;
+    resetAgentChain(c.id); // the user acted in this chat
     const [first, ...rest] = steps;
     for (const s of rest) c.queue.push({ text: s });
     if (c.streaming) {
@@ -5237,7 +5238,7 @@ export class ChatView extends ItemView {
     // new turn's own row can legitimately exist from here.
     c.listEl.querySelectorAll(".mva-working").forEach((el) => el.remove());
     // Stopped while still preparing (recall, vault reads): no model call at all.
-    if (c.stopped) return void this.plugin.emitConvoState(c.id, "stopped", { reason: "stopped" });
+    if (c.stopped) { c.updatedAt = Date.now(); this.refreshTabs(); return void this.plugin.emitConvoState(c.id, "stopped", { reason: "stopped" }); }
     const ctx = this.addAssistantTurn(c, text);
     c.currentCtx = ctx; // target for this conversation's ask_user cards
     this.reconcileLiveTasks(c); // drop orphaned/faded entries before this turn adds new ones
