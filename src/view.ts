@@ -4647,10 +4647,12 @@ export class ChatView extends ItemView {
     // and this is the one place every close path goes through — a verdict, a
     // Stop, the turn teardown — so clearing it here is what stops a sidebar row
     // holding a live Allow button over a prompt that is already answered.
+    const wasOpen = kind === "perm" ? c.pendingPerm : c.pendingAsk;
     if (kind === "perm") c.pendingPerm = cancel;
     else c.pendingAsk = cancel;
     if (kind === "perm" && !cancel) c.pendingDecision = null;
     if (!cancel) clearChildBlock(c.id); // its card in the parent, if it is a delegated child
+    if (!cancel && wasOpen && c.streaming && !c.stopped) this.plugin.emitConvoState(c.id, "turn-start"); // answered: the turn goes on, the board task with it
     this.refreshTabs();
   }
 
