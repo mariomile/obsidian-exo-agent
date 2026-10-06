@@ -159,6 +159,9 @@ export interface MVASettings {
   chatsMode: import("./core/chat-rows").ChatListMode;
   /** Chats-sidebar sections collapsed, by `ChatSectionKey` — core/chat-list-state. */
   chatsCollapsed: string[];
+  /** Quiet days before an idle chat moves to the Settled shelf on its own
+   *  (core/thread-lifecycle). 0 = never. Default 3, T3 Code's default. */
+  chatsAutoSettleDays: number;
   /** Chats-sidebar rows whose fan-out children are folded away, by CONVERSATION
    *  ID. A list of its own rather than a share of `chatsCollapsed`: the two are
    *  keyed in different namespaces — core/chat-list-state. */
@@ -312,6 +315,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   cockpitOnStartup: false,
   chatsMode: "activity",
   chatsCollapsed: [],
+  chatsAutoSettleDays: 3,
   chatsCollapsedParents: [],
   scheduledRuns: "",
   automations: [],

@@ -14,7 +14,8 @@ import { App, Menu, Modal, Notice } from "obsidian";
 import type ExoPlugin from "../main";
 import type { ChatRow } from "../core/chat-rows";
 import { canSettleRow } from "../core/settle-note";
-import { settleToNote } from "./convo-bridge";
+import { activeConvoId, applyLifecycle, settleToNote } from "./convo-bridge";
+import { snoozePresets } from "../core/thread-lifecycle";
 
 /** What the menu needs from whoever opened it: the two hosts it calls into,
  *  and a way to ask for a repaint once a mutation lands. */
@@ -72,6 +73,43 @@ armed = false,
         ctx.repaint();
       }),
   );
+  // The lifecycle verbs, from T3 Code (core/thread-lifecycle). Absent where
+  // they would be refused: nothing is hidden while it waits on you, and nothing
+  // is settled while a turn runs.
+  if (r.shelf === "snoozed") {
+    menu.addItem((i) =>
+      i.setTitle("Unsnooze").setIcon("alarm-clock-off").onClick(() => {
+        applyLifecycle(ctx.app, r.id, { verb: "unsnooze" });
+        ctx.repaint();
+      }),
+    );
+  } else if (r.lane !== "needs-input") {
+    menu.addItem((i) =>
+      i.setTitle("Snooze…").setIcon("alarm-clock").onClick(() => {
+        // Same re-open trick as Delete: Menu has no typed submenu API.
+        window.setTimeout(() => openSnoozeMenu(e, r, ctx), 0);
+      }),
+    );
+  }
+  if (r.shelf === "settled") {
+    menu.addItem((i) =>
+      i.setTitle("Unsettle").setIcon("inbox").onClick(() => {
+        applyLifecycle(ctx.app, r.id, { verb: "unsettle" });
+        ctx.repaint();
+      }),
+    );
+  } else if (!r.lane) {
+    menu.addItem((i) =>
+      i.setTitle("Settle").setIcon("check-check").onClick(() => {
+        if (!applyLifecycle(ctx.app, r.id, { verb: "settle" })) {
+          new Notice("Couldn't settle this chat. Let the running turn finish first.");
+          return;
+        }
+        if (activeConvoId(ctx.app) === r.id) new Notice("Settled. It moves to the shelf when you switch away.");
+        ctx.repaint();
+      }),
+    );
+  }
   // Settled chats only. Not greyed out but ABSENT on a running or blocked
   // row: a chat mid-turn has no outcome to write down yet, and an item that
   // is permanently there and permanently dead teaches the user to ignore it.
@@ -130,6 +168,29 @@ armed = false,
         ctx.repaint();
       }),
   );
+  menu.showAtMouseEvent(e);
+}
+
+/** The snooze presets, as a second menu under the cursor. */
+function openSnoozeMenu(e: MouseEvent, r: ChatRow, ctx: ChatRowMenuContext): void {
+  const menu = new Menu();
+  for (const p of snoozePresets(new Date())) {
+    const when = new Date(p.until).toLocaleString(undefined, {
+      weekday: "short", hour: "numeric", minute: "2-digit",
+    });
+    menu.addItem((i) =>
+      i.setTitle(`${p.label} · ${when}`).onClick(() => {
+        if (!applyLifecycle(ctx.app, r.id, { verb: "snooze", until: p.until })) {
+          new Notice("Couldn't snooze this chat. It is waiting on you, or Exo is not open.");
+          return;
+        }
+        // The chat in front of you stays on screen until you leave it, so say
+        // where it went rather than leaving the click looking dead.
+        new Notice(`Snoozed until ${when}.`);
+        ctx.repaint();
+      }),
+    );
+  }
   menu.showAtMouseEvent(e);
 }
 

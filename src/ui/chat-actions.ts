@@ -16,6 +16,7 @@ import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import { looksAutoTitled } from "../core/title-ownership";
 import { canSettle, type SettleSource } from "../core/settle-note";
+import { canSettleThread, canSnooze, lifecycleWrites, type LifecycleFields } from "../core/thread-lifecycle";
 import { adaptAppToSettleVault, settleConversationToNote } from "../obsidian/settle-note";
 import { ADAPTERS } from "../providers/registry";
 
@@ -34,6 +35,39 @@ export function setConvoPinned(view: ChatView, id: string, pinned: boolean): boo
   const c = find(view, id);
   if (!c) return false;
   if (c.pinned !== pinned) view.togglePin(c);
+  return true;
+}
+
+/** The lifecycle verbs of the chats sidebar (core/thread-lifecycle). */
+export type LifecycleVerb =
+  | { verb: "snooze"; until: number }
+  | { verb: "unsnooze" }
+  | { verb: "settle" }
+  | { verb: "unsettle" };
+
+/**
+ * Snooze, settle, or take a chat back out. Refused where T3 refuses: nothing
+ * is snoozed or settled while it waits on the user, and nothing is settled
+ * while a turn runs. The field writes come from `lifecycleWrites`, so the
+ * rules live in one pure place.
+ */
+export function applyLifecycle(view: ChatView, id: string, v: LifecycleVerb): boolean {
+  const c = find(view, id);
+  if (!c) return false;
+  const live = { streaming: c.streaming, pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null };
+  const now = Date.now();
+  let writes: LifecycleFields;
+  if (v.verb === "snooze") {
+    if (!canSnooze(live)) return false;
+    writes = lifecycleWrites.snooze(v.until, now);
+  } else if (v.verb === "settle") {
+    if (!canSettleThread(live)) return false;
+    writes = lifecycleWrites.settle(now);
+  } else {
+    writes = v.verb === "unsettle" ? lifecycleWrites.unsettle(now) : lifecycleWrites.unsnooze();
+  }
+  Object.assign(c, writes);
+  view.persist();
   return true;
 }
 

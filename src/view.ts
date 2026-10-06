@@ -113,6 +113,7 @@ import type { TabAgents, TabVM, TabFacts } from "./core/working-set";
 import { chooseDensity } from "./core/strip-density";
 import type { StripDensity } from "./core/strip-density";
 import type { ChatRowSource } from "./core/chat-rows";
+import { planProgress } from "./core/thread-lifecycle";
 import {
   drainReportsForParent,
   lastAssistantText,
@@ -1048,6 +1049,11 @@ export class ChatView extends ItemView {
         retiredAt: d.retiredAt,
         lastActiveAt: d.lastActiveAt,
         boardStatus: d.boardStatus,
+        snoozedUntil: d.snoozedUntil,
+        snoozedAt: d.snoozedAt,
+        settledOverride: d.settledOverride,
+        settledAt: d.settledAt,
+        unsettledAt: d.unsettledAt,
         parentConvoId: d.parentConvoId,
         pendingChildReports: reviveChildReports(d.pendingChildReports),
         titleLocked: d.titleLocked === true,
@@ -1130,6 +1136,9 @@ export class ChatView extends ItemView {
       ...(c.retiredAt ? { retiredAt: c.retiredAt } : {}),
       ...(c.lastActiveAt ? { lastActiveAt: c.lastActiveAt } : {}),
       ...(c.boardStatus ? { boardStatus: c.boardStatus } : {}),
+      ...(c.snoozedUntil ? { snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt } : {}),
+      ...(c.settledOverride ? { settledOverride: c.settledOverride, settledAt: c.settledAt } : {}),
+      ...(c.unsettledAt ? { unsettledAt: c.unsettledAt } : {}),
       ...(c.parentConvoId ? { parentConvoId: c.parentConvoId } : {}),
       // Capped at the queue itself (core/child-reports), so this writes exactly
       // what the parent is holding. An unread child report that did not survive
@@ -2181,6 +2190,14 @@ export class ChatView extends ItemView {
       // rows are allowed to show them.
       activity: c.activity,
       permRule: c.pendingDecision?.rule,
+      // Lifecycle (core/thread-lifecycle). The chat in front of you is never
+      // put away on a shelf; `focused` is what says which one that is.
+      focused: c === this.active,
+      lastActiveAt: c.lastActiveAt,
+      pendingReport: (c.pendingChildReports?.length ?? 0) > 0,
+      planProgress: c.streaming ? (planProgress(c.messages) ?? undefined) : undefined,
+      snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt,
+      settledOverride: c.settledOverride, settledAt: c.settledAt, unsettledAt: c.unsettledAt,
     }));
   }
 

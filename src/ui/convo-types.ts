@@ -69,6 +69,14 @@ export interface ConvoData {
   lastActiveAt?: number;
   /** Manually-assigned Session-Cockpit column (persisted). Absent = default. */
   boardStatus?: SessionLane;
+  /** Lifecycle on the chats sidebar (core/thread-lifecycle, from T3 Code):
+   *  snooze until a wake time, settle by hand or take back out. Each absent
+   *  by default, so every existing conversations.json stays valid. */
+  snoozedUntil?: number;
+  snoozedAt?: number;
+  settledOverride?: "settled" | "active";
+  settledAt?: number;
+  unsettledAt?: number;
   /** Convo id of the conversation that spawned this one via `spawn_task`.
    *  Denormalized from the ledger's `parent` (which stays the source of truth)
    *  so the sidebar can group without reading tasks.md. Persisted: a child that
@@ -145,6 +153,12 @@ export interface Convo {
    *  is idle, its card sits here instead of the default review lane; running /
    *  needs-input still auto-override. */
   boardStatus?: SessionLane;
+  /** Lifecycle fields, see `ConvoData`. Persisted. */
+  snoozedUntil?: number;
+  snoozedAt?: number;
+  settledOverride?: "settled" | "active";
+  settledAt?: number;
+  unsettledAt?: number;
   /** Convo id of the conversation that spawned this one via `spawn_task`.
    *  Denormalized from the ledger's `parent` (the source of truth) so the chats
    *  sidebar can indent without reading tasks.md. Persisted. */

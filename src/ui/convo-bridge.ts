@@ -43,6 +43,14 @@ export function setConvoPinned(app: App, convoId: string, pinned: boolean): bool
   return view ? actions.setConvoPinned(view, convoId, pinned) : false;
 }
 
+/** Snooze, settle, or take a chat back out (core/thread-lifecycle). False
+ *  when the chat is blocked on the user, running (settle), unknown, or Exo is
+ *  not mounted. */
+export function applyLifecycle(app: App, convoId: string, v: actions.LifecycleVerb): boolean {
+  const view = chatView(app);
+  return view ? actions.applyLifecycle(view, convoId, v) : false;
+}
+
 /** Answer a conversation's open permission prompt from the chats sidebar. This
  *  is the ONLY route the pane has to a verdict: it never holds a `ChatView`. */
 export function decidePermission(app: App, convoId: string, verdict: "allow" | "deny"): boolean {
