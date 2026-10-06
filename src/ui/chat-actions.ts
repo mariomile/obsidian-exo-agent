@@ -15,6 +15,7 @@ import type { ChatView } from "../view";
 import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import { looksAutoTitled } from "../core/title-ownership";
+import { titleContext } from "../core/title";
 import { canSettle, type SettleSource } from "../core/settle-note";
 import { canSettleThread, canSnooze, lifecycleWrites, type LifecycleFields } from "../core/thread-lifecycle";
 import { adaptAppToSettleVault, settleConversationToNote } from "../obsidian/settle-note";
@@ -161,7 +162,8 @@ function lastExchange(c: Convo): { userText: string; assistantText: string } | n
 }
 
 /**
- * Regenerate one conversation's title from its last exchange. Does NOT set
+ * Regenerate one conversation's title from the whole chat and the title it has
+ * now (T3 Code's regenerate rules: core/title.ts `titleContext`). Does NOT set
  * `titleLocked`: the user asked for a better generated title, not to take
  * ownership of it, so a later automatic refinement is still allowed. Sets
  * `aiTitleApplied` so the turn-driven path does not immediately spend an
@@ -179,7 +181,8 @@ export async function retitleConversation(
   const ctrl = new AbortController();
   c.titleAbort?.abort();
   c.titleAbort = ctrl;
-  const title = await plugin.generateTitle(ex.userText, ex.assistantText, ctrl.signal);
+  const context = titleContext(c.messages);
+  const title = await plugin.generateTitle({ kind: "regenerate", context, previousTitle: c.title }, ctrl.signal);
   if (!title || ctrl.signal.aborted) return false;
   // Re-find: the conversation can be deleted while a 90s cold spawn is in
   // flight, and writing to a detached object would silently lose the title.

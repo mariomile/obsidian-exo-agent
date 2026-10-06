@@ -83,6 +83,7 @@ describe("registerChatCommands", () => {
     expect(harness([], null).ids).toEqual([
       "open-chat-list",
       "search-chats",
+      "retitle-chat",
       "retitle-chats",
       "next-needs-you",
       "settle-chat-to-note",

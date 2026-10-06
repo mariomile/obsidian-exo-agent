@@ -16,6 +16,7 @@ import type { ChatRow } from "../core/chat-rows";
 import { canSettleRow } from "../core/settle-note";
 import { activeConvoId, applyLifecycle, settleToNote } from "./convo-bridge";
 import { snoozePresets } from "../core/thread-lifecycle";
+import { retitleWithNotice } from "./chat-commands";
 
 /** What the menu needs from whoever opened it: the two hosts it calls into,
  *  and a way to ask for a repaint once a mutation lands. */
@@ -47,22 +48,7 @@ armed = false,
     i.setTitle("Rename").setIcon("pencil").onClick(() => promptRename(r, ctx)),
   );
   menu.addItem((i) =>
-    i.setTitle("Retitle with AI").setIcon("sparkles").onClick(() => {
-      // Cold-spawning a CLI session takes seconds, so say something first —
-      // an item that appears to do nothing for ten seconds reads as broken.
-      const pending = new Notice("Retitling…", 0);
-      void ctx.plugin
-        .retitleConversation(r.id)
-        .then((ok) => {
-          pending.hide();
-          if (!ok) new Notice("Couldn't retitle — this chat has no complete exchange yet.");
-          ctx.repaint();
-        })
-        .catch(() => {
-          pending.hide();
-          new Notice("Retitling failed.");
-        });
-    }),
+    i.setTitle("Retitle with AI").setIcon("sparkles").onClick(() => retitleWithNotice(ctx.plugin, r.id, ctx.repaint)),
   );
   menu.addItem((i) =>
     i

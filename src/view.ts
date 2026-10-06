@@ -50,6 +50,7 @@ import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
+import { retitleWithNotice } from "./ui/chat-commands";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
@@ -1792,6 +1793,9 @@ export class ChatView extends ItemView {
           .setIcon(pinned ? "pin-off" : "pin")
           .onClick(() => this.togglePin(c))
       );
+      menu.addItem((i) =>
+        i.setTitle("Retitle with AI").setIcon("sparkles").onClick(() => retitleWithNotice(this.plugin, c.id)),
+      );
       // Last: it is the one item that takes something away.
       menu.addItem((i) => i.setTitle("Close tab").setIcon("x").onClick(() => this.closeTab(c)));
       menu.showAtMouseEvent(e);
@@ -2726,7 +2730,7 @@ export class ChatView extends ItemView {
     c.titleAbort?.abort();
     c.titleAbort = ctrl;
     void this.plugin
-      .generateTitle(userText, assistantText, ctrl.signal)
+      .generateTitle({ kind: "initial", userText, assistantText }, ctrl.signal)
       .then((title) => {
         if (ctrl.signal.aborted || !title) return; // aborted/failed → keep placeholder
         if (!this.convos.includes(c)) return; // conversation removed meanwhile
