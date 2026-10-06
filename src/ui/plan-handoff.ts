@@ -10,6 +10,10 @@ import { planHandoffPrompt, PLAN_HANDOFF_DENY } from "../core/plan";
 
 type PlanSegment = Extract<Segment, { t: "plan" }>;
 
+/** How long a settled card keeps following its new chat's title: the AI
+ *  title's own ceiling (main.ts generateTitle, 90s). */
+const TITLE_FOLLOW_MS = 90_000;
+
 export function addBuildInNewChat(
   view: ChatView,
   actions: HTMLElement,
@@ -33,6 +37,13 @@ export function renderImplementedLink(view: ChatView, head: HTMLElement, id: str
   const target = view.allConvos().find((c) => c.id === id);
   const link = head.createSpan({ cls: "mva-plan-state", text: `→ ${target?.title || "a chat that was deleted"}` });
   if (!target) return;
+  // The new chat is still "New chat" when the card settles: its real title
+  // lands seconds later (seen live). Follow it for as long as a title can take.
+  const started = Date.now();
+  const follow = window.setInterval(() => {
+    if (!link.isConnected || Date.now() - started > TITLE_FOLLOW_MS) return window.clearInterval(follow);
+    link.setText(`→ ${target.title}`);
+  }, 2000);
   link.addClass("mva-link");
   link.addEventListener("click", (e) => {
     e.stopPropagation(); // the head toggles the card
