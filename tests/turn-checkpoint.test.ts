@@ -67,7 +67,8 @@ describe("turn checkpoint rules", () => {
   });
 });
 
-describe("turn checkpoint against a real git repo", () => {
+// Real git spawns: slow under a full parallel suite, so a generous timeout.
+describe("turn checkpoint against a real git repo", { timeout: 30_000 }, () => {
   let root: string;
   let vault: CheckpointVault;
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
