@@ -49,6 +49,8 @@ import { renderRecallRow } from "./ui/recall-row";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
+import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
+import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
 import { assembleContext, formatContextDebug, selectUnchangedPaths } from "./core/context-assembly";
@@ -2705,7 +2707,7 @@ export class ChatView extends ItemView {
           }
         }
         flushRun(); // message end closes the last run (renders folded, no animation)
-        this.attachTouched(el, touched, m.checkpoint);
+        this.attachTouched(el, touched, m.checkpoint, true, m);
         if (full.trim()) {
           this.attachActions(el, full, lastUser || undefined, c);
         }
@@ -3489,7 +3491,8 @@ export class ChatView extends ItemView {
     turnEl: HTMLElement,
     touched: TouchedNote[],
     checkpoint?: Checkpoint,
-    collapsed = true
+    collapsed = true,
+    turn?: TurnCheckpointHolder
   ): void {
     if (touched.length === 0) return;
     const bar = turnEl.createDiv({ cls: "mva-sources" + (collapsed ? " is-collapsed" : "") });
@@ -3501,6 +3504,9 @@ export class ChatView extends ItemView {
     setIcon(head.createSpan({ cls: "mva-reason-chevron" }), "chevron-right");
     head.createSpan({ text: `${touched.length} file${touched.length === 1 ? "" : "s"}` });
     this.clickable(head, () => bar.classList.toggle("is-collapsed"));
+    if (turn && touched.some((t) => t.kind === "write")) {
+      addTurnCheckpointActions(this.app, head, turn, () => checkpointVaultFor(this.app, this.vaultPath()));
+    }
     // No "EDITED"/"READ" text headers — the accent border + accent icon color on
     // write chips already distinguish them from muted read chips three ways over
     // (icon shape, border, color); a third, textual signal was pure redundancy
@@ -5247,6 +5253,7 @@ export class ChatView extends ItemView {
 
     // File snapshots taken before this turn's writes, for "Rewind code + conversation".
     const checkpoint: Checkpoint = new Map();
+    const turnCk: TurnCheckpointHolder = {}; // filled with the git ref once captured
     // Pre-write snapshots are async; collect them so we can guarantee they've all
     // landed before we read/persist the checkpoint at turn end. (In acceptEdits /
     // bypass modes this tool-call-start snapshot is the only one — best-effort, it
@@ -5740,7 +5747,7 @@ export class ChatView extends ItemView {
       // Touched-notes footer renders collapsed by default (03-07 feedback), so
       // there's nothing to fold on older turns — every footer is already a quiet
       // "N files" toggle that opens on click.
-      this.attachTouched(ctx.el, ctx.touched, checkpoint);
+      this.attachTouched(ctx.el, ctx.touched, checkpoint, true, turnCk);
       // The footer above now carries every note this turn touched — drop the
       // matching live tool-call rows so the same file isn't shown twice (the
       // #1 finding of the 2026-07-03 impeccable critique on this surface).
@@ -5858,7 +5865,11 @@ export class ChatView extends ItemView {
         ctx.bodyEl.createSpan({ cls: "mva-faint", text: "Stopped." });
       }
       if (ctx.segments.length) {
-        c.messages.push({ role: "assistant", segments: ctx.segments, ...(checkpoint.size ? { checkpoint } : {}) });
+        const msg: Message = { role: "assistant", segments: ctx.segments, ...(checkpoint.size ? { checkpoint } : {}) };
+        c.messages.push(msg);
+        // Hidden git ref of this turn's files (core/turn-checkpoint), off the critical path.
+        if (checkpoint.size) void captureTurnCheckpoint(checkpointVaultFor(this.app, this.vaultPath()), c.id, checkpoint)
+          .then((ref) => { if (ref && msg.role === "assistant") { msg.checkpointRef = turnCk.checkpointRef = ref; this.persist(); } });
         ctx.el.dataset.msg = String(c.messages.length - 1); // only NOW does this element have a message
       }
       // Turn finalized — the live phrase is gone (from the rail AND from this

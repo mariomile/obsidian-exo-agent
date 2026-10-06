@@ -31,6 +31,8 @@ export type Message =
       role: "assistant";
       segments: Segment[];
       checkpoint?: Checkpoint;
+      /** Hidden git ref holding this turn's before/after files (core/turn-checkpoint). */
+      checkpointRef?: string;
     };
 
 /** On-disk form of a message: the checkpoint Map is stored as [path, content] entries.
@@ -41,6 +43,7 @@ export type PersistedMessage =
       role: "assistant";
       segments: Segment[];
       checkpoint?: [string, string | null][];
+      checkpointRef?: string;
     };
 
 export interface MessagePersistenceLimits {
@@ -68,6 +71,7 @@ export function persistMessage(
           ),
         }
       : {}),
+    ...(message.checkpointRef ? { checkpointRef: message.checkpointRef } : {}),
   };
 }
 
@@ -78,5 +82,6 @@ export function revivePersistedMessage(message: PersistedMessage): Message {
     role: "assistant",
     segments: message.segments,
     ...(Array.isArray(message.checkpoint) ? { checkpoint: new Map(message.checkpoint) } : {}),
+    ...(typeof message.checkpointRef === "string" ? { checkpointRef: message.checkpointRef } : {}),
   };
 }
