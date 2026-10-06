@@ -57,7 +57,7 @@ import { AutomationStore, adaptAppToAutomationVault, migrateToAutomationFiles } 
 import { contractFromAutomation, legacyConfigFromAutomation, type Automation } from "./core/automation-model";
 import { drainExoQueue, countPendingQueue } from "./queue";
 import { parseConversationsSource } from "./core/persistence";
-import { sanitizeTitle, classifyTitleOutcome } from "./core/title";
+import { sanitizeTitle, classifyTitleOutcome, buildTitlePrompt, type TitleInput } from "./core/title";
 import { buildEditPrompt, buildContinuePrompt } from "./core/inline-ai";
 import { inlineAiExtension } from "./editor/inline-ai";
 import { mentionsExtension } from "./mentions/editor";
@@ -1267,7 +1267,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *  reply that came back but sanitized to nothing (see `classifyTitleOutcome`
    *  in core/title.ts). Deliberately NOT gated behind a debug flag — this needs
    *  to produce data during normal use. */
-  async generateTitle(userText: string, assistantText: string, signal: AbortSignal): Promise<string> {
+  async generateTitle(input: TitleInput, signal: AbortSignal): Promise<string> {
     const t0 = Date.now();
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
@@ -1320,14 +1320,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
           /* already torn down */
         }
       });
-      // Cap the input (~1500 chars total) so the call stays cheap and fast.
-      const user = userText.replace(/\s+/g, " ").trim().slice(0, 800);
-      const asst = assistantText.replace(/\s+/g, " ").trim().slice(0, 700);
-      const prompt =
-        "Write a short, specific title for this chat. Rules: 3-6 words, plain text only, " +
-        "no surrounding quotes, no backticks, no trailing punctuation, and no preamble " +
-        '(never "Chat about…", "Title:", etc). Return ONLY the title.\n\n' +
-        `User: ${user}\n\nAssistant: ${asst}`;
+      const prompt = buildTitlePrompt(input);
       let out = "";
       try {
         await session.send(prompt, (e: AgentEvent) => {

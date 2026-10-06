@@ -36,6 +36,7 @@ import { ok, err, getExo, pluginInstance, type Result } from "./tool-kit";
 import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools";
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
 import { buildCollaboTools, COLLABO_READ_TOOLS, collaboBridgeFrom } from "./collabo-tools";
+import { buildChatTools } from "./chat-tools";
 import { toSdkTools, type AnyTool } from "./sdk-tool";
 import { blockSpec } from "../core/agent-self";
 import { memoryCaps, type MemoryCaps } from "../core/memory-caps";
@@ -1204,6 +1205,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     ...buildMemoryTools(app, memory),
     ...(orchestrationEnabled ? [addTask, listTasks] : []),
     ...(orchestrationEnabled && parentConvoId ? [spawnTask] : []),
+    ...(parentConvoId ? buildChatTools(app, parentConvoId) : []),
     ...(browserBridge ? buildBrowserTools(browserBridge) : []),
     ...(collaboBridge ? buildCollaboTools(collaboBridge) : []),
   ];

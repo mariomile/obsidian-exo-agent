@@ -26,6 +26,15 @@ export function registerChatCommands(plugin: ExoPlugin): void {
     callback: () => void searchChatsCommand(plugin),
   });
   plugin.addCommand({
+    id: "retitle-chat",
+    name: "Retitle this chat",
+    callback: () => {
+      const id = plugin.activeConvoId();
+      if (id) retitleWithNotice(plugin, id);
+      else void plugin.activateView();
+    },
+  });
+  plugin.addCommand({
     id: "retitle-chats",
     name: "Retitle auto-named chats",
     callback: () => void plugin.backfillTitles(),
@@ -111,4 +120,23 @@ async function searchChatsCommand(plugin: ExoPlugin): Promise<void> {
     const view = leaf.view as { focusSearch?: () => void };
     view.focusSearch?.();
   }
+}
+
+/** Regenerate one chat's title from the whole conversation, with the feedback
+ *  every entry point owes the user: cold-spawning a CLI session takes seconds,
+ *  and an action that appears to do nothing for ten seconds reads as broken.
+ *  Shared by the command, the tab menu and the sidebar row menu. */
+export function retitleWithNotice(plugin: ExoPlugin, id: string, after?: () => void): void {
+  const pending = new Notice("Retitling…", 0);
+  void plugin
+    .retitleConversation(id)
+    .then((ok) => {
+      pending.hide();
+      if (!ok) new Notice("Couldn't retitle: this chat has no complete exchange yet.");
+      after?.();
+    })
+    .catch(() => {
+      pending.hide();
+      new Notice("Retitling failed.");
+    });
 }

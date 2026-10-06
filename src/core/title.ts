@@ -76,3 +76,90 @@ export function isAiTitleDue(state: { attempts: number; applied: boolean }, maxA
   if (state.applied) return false;
   return state.attempts < maxAttempts;
 }
+
+/* ---------------------------- title prompts ---------------------------- */
+
+/**
+ * What a title is generated from. `initial` is the turn-end path: the first
+ * exchange. `regenerate` is the explicit "Retitle" (menu, command, or the agent
+ * asking for it): the whole conversation, plus the title it has now, as in
+ * T3 Code's ThreadTitleRegenerationService.
+ */
+export type TitleInput =
+  | { kind: "initial"; userText: string; assistantText: string }
+  | { kind: "regenerate"; context: string; previousTitle: string };
+
+const TITLE_RULES =
+  "Rules: 3-8 words, under 40 characters, a noun or action phrase naming the subject and outcome. " +
+  "Name the durable goal, not the artifact used to reach it (plan, draft, review). " +
+  "Do not mention models, agents or tools unless they are the topic. Do not claim the work is done. " +
+  "Plain text only: no quotes, no backticks, no trailing punctuation, no preamble. Return ONLY the title.";
+
+/** The prompt for one title call. */
+export function buildTitlePrompt(input: TitleInput): string {
+  if (input.kind === "initial") {
+    // Cap the input (~1500 chars total) so the call stays cheap and fast.
+    const user = input.userText.replace(/\s+/g, " ").trim().slice(0, 800);
+    const asst = input.assistantText.replace(/\s+/g, " ").trim().slice(0, 700);
+    return (
+      "Write a title that will help the user recognize this chat weeks later. " +
+      `${TITLE_RULES}\n\nUser: ${user}\n\nAssistant: ${asst}`
+    );
+  }
+  return (
+    "Regenerate the title of an existing chat. Read the USER messages for the latest durable goal; " +
+    "use the ASSISTANT messages only to resolve vague words. A chat that moved through research, " +
+    "planning, writing and review has usually not changed subject. " +
+    "If the current title is still accurate, return it unchanged. " +
+    `${TITLE_RULES}\n\nCurrent title: ${input.previousTitle}\n\nChat contents:\n${input.context}`
+  );
+}
+
+const CONTEXT_MAX = 8_000;
+const CONTEXT_PER_MESSAGE = 2_000;
+const CONTEXT_USER_BUDGET = 6_000;
+
+type TitleMessage = { role: string; text?: string; segments?: readonly { t: string; md?: string }[] };
+
+const clipMessage = (s: string): string => {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > CONTEXT_PER_MESSAGE ? `${flat.slice(0, CONTEXT_PER_MESSAGE)} [Content truncated]` : flat;
+};
+
+/**
+ * The conversation as title context, T3's budget: at most 8,000 characters and
+ * 2,000 per message; the first user message always; then user messages,
+ * newest first, up to 6,000, so long answers can never crowd out what the
+ * user asked; assistant prose fills what is left. Tool calls are never sent.
+ * Output is in chronological order.
+ */
+export function titleContext(messages: readonly TitleMessage[]): string {
+  const lines = messages
+    .map((m, i) => ({
+      i,
+      role: m.role,
+      text: clipMessage(
+        m.role === "user"
+          ? (m.text ?? "")
+          : (m.segments ?? []).filter((s) => s.t === "text").map((s) => s.md ?? "").join(" "),
+      ),
+    }))
+    .filter((l) => (l.role === "user" || l.role === "assistant") && l.text);
+  const picked = new Set<number>();
+  let used = 0;
+  const take = (l: (typeof lines)[number], cap: number): void => {
+    if (picked.has(l.i) || used + l.text.length > cap) return;
+    picked.add(l.i);
+    used += l.text.length;
+  };
+  const users = lines.filter((l) => l.role === "user");
+  if (users[0]) take(users[0], CONTEXT_MAX);
+  for (const l of [...users].reverse()) take(l, CONTEXT_USER_BUDGET);
+  for (const l of [...lines].reverse()) if (l.role === "assistant") take(l, CONTEXT_MAX);
+  const kept = lines.filter((l) => picked.has(l.i));
+  const omitted = kept.length < lines.length && kept[0]?.i !== lines[0]?.i;
+  return [
+    ...(omitted ? ["[Earlier content truncated]"] : []),
+    ...kept.map((l) => `${l.role === "user" ? "USER" : "ASSISTANT"}: ${l.text}`),
+  ].join("\n\n");
+}

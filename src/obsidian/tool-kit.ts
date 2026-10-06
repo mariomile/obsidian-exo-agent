@@ -29,6 +29,9 @@ export interface ExoToolHost {
     collaboShares: Record<string, { slug: string; ownerSecret: string; accessToken: string; role: string }>;
   };
   saveSettings(): Promise<void>;
+  /** The chat's own title (obsidian/chat-tools.ts `update_chat`). */
+  renameConversation(id: string, title: string): boolean;
+  retitleConversation(id: string): Promise<boolean>;
   loadAutomationRuns(): Promise<AutomationRunRecord[]>;
   restoreAutomationRun(id: string): Promise<string[]>;
   markAutomationRunReviewed(id: string): Promise<void>;
