@@ -609,6 +609,26 @@ describe("OrchestratorDriver — child reports", () => {
     expect(reports).toHaveLength(1);
   });
 
+  it("an approved card resumes the child, so its finish reaches the parent", async () => {
+    const reports: ChildReport[] = [];
+    const { deps, emitter } = makeDeps([
+      task({ id: "task-8", title: "Touch file", status: "running", parent: "convo-parent", convo: "convo-child" }),
+    ]);
+    deps.onChildReport = (r) => reports.push(r);
+    const driver = new OrchestratorDriver(deps);
+    await driver.start();
+
+    emitter.emit({ convoId: "convo-child", state: "needs-input", reason: "perm" });
+    await flushReports();
+    // The view emits turn-start when the card is answered and the turn goes on.
+    emitter.emit({ convoId: "convo-child", state: "turn-start" });
+    emitter.emit({ convoId: "convo-child", state: "turn-end" });
+    await flushReports();
+
+    expect(reports.map((r) => r.outcome)).toEqual(["blocked", "done"]);
+    expect(driver.snapshot().find((t) => t.id === "task-8")!.status).toBe("review");
+  });
+
   it("re-running a settled child reports again — a real second settling transition", async () => {
     const reports: ChildReport[] = [];
     const { deps, emitter } = makeDeps([
