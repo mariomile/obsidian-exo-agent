@@ -2,11 +2,22 @@
  * Proposal Kernel — pure parsing, validation, deduplication and retention.
  *
  * This module deliberately has no Obsidian imports and performs no IO. Model
- * output enters through `parseProposalCandidates`; only validated, explicitly
- * accepted records may later be routed to a side-effecting store.
+ * output enters through `parseProposalCandidates`; only validated records may
+ * later be routed to a side-effecting store. Memory kinds (loop, decision) are
+ * routed as soon as they are validated and deduped; action kinds (task,
+ * playbook) are routed only once the user accepts them.
  */
 
 export type ProposalKind = "task" | "loop" | "decision" | "playbook";
+/**
+ * Memory kinds (open-loops ledger, decisions) are written the moment they are
+ * validated and deduped: review happens after the fact, never before. Actions
+ * (`task`, `playbook`) stay pending until the user accepts.
+ */
+export function isMemoryProposalKind(kind: ProposalKind): boolean {
+  return kind === "loop" || kind === "decision";
+}
+
 export type ProposalStatus = "pending" | "accepted" | "dismissed";
 
 export type ProposalPayload =
@@ -39,6 +50,8 @@ export interface ProposalRecord {
     createdAt: number;
   };
   resolvedAt?: number;
+  /** Last routing failure while the record stayed pending; cleared on success. */
+  lastError?: string;
 }
 
 /** A validated, still-inert proposal before persistence assigns identity/source. */

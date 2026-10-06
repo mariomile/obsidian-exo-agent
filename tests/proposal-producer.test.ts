@@ -129,6 +129,7 @@ describe("proposal producer extraction", () => {
       status: "generated",
       candidates: 0,
       appended: 0,
+      saved: [],
       duplicates: 0,
       invalid: 0,
     });
@@ -197,9 +198,29 @@ describe("proposal producer extraction", () => {
       status: "generated",
       candidates: 3,
       appended: 1,
+      saved: [],
       duplicates: 1,
       invalid: 1,
     });
     expect(mocked.recordMetric).not.toHaveBeenCalled();
+  });
+
+  it("reports memory records written directly apart from pending suggestions", async () => {
+    const taskJson = { kind: "task", title: "First", prompt: "Do it", rationale: "Explicit" };
+    const mocked = deps(JSON.stringify([taskJson, { ...taskJson, title: "Second" }]), [
+      { status: "appended", record: { status: "pending" } as ProposalRecord },
+      {
+        status: "applied",
+        record: { kind: "decision", title: "Use Postgres", status: "accepted" } as ProposalRecord,
+        target: "Decisions/2026-10-06-use-postgres.md",
+        path: "Decisions/2026-10-06-use-postgres.md",
+      },
+    ]);
+    const result = await produceTurnProposals(eligible(), mocked.value);
+    expect(result).toMatchObject({
+      status: "generated",
+      appended: 1,
+      saved: [{ kind: "decision", title: "Use Postgres", path: "Decisions/2026-10-06-use-postgres.md" }],
+    });
   });
 });

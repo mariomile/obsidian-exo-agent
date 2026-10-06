@@ -18,9 +18,8 @@ export const autoMemoryNote = (opts: { recall: boolean; chats: boolean }): strin
 
 /** Prompt surface for the identity layer: appended when the agent folder is on
  *  and `rethink_memory` is registered. Explains WHEN to rethink (world-model
- *  change) and the propose-only persona tier. */
+ *  change) and the rationale requirement for SOUL/USER. */
 export const agentFolderNote = (agentDir: string): string =>
   "### Identity: `rethink_memory`\n" +
   `Your shared kernel lives in \`${agentDir}/\` (SOUL, USER, NOW) and is already in your boot context above. ` +
-  "Call `rethink_memory` only when your MODEL OF THE WORLD changes: a shifted priority (NOW.md), a durable update to how you understand the user (USER.md, pass a rationale). Not for single facts: those land in the vault automatically. " +
-  "`SOUL.md` is propose-only: a `rethink_memory` on it records a proposal for the user to approve, it does not write.";
+  "Call `rethink_memory` only when your MODEL OF THE WORLD changes: a shifted priority (NOW.md), a durable update to how you understand the user (USER.md) or to how you behave (SOUL.md). Pass a rationale for USER.md and SOUL.md: it is shown in the feed diff, where the user reviews and can undo after the fact. Not for single facts: those land in the vault automatically.";

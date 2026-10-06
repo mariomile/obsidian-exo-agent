@@ -67,18 +67,20 @@ export class OpenLoopProposalTarget implements OpenLoopTarget {
   constructor(
     private readonly vault: ProposalTargetVaultAdapter,
     private readonly queue: WriteQueue,
+    /** Called with each memory file written, so git autocommit covers it. */
+    private readonly noteWrite: (paths: readonly string[]) => void,
     private readonly now: () => number = Date.now,
     private readonly openLoopsPath: string = OPEN_LOOPS_PATH
   ) {}
 
-  create(input: OpenLoopCreateInput): Promise<{ id: string }> {
+  create(input: OpenLoopCreateInput): Promise<{ id: string; path: string }> {
     return this.queue.enqueue(async () => {
       const existing = this.vault.getFile(this.openLoopsPath);
       const current = existing ? await this.vault.read(this.openLoopsPath) : "";
       const entries = current ? parseLoopsFile(current) : [];
       const marker = proposalMarker(input.proposalId);
       const prior = entries.find(({ note }) => note.includes(marker));
-      if (prior) return { id: prior.id };
+      if (prior) return { id: prior.id, path: this.openLoopsPath };
 
       // Date.now() alone can collide when two proposals are accepted in the
       // same millisecond. Re-check against the freshly-read ledger while still
@@ -104,7 +106,8 @@ export class OpenLoopProposalTarget implements OpenLoopTarget {
         await this.vault.ensureFolder(this.openLoopsPath);
         await this.vault.create(this.openLoopsPath, content);
       }
-      return { id: entry.id };
+      this.noteWrite([this.openLoopsPath]);
+      return { id: entry.id, path: this.openLoopsPath };
     });
   }
 }
@@ -125,6 +128,8 @@ function localDate(date: Date): string {
 export class DecisionProposalTarget implements DecisionTarget {
   constructor(
     private readonly vault: ProposalTargetVaultAdapter,
+    /** Called with each memory file written, so git autocommit covers it. */
+    private readonly noteWrite: (paths: readonly string[]) => void,
     private readonly now: () => Date = () => new Date(),
     private readonly decisionsDir: string = DECISIONS_DIR
   ) {}
@@ -155,6 +160,7 @@ export class DecisionProposalTarget implements DecisionTarget {
     // `create` is the final collision guard. A race rejects here rather than
     // falling back to modify, so an existing decision is never overwritten.
     await this.vault.create(path, content);
+    this.noteWrite([path]);
     return { path };
   }
 }
@@ -220,6 +226,8 @@ export interface ProposalAcceptanceTargetOptions {
   openLoopsPath?: string;
   /** Decisions dir (`paths.decisions`). Absent → the legacy location. */
   decisionsDir?: string;
+  /** Called with each memory file a proposal wrote, so git autocommit covers it. */
+  noteWrite: (paths: readonly string[]) => void;
 }
 
 /** Build the exact dependency object consumed by `routeAcceptedProposal`. */
@@ -228,8 +236,19 @@ export function createProposalAcceptanceDeps(
 ): ProposalAcceptanceDeps {
   return {
     tasks: new TaskProposalTarget(options.tasks),
-    loops: new OpenLoopProposalTarget(options.vault, options.loopsWriteQueue, options.nowMs, options.openLoopsPath ?? OPEN_LOOPS_PATH),
-    decisions: new DecisionProposalTarget(options.vault, options.nowDate, options.decisionsDir ?? DECISIONS_DIR),
+    loops: new OpenLoopProposalTarget(
+      options.vault,
+      options.loopsWriteQueue,
+      options.noteWrite,
+      options.nowMs,
+      options.openLoopsPath ?? OPEN_LOOPS_PATH
+    ),
+    decisions: new DecisionProposalTarget(
+      options.vault,
+      options.noteWrite,
+      options.nowDate,
+      options.decisionsDir ?? DECISIONS_DIR
+    ),
     playbooks: new PlaybookProposalTarget(options.playbooksWriteQueue, options.playbooks),
   };
 }

@@ -18,6 +18,7 @@ import {
   buildAgentRunPrompt,
   collectRunProposals,
   proposeEligible,
+  proposalContract,
   type RunProposalDeps,
 } from "../src/core/agent-runs";
 import { mergeAgents, defaultContract, parseTrigger, type AgentBrain, type AgentContract } from "../src/core/agents";
@@ -366,7 +367,7 @@ describe("buildAgentRunPrompt — the proposal channel", () => {
   it("names the kernel's existing kinds and says proposals are inert", () => {
     const p = buildAgentRunPrompt(propose, "x", undefined, undefined, "r", true);
     for (const kind of ["task", "loop", "decision", "playbook"]) expect(p).toContain(`\`${kind}\``);
-    expect(p).toContain("INERT until a human accepts");
+    expect(p).toContain("stay inert until a human accepts");
   });
 });
 
@@ -683,6 +684,16 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
     expect(mocked.diagnostic).toHaveBeenCalledTimes(1);
   });
 
+  it("counts only proposals left pending review, not memory records written directly", async () => {
+    const loopJson = { kind: "loop", title: "Call Anna", note: "Soon", rationale: "follow-up" };
+    const append = vi.fn(async (candidate: ProposalCandidate) => ({
+      status: candidate.kind === "loop" ? "applied" : "appended",
+    }));
+    const landed = await collectRunProposals(fenced([taskJson, loopJson]), runSource, { store: { append } });
+    expect(append).toHaveBeenCalledTimes(2);
+    expect(landed).toBe(1);
+  });
+
   it("never throws when the store append fails", async () => {
     const append = vi.fn(async () => {
       throw new Error("disk full");
@@ -690,5 +701,14 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
     const diagnostic = vi.fn();
     expect(await collectRunProposals(fenced([taskJson]), runSource, { store: { append }, diagnostic })).toBe(0);
     expect(diagnostic).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("proposalContract copy", () => {
+  it("says loops and decisions are recorded directly and only tasks and playbooks stay inert", () => {
+    const text = proposalContract("Memory/");
+    expect(text).toMatch(/`loop` and `decision` entries are recorded in the vault/);
+    expect(text).toMatch(/`task` and `playbook` entries stay inert until a human accepts/);
+    expect(text).not.toMatch(/Proposals are INERT/);
   });
 });

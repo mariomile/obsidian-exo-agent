@@ -308,9 +308,9 @@ export function proposalContract(memoryRootHint: string): string {
     "  - `loop` (an open thread to resurface) → `title`, `note` (optional `resurface` as YYYY-MM-DD, `tags`)",
     "  - `decision` (a choice worth recording) → `title`, `context`, `decision`",
     "  - `playbook` (a repeatable prompt worth saving) → `name`, `prompt`",
-    "- At most 3 entries, and only things a human would plausibly accept. An empty run needs no block at all.",
+    "- At most 3 entries, and only things worth keeping or that a human would plausibly accept. An empty run needs no block at all.",
     "- Titles stay under 120 characters and rationales under 500. One bad entry rejects the whole block, so keep it minimal and valid.",
-    "- Proposals are INERT until a human accepts them, so propose the real thing rather than a watered-down version — but do not propose the same thing twice.",
+    "- `loop` and `decision` entries are recorded in the vault as soon as your run ends and are reviewed afterwards, so write them as final. `task` and `playbook` entries stay inert until a human accepts them. Do not propose the same thing twice.",
     `- Do not use a proposal to ask for a file edit you could describe in prose; edits stay in your report (${memoryRootHint}).`,
     "",
   ].join("\n");
@@ -367,7 +367,7 @@ export interface RunProposalDeps {
  * this for a run that was given the contract.
  *
  * Never throws: a malformed block or a failed append costs the proposals, not
- * the run that already did the work. Returns how many landed.
+ * the run that already did the work. Returns how many landed pending review.
  */
 export async function collectRunProposals(
   output: string,

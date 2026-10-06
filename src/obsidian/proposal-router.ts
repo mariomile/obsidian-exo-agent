@@ -1,10 +1,11 @@
 /**
- * Explicit side-effect router for proposals that the user has accepted.
+ * Explicit side-effect router for proposals being written to their targets:
+ * memory kinds right after they are validated, action kinds once the user accepts.
  *
  * The router owns no persistence primitives itself. Production wiring injects
  * the existing queued/raw-preserving stores, while tests use structural fakes.
  * Every dependency failure is converted to a route result so ProposalStore can
- * leave the record pending and offer Retry.
+ * leave the record pending, keep the error, and offer Retry.
  */
 import type { ProposalPayload, ProposalRecord } from "../core/proposals";
 import type { NewBacklogTask } from "../core/tasks";
@@ -35,7 +36,7 @@ export interface ProposalAcceptanceDeps {
   };
   /** Production implementation must use the shared Open Loops WriteQueue. */
   loops: {
-    create(loop: OpenLoopCreateInput): Promise<{ id: string }>;
+    create(loop: OpenLoopCreateInput): Promise<{ id: string; path: string }>;
   };
   /** Production implementation must create the decision with raw-preserving frontmatter patching. */
   decisions: {
@@ -70,7 +71,7 @@ function unsupportedPayload(payload: never): ProposalAcceptanceResult {
   };
 }
 
-/** Route one already-accepted-by-the-user proposal through its safe store. Never throws. */
+/** Route one proposal through its safe store. Never throws. */
 export async function routeAcceptedProposal(
   record: ProposalRecord,
   deps: ProposalAcceptanceDeps
@@ -110,7 +111,7 @@ export async function routeAcceptedProposal(
           ...(payload.resurface ? { resurface: payload.resurface } : {}),
           ...(payload.tags?.length ? { tags: payload.tags } : {}),
         });
-        return { ok: true, target: created.id };
+        return { ok: true, target: created.id, path: created.path };
       }
       case "decision": {
         const created = await deps.decisions.captureRawPreserving({

@@ -85,7 +85,8 @@ const CEILINGS: Record<string, number> = {
   // schedule, modal) cancellato; gli helper git sono in `obsidian/git.ts` e il
   // wiring della memoria in `obsidian/memory-wiring.ts`. 3316 -> 3040 righe
   // reali. Il tetto scende a 3050.
-  "src/main.ts": 3050,
+  // Abbassato a 3040, il conteggio reale, dopo la review del memory gate.
+  "src/main.ts": 3040,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza

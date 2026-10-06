@@ -32,7 +32,7 @@ function record<K extends ProposalPayload["kind"]>(kind: K): ProposalRecord {
 function deps(): ProposalAcceptanceDeps {
   return {
     tasks: { create: vi.fn(async () => ({ id: "task-1" })) },
-    loops: { create: vi.fn(async () => ({ id: "loop-1" })) },
+    loops: { create: vi.fn(async () => ({ id: "loop-1", path: "Memory/open-loops.md" })) },
     decisions: { captureRawPreserving: vi.fn(async () => ({ path: "_system/memory/decisions/decision.md" })) },
     playbooks: {
       save: vi.fn(async ({ name }) => ({ name })),
@@ -54,7 +54,11 @@ describe("routeAcceptedProposal", () => {
 
   it("routes loops through the shared queued Open Loops create dependency", async () => {
     const d = deps();
-    await expect(routeAcceptedProposal(record("loop"), d)).resolves.toEqual({ ok: true, target: "loop-1" });
+    await expect(routeAcceptedProposal(record("loop"), d)).resolves.toEqual({
+      ok: true,
+      target: "loop-1",
+      path: "Memory/open-loops.md",
+    });
     expect(d.loops.create).toHaveBeenCalledWith({
       proposalId: "proposal-loop",
       title: "Check adoption",

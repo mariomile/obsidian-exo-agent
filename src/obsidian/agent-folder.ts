@@ -5,14 +5,14 @@ import { AGENT_DIR, isAgentBlock, type BlockName } from "../core/agent-self";
 /**
  * The Agent Is the Folder — Obsidian-side block IO for the agent folder.
  *
- * The pure identity logic (registry, manifest parse, `compileIdentity`,
- * `planRethink`) lives in `src/core/agent-self.ts`. This module is the thin,
+ * The pure identity logic (registry, manifest parse, `compileIdentity`)
+ * lives in `src/core/agent-self.ts`. This module is the thin,
  * impure glue that reads and writes the three block files through the SHARED
  * store write-queue, capturing a before-image so every governed write surfaces a
  * diff-with-undo in the activity feed (non-negotiable #4). It never decides
- * policy: the caller (the `rethink_memory` tool, or the Apply click on a SOUL
- * proposal) has already resolved the tier via `planRethink`; this just enacts a
- * block replacement and hands back the undo snapshot.
+ * policy: the `rethink_memory` tool has already enforced the block's
+ * rationale rule; this just enacts a block replacement and hands back the undo
+ * snapshot.
  */
 
 /** Snapshot of a block file taken immediately BEFORE a governed write — the
@@ -73,11 +73,10 @@ export class AgentFolder {
 
   /**
    * Replace a block's WHOLE content through the write-queue, capturing a
-   * before-image. This is the single governed write path for `NOW.md`/`USER.md`
-   * (direct rewrite) and for an APPLIED `SOUL.md` proposal — the tier check
-   * happens upstream. Missing block file → created (previous = ""); existing →
-   * modified. Returns the write descriptor (previous + snapshot) so the caller
-   * can render the feed diff and wire undo.
+   * before-image. This is the single governed write path for every block
+   * (direct rewrite); the tier check happens upstream. Missing block file →
+   * created (previous = ""); existing → modified. Returns the write descriptor
+   * (previous + snapshot) so the caller can render the feed diff and wire undo.
    */
   async writeBlock(block: BlockName, next: string): Promise<BlockWrite> {
     const path = blockPath(block, this.agentDir);

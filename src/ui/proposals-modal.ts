@@ -7,7 +7,6 @@ export interface ProposalsModalOptions {
   accept(id: string): Promise<ProposalAcceptResult>;
   dismiss(id: string): Promise<ProposalRecord>;
   sourceTitle(convoId: string): string;
-  lastRouteError(id: string): string | undefined;
   /** When present, playbook proposals expose editable name/prompt before Accept. */
   updatePlaybook?(id: string, patch: { name: string; prompt: string }): Promise<ProposalRecord>;
 }
@@ -153,7 +152,7 @@ export class ProposalsModal extends Modal {
       }
     }
 
-    const routeError = this.sessionErrors.get(record.id) ?? this.options.lastRouteError(record.id);
+    const routeError = this.sessionErrors.get(record.id) ?? record.lastError;
     if (routeError) {
       const warning = parent.createDiv({ cls: "mva-proposals-warning" });
       setIcon(warning.createSpan(), "alert-circle");

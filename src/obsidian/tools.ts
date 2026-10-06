@@ -37,6 +37,7 @@ import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools"
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
 import { buildCollaboTools, COLLABO_READ_TOOLS, collaboBridgeFrom } from "./collabo-tools";
 import { toSdkTools, type AnyTool } from "./sdk-tool";
+import { blockSpec } from "../core/agent-self";
 import { memoryCaps, type MemoryCaps } from "../core/memory-caps";
 import { DEFAULT_SETTINGS } from "../settings-schema";
 import { buildMemoryTools, MEMORY_READ_TOOLS } from "./memory-tools";
@@ -56,10 +57,10 @@ interface AskQuestion {
   multiSelect?: boolean;
 }
 
-/** A `rethink_memory` request handed to the view-side bridge. The tool has NOT
- *  yet decided the tier — the bridge resolves `planRethink`, enacts the write
- *  (now/human) or records a pending proposal card (persona), and returns a short
- *  status line for the model. Kept minimal to avoid a tools→view import cycle. */
+/** A `rethink_memory` request handed to the view-side bridge. The tool has
+ *  already enforced the block's rationale rule; the bridge enacts the write,
+ *  renders the diff and undo row, and returns a short status line for the model.
+ *  Kept minimal to avoid a tools→view import cycle. */
 export interface RethinkRequest {
   block: "SOUL" | "USER" | "NOW";
   content: string;
@@ -206,9 +207,8 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
      *  a headless run, which must not drive a surface whose whole point is that
      *  Mario watches it. */
     browserBridge,
-    /** View-side bridge that enacts a `rethink_memory` request: resolves the tier,
-     *  writes (now/human) or records a pending proposal card (persona), and renders
-     *  the feed diff+undo. Absent → the tool is not registered. */
+    /** View-side bridge that enacts a `rethink_memory` request: writes the block
+     *  directly and renders the feed diff+undo. Absent → the tool is not registered. */
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
     agentCaller = EXO_CALLER,
@@ -679,14 +679,17 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
   const rethinkMemory = tool(
     "rethink_memory",
-    "Rewrite one shared-kernel block when your MODEL OF THE WORLD changes, not for single facts (those land in the vault automatically after the chat). `NOW.md` = what matters right now (hot projects, focus); `USER.md` = your distilled working model of the user (pass a `rationale`: it's surfaced with the change); `SOUL.md` = shared operating principles (this only PROPOSES a change for the user to approve, it does not write). Pass the WHOLE new block content, not a patch.",
+    "Rewrite one shared-kernel block when your MODEL OF THE WORLD changes, not for single facts (those land in the vault automatically after the chat). `NOW.md` = what matters right now (hot projects, focus); `USER.md` = your distilled working model of the user; `SOUL.md` = shared operating principles. Pass a `rationale` for USER.md and SOUL.md: it's surfaced with the change in the feed, where the user reviews and can undo. Pass the WHOLE new block content, not a patch.",
     {
       block: z.enum(["SOUL", "USER", "NOW"]),
       new_content: z.string().describe("The complete new content for the block (replaces it whole; never truncated)."),
-      rationale: z.string().optional().describe("Why the change — required for USER.md, surfaced prominently in the change."),
+      rationale: z.string().optional().describe("Why the change — required for USER.md and SOUL.md, surfaced prominently in the change."),
     },
     async (args) => {
       if (!rethinkBridge) return err("The agent identity layer is off.");
+      if (blockSpec(args.block).requiresRationale && !args.rationale?.trim()) {
+        return err(`Not written: ${args.block}.md needs a rationale. Call rethink_memory again with one.`);
+      }
       try {
         const status = await rethinkBridge({
           block: args.block,
@@ -1196,7 +1199,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     listAutomations, savePlaybook, manageAutomation, reviewAutomationRun,
     ...buildCapabilityTools(app),
     ...(memory.ledgerWrite ? [captureDecision, openLoop, closeLoopTool] : []),
-    // `rethink_memory` also needs a live view bridge to render its diff/proposal.
+    // `rethink_memory` also needs a live view bridge to render its diff.
     ...(memory.rethink && rethinkBridge ? [rethinkMemory] : []),
     ...buildMemoryTools(app, memory),
     ...(orchestrationEnabled ? [addTask, listTasks] : []),
