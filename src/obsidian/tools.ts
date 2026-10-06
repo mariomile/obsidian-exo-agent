@@ -36,7 +36,7 @@ import { ok, err, getExo, pluginInstance, type Result } from "./tool-kit";
 import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools";
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
 import { buildCollaboTools, COLLABO_READ_TOOLS, collaboBridgeFrom } from "./collabo-tools";
-import { buildChatTools } from "./chat-tools";
+import { buildChatTools, CHAT_READ_TOOLS } from "./chat-tools";
 import { toSdkTools, type AnyTool } from "./sdk-tool";
 import { blockSpec } from "../core/agent-self";
 import { memoryCaps, type MemoryCaps } from "../core/memory-caps";
@@ -191,9 +191,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     memory = DEFAULT_TOOL_MEMORY,
     askBridge,
     loopsWriteQueue = new WriteQueue(),
-    /** Orchestration Board master flag (default OFF). Gates `add_task` only —
-     *  every other tool above is unaffected, and the tool list sent to sessions
-     *  must be byte-identical to before this parameter existed when this is false. */
+    /** Orchestration Board master flag (default OFF). Gates the task tools:
+     *  add_task, list_tasks, spawn_task, task_status, task_cancel. With it off
+     *  none of them is registered. */
     orchestrationEnabled = false,
     /** Shared write-queue for the tasks ledger (`paths.tasks`),
      *  injected by the plugin the same way `loopsWriteQueue` is, so `add_task`
@@ -827,7 +827,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
   const spawnTask = tool(
     "spawn_task",
-    "Delegate a piece of work to a separate child conversation that runs in parallel with this one. Use it when the work is self-contained and would otherwise crowd this thread — research a source, draft a section, check a dataset. The child runs as a normal chat (so it can ask Mario for permission) and reports its outcome back here when it finishes. IMPORTANT: the Orchestration Board owns the scheduler, so it must be OPEN for a delegated task to run at all — with the board closed the task is written to the ledger and simply waits there, and nothing will report back. Say so if Mario seems to be expecting results. Prefer doing small work yourself: each child is a whole conversation Mario has to supervise.",
+    "Delegate a piece of work to a separate child conversation that runs in parallel with this one. Use it when the work is self-contained and would otherwise crowd this thread: research a source, draft a section, check a dataset. The child runs as a normal chat (its approvals show up here too) and, when it finishes, its report wakes this chat on its own, so never poll for it. Use task_status to look in, task_cancel to stop it, send_to_chat to give it more instructions. Prefer doing small work yourself: each child is a whole conversation Mario has to supervise.",
     {
       title: z.string().describe("Short title shown on the board card and in the sidebar."),
       prompt: z.string().describe("The full instruction for the child conversation — it does not see this chat's history."),
@@ -855,7 +855,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
           (tasks) => canSpawnChild(tasks, parentConvoId)
         );
         return ok(
-          `Queued child task ${entry.id}: ${entry.title}. It starts when the Orchestration Board is open and has a free slot, and reports back here when it is done. If the board is closed nothing runs — the task waits in the ledger.`
+          `Queued child task ${entry.id}: ${entry.title}. It starts as soon as a slot is free and reports back to this chat when it is done.`
         );
       } catch (e) {
         // A cap/depth refusal is expected traffic, not a failure — surface the
@@ -1205,7 +1205,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     ...buildMemoryTools(app, memory),
     ...(orchestrationEnabled ? [addTask, listTasks] : []),
     ...(orchestrationEnabled && parentConvoId ? [spawnTask] : []),
-    ...(parentConvoId ? buildChatTools(app, parentConvoId) : []),
+    ...(parentConvoId ? buildChatTools(app, parentConvoId, orchestrationEnabled) : []),
     ...(browserBridge ? buildBrowserTools(browserBridge) : []),
     ...(collaboBridge ? buildCollaboTools(collaboBridge) : []),
   ];
@@ -1242,6 +1242,7 @@ export const OBSIDIAN_READ_TOOLS = new Set([
   "mcp__obsidian__list_annotations",
   "mcp__obsidian__list_sonar_actions",
   ...MEMORY_READ_TOOLS,
+  ...CHAT_READ_TOOLS,
   "mcp__obsidian__list_loops",
   "mcp__obsidian__list_automations",
   "mcp__obsidian__list_agents",

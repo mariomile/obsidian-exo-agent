@@ -121,7 +121,9 @@ describe("fan-out tools registration gating", () => {
  * "I've delegated that, it'll report back" when nothing can run is worse than
  * one that says the board has to be open.
  */
-describe("spawn_task tells the truth about needing an open board", () => {
+// The runtime is plugin-owned (obsidian/orchestration.ts): a closed board stops
+// nothing, so neither text may tell the model it has to be open.
+describe("spawn_task tells the truth: no board needed, the report wakes the parent", () => {
   const spawnTool = () => {
     const { app } = fakeApp();
     const server = createObsidianToolServer(app, {
@@ -141,7 +143,9 @@ describe("spawn_task tells the truth about needing an open board", () => {
   };
 
   it("says so in the tool description the model reads before calling", () => {
-    expect(spawnTool().description).toMatch(/board.{0,40}open|open.{0,40}board/i);
+    const d = spawnTool().description;
+    expect(d).not.toMatch(/board.{0,40}open|open.{0,40}board/i);
+    expect(d).toMatch(/never poll/i);
   });
 
   it("says so again in the result, which is what the model actually acts on", async () => {
@@ -162,7 +166,9 @@ describe("spawn_task tells the truth about needing an open board", () => {
       { title: "Research the pricing page", prompt: "Go read it" },
       {}
     );
-    expect(result.content[0].text).toMatch(/board.{0,40}open|open.{0,40}board/i);
+    const text = result.content[0].text;
+    expect(text).not.toMatch(/board.{0,40}open|open.{0,40}board/i);
+    expect(text).toMatch(/reports back to this chat/);
   });
 });
 

@@ -51,6 +51,7 @@ import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { retitleWithNotice } from "./ui/chat-commands";
+import { stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
@@ -468,6 +469,7 @@ export class ChatView extends ItemView {
     }, 120, true);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => refreshForLeafChange()));
     this.register(() => refreshForLeafChange.cancel());
+    this.register(this.plugin.onConvoState((e) => surfaceChildBlock(this, e)));
     // Resizing the pane can flip a short transcript into overflow (or back) without
     // any content change — keep the tail "Related" section in sync with that too.
     // Debounced: a drag emits a continuous stream of resize ticks, and each tail
@@ -1489,7 +1491,7 @@ export class ChatView extends ItemView {
    * renders just changed", which is why later work adds calls here and not
    * scattered `renderTabs` calls.
    */
-  private refreshTabs(): void {
+  refreshTabs(): void {
     this.renderTabs();
     if (this.listWrap && this.active) renderResumeVerbs(this.listWrap, this.active, this.composer);
   }
@@ -2105,16 +2107,17 @@ export class ChatView extends ItemView {
     return c ? lastAssistantText(c.messages) : "";
   }
 
-  /** Queue a finished child's report onto its parent and surface it. The model
-   *  sees it on the parent's NEXT turn, never mid-turn — a turn already in
-   *  flight has its outbound message built. A report whose parent no longer
-   *  exists is dropped by `queueReportForParent`, which is correct. */
+  /** Queue a finished child's report onto its parent and wake the parent: a
+   *  turn now, or right after the one in flight (whose outbound is already
+   *  built). A report whose parent no longer exists is dropped by
+   *  `queueReportForParent`, which is correct. */
   deliverChildReport(report: ChildReport): void {
     const parent = queueReportForParent(this.allConvos(), report);
     if (!parent) return;
     parent.unread = true;
     this.refreshTabs();
     this.persist();
+    wakeParent(this, parent); // T3: a child's report wakes its parent, no polling
   }
 
   /**
@@ -2879,7 +2882,7 @@ export class ChatView extends ItemView {
     return recall;
   }
 
-  private addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): HTMLElement {
+  addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): HTMLElement {
     this.clearEmptyState(c);
     // Derive the tab title from the first message; canAutoTitle (core/title-ownership) decides what's untitled and whether it's locked.
     if (canAutoTitle(c, "first-message")) {
@@ -4764,8 +4767,7 @@ export class ChatView extends ItemView {
     this.plugin.emitConvoState(c.id, state, reason ? { reason } : undefined);
   }
 
-  private stop(source: "esc" | "button" = "button"): void {
-    const c = this.active;
+  stop(source: "esc" | "button" = "button", c: Convo = this.active): void {
     // `stopped` resets at turn start, so true here means a PRIOR stop this turn
     // hasn't settled it YET. That alone isn't proof of a stuck session — a
     // healthy `q.interrupt()` is a CLI round-trip, not a local call — so the
@@ -4780,6 +4782,7 @@ export class ChatView extends ItemView {
     this.renderQueue(c);
     c.pendingPerm?.(); // cancel any open permission card
     c.pendingAsk?.(); // cancel any open ask card
+    stopChildren(this, c); // the stop reaches every chat this one delegated to
     if (action === "dispose") {
       this.dropSession(c, "stop-escalation");
       new Notice("Exo — session force-reset");
@@ -5053,7 +5056,7 @@ export class ChatView extends ItemView {
   }
 
   /** Render queued (not-yet-sent) messages as removable chips. */
-  private renderQueue(c: Convo): void {
+  renderQueue(c: Convo): void {
     if (!c.queue.length) {
       c.pendingEl?.remove();
       c.pendingEl = null;
@@ -5083,7 +5086,7 @@ export class ChatView extends ItemView {
    *  hoisted to the front — but ONLY in the outbound payload. The bubble and
    *  history keep what the user actually typed, the same contract as
    *  sendPrefix and recall blocks (payload-only riders). */
-  private hoistOutbound(text: string): string {
+  hoistOutbound(text: string): string {
     const caps = this.sessionCaps ?? this.plugin.lastSessionCaps;
     return hoistSlashCommand(text, new Set([...(caps?.commands ?? []), ...(caps?.skills ?? [])]));
   }
@@ -5098,7 +5101,7 @@ export class ChatView extends ItemView {
    *  queue-drain recurses into this SAME function, from inside its own
    *  finally, before this wrapper's finally has released — the generation
    *  check is what stops that from deadlocking or double-releasing. */
-  private async runTurn(
+  async runTurn(
     c: Convo,
     text: string,
     images?: ImageAttachment[],
