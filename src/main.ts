@@ -24,6 +24,7 @@ import {
   activateChats as activateChatsView,
 } from "./ui/view-registry";
 import { registerChatCommands } from "./ui/chat-commands";
+import { registerAutomationCommands } from "./ui/hub/automation-actions";
 import { startScheduledPrompts } from "./ui/scheduled-runner";
 import { registerFormatCommands } from "./editor/format-commands";
 import { registerExoIcons } from "./ui/icons";
@@ -92,6 +93,7 @@ import {
   buildAgentSystemPrompt,
   collectRunProposals,
   dueScheduledAgentRuns,
+  seedUnseenSlots,
   isEmptyRun,
   gateAgentInvoke,
   gateAgentRun,
@@ -609,6 +611,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       callback: () => void this.openCockpit(),
     });
     registerChatCommands(this);
+    registerAutomationCommands(this);
     startScheduledPrompts(this);
     registerFormatCommands(this);
     this.addCommand({
@@ -681,7 +684,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     });
     this.addCommand({
       id: "automations",
-      name: "Automations…",
+      name: "Manage automations",
       callback: () => void this.activateHub("automations"),
     });
     this.addCommand({
@@ -2639,6 +2642,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         }
       }
       // Everything else — playbook or agent-backed — through the shared gates.
+      if (seedUnseenSlots(this.automationDefs(), this.settings.scheduledLastRun, Date.now())) await this.saveSettings();
       const due = dueScheduledAgentRuns(this.automationDefs(), this.settings.scheduledLastRun, Date.now());
       for (const run of due) {
         await this.runDueAutomation(run);
@@ -2740,6 +2744,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         write,
         agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
         codexBridge: await this.headlessBridge(),
+        mcp: agent.contract.mcp,
       };
       // Claude delegates to a true isolated subagent via an inline Agent()
       // instruction (buildAgentRunPrompt). Codex has no such primitive — its own

@@ -57,9 +57,16 @@ export interface Automation {
   canCall: string[];
   /** Minimum ms between two event-triggered runs. */
   cooldownMs: number;
+  /** External MCP servers a run may load, by CLI name (`claude.ai Gmail`).
+   *  Absent = the global setting decides; empty = none (core/mcp-scope.ts). */
+  mcp?: string[];
   enabled: boolean;
   /** Markdown body — the playbook itself. */
   prompt: string;
+  /** Frontmatter keys this model does not own (tags, notes Mario added), kept
+   *  verbatim with their continuation lines so a save from the form never
+   *  drops them. */
+  extra?: string[];
 }
 
 export const DEFAULT_AUTOMATION_ICON = "zap";
@@ -187,10 +194,11 @@ export function parseAutomationFile(
     warnings.push(`unknown system "${systemRaw}" — ignored`);
   }
 
+  const unescape = (v: string | undefined) => v?.replace(/\\"/g, '"');
   const automation: Automation = {
     slug,
-    name: fmScalar(fm, "name") ?? slug,
-    description: fmScalar(fm, "description") ?? "",
+    name: unescape(fmScalar(fm, "name")) ?? slug,
+    description: unescape(fmScalar(fm, "description")) ?? "",
     icon: fmScalar(fm, "icon") ?? DEFAULT_AUTOMATION_ICON,
     when,
     mode,
@@ -199,15 +207,41 @@ export function parseAutomationFile(
     canCall: fmList(fm, "can_call"),
     system: systemRaw === "daily-pulse" ? "daily-pulse" : undefined,
     cooldownMs,
+    ...(/^mcp:/m.test(fm) ? { mcp: fmList(fm, "mcp") } : {}),
     enabled: fmScalar(fm, "enabled") === "true",
     prompt: stripFrontmatter(raw).trim(),
   };
+  const extra = unknownFrontmatter(fm);
+  if (extra.length) automation.extra = extra;
   return { automation, warnings };
 }
 
+const KNOWN_KEYS = new Set(["name", "description", "icon", "when", "mode", "scope", "agent", "can_call", "system", "cooldown", "enabled", "mcp"]);
+
+/** Top-level keys the model does not own, each with its indented or `- `
+ *  continuation lines, in file order. */
+function unknownFrontmatter(fm: string): string[] {
+  const out: string[] = [];
+  let keep = false;
+  for (const line of fm.split(/\r?\n/)) {
+    const key = line.match(/^([A-Za-z_][\w-]*):/)?.[1];
+    if (key !== undefined) keep = !KNOWN_KEYS.has(key);
+    else if (!/^(\s|-\s|-$)/.test(line)) keep = false;
+    if (keep) out.push(line);
+  }
+  return out;
+}
+
+/** A scalar YAML would misread (a colon-space, a comment, a leading
+ *  indicator, a bare boolean or number) goes out double-quoted. */
+function yamlScalar(v: string): string {
+  const risky = /: |\s#|^[\s\-?:,[\]{}#&*!|>'"%@`]|\s$|^(true|false|null|yes|no|~|[\d.+-]+)$/i.test(v);
+  return risky ? `"${v.replace(/"/g, '\\"')}"` : v;
+}
+
 export function serializeAutomation(a: Automation): string {
-  const lines: string[] = ["---", `name: ${a.name}`];
-  if (a.description) lines.push(`description: ${a.description}`);
+  const lines: string[] = ["---", `name: ${yamlScalar(a.name)}`];
+  if (a.description) lines.push(`description: ${yamlScalar(a.description)}`);
   lines.push(`icon: ${a.icon}`);
   if (a.when.length) {
     lines.push("when:");
@@ -219,7 +253,9 @@ export function serializeAutomation(a: Automation): string {
   if (a.canCall.length) lines.push(`can_call: [${a.canCall.join(", ")}]`);
   if (a.system) lines.push(`system: ${a.system}`);
   lines.push(`cooldown: ${formatDuration(a.cooldownMs)}`);
+  if (a.mcp) lines.push(`mcp: [${a.mcp.map((n) => `"${n.replace(/"/g, "")}"`).join(", ")}]`);
   lines.push(`enabled: ${a.enabled}`);
+  if (a.extra?.length) lines.push(...a.extra);
   lines.push("---", "", a.prompt, "");
   return lines.join("\n");
 }
@@ -289,6 +325,7 @@ export function contractFromAutomation(a: Automation): import("./agents").AgentC
     scope: { read: [], write: a.scope },
     canCall: a.canCall,
     triggers: a.when,
+    ...(a.mcp ? { mcp: [...a.mcp] } : {}),
   };
 }
 
@@ -310,4 +347,60 @@ export function legacyConfigFromAutomation(a: Automation): AutomationConfig | nu
   const sched = a.when.find((w) => w.on === "schedule");
   if (sched?.on !== "schedule") return null;
   return { name: a.name, system: a.system, cadence: sched.cadence, enabled: a.enabled, write: a.mode === "act" };
+}
+
+/* ------------------------------ management ------------------------------ */
+
+/**
+ * What stops a save, in words the form shows next to the field. Empty when
+ * the automation is fine. The editor and `manage_automation` both use it, so
+ * the UI and the agent refuse the same things.
+ */
+export function validateAutomation(a: Automation): string[] {
+  const out: string[] = [];
+  if (!a.name.trim()) out.push("Give the automation a name.");
+  if (!a.prompt.trim() && !a.agent && !a.system) out.push("Write a prompt, or bind an agent that carries its own.");
+  if (a.mode === "act" && !a.scope.length) out.push("Act mode needs at least one folder it may write in.");
+  for (const w of a.when) {
+    if (w.on === "vault-event" && (!w.path || w.path === "**")) out.push(`"${formatWhen(w)}" watches the whole vault: name a folder.`);
+    if (w.on === "tag" && w.tag.length < 2) out.push("Name the tag the trigger waits for.");
+  }
+  if (!Number.isFinite(a.cooldownMs) || a.cooldownMs < 0) out.push("The cooldown is not a duration like 15m or 2h.");
+  return out;
+}
+
+/** A copy that never collides and starts paused: two identical automations
+ *  running at once is never what a duplicate is for. */
+export function duplicateAutomation(a: Automation, takenSlugs: ReadonlySet<string>): Automation {
+  let name = `${a.name} (copy)`;
+  let slug = slugifyAgent(name) || "automation";
+  for (let i = 2; takenSlugs.has(slug); i++) {
+    name = `${a.name} (copy ${i})`;
+    slug = slugifyAgent(name) || `automation-${i}`;
+  }
+  return {
+    ...a,
+    slug,
+    name,
+    enabled: false,
+    when: a.when.map((w) => ({ ...w })),
+    scope: [...a.scope],
+    canCall: [...a.canCall],
+    ...(a.mcp ? { mcp: [...a.mcp] } : {}),
+    ...(a.extra ? { extra: [...a.extra] } : {}),
+  };
+}
+
+/** Where an archived automation goes: the same path under `.archive/`, as
+ *  the vault convention has it. */
+export function archivedAutomationPath(automationsDir: string, slug: string): string {
+  return `.archive/${automationsDir}/${slug}.md`;
+}
+
+/** Scheduler cursors an automation leaves behind: its run keys and the
+ *  last-run stamp. Dropped when it is archived, so a later automation with
+ *  the same name starts clean. */
+export function automationRunKeysIn(lastRun: Record<string, number>, slug: string): string[] {
+  const base = `agent:${slug}`;
+  return Object.keys(lastRun).filter((k) => k === base || k.startsWith(`${base}::`));
 }

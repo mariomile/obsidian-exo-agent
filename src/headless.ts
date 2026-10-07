@@ -6,6 +6,7 @@ import { buildObsidianTools, createObsidianToolServer, OBSIDIAN_READ_TOOLS, type
 import type { CodexBridge } from "./obsidian/codex-bridge";
 import { READ_ONLY_TOOLS, toolFilePath, toolFilePaths } from "./ui/tools";
 import { isReadOnlyExternalTool } from "./core/headless-tools";
+import { rememberMcpServers, toolInMcpScope } from "./core/mcp-scope";
 import { WRITE_TOOLS } from "./core/touched";
 import { exoPaths, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { memoryCaps } from "./core/memory-caps";
@@ -42,6 +43,9 @@ export interface HeadlessOpts {
   systemPrompt?: string;
   /** The agent this run executes as: what its `invoke_agent` calls delegate from. */
   agentCaller?: AgentCaller;
+  /** External MCP servers this run may load; absent = `playbookExternalTools`
+   *  decides, empty = none (core/mcp-scope.ts). */
+  mcp?: string[];
 }
 
 function vaultPath(app: App): string {
@@ -142,7 +146,9 @@ export async function runHeadlessPlaybook(
       // External tools (Dia-style digest sources: Gmail/Slack/Calendar via MCP)
       // opt in per settings: fastStartup=false lets the CLI load external MCP
       // servers; the resolver below still auto-denies anything that mutates.
-      fastStartup: !settings.playbookExternalTools,
+      fastStartup: opts.mcp ? opts.mcp.length === 0 : !settings.playbookExternalTools,
+      waitForMcp: opts.mcp ? opts.mcp.length > 0 : settings.playbookExternalTools,
+      ...(opts.mcp?.length ? { mcpOnly: { allow: opts.mcp, known: settings.knownMcpServers ?? [] } } : {}),
       // Claude: in-process vault tools, same options as the Codex bridge above.
       obsidianServer:
         provider === "claude" && settings.obsidianToolsEnabled
@@ -155,6 +161,13 @@ export async function runHeadlessPlaybook(
       codexBridge,
     });
 
+    // Learn the server roster from what this session loaded, so a later
+    // `mcp:`-scoped run can deny the rest by name. Mutates the live settings;
+    // the run's caller persists them with its last-run stamp.
+    session.onCaps = (caps) => {
+      const next = rememberMcpServers(settings.knownMcpServers ?? [], caps.mcpServers.map((m) => m.name));
+      if (next) settings.knownMcpServers = next;
+    };
     for (let i = 0; i < steps.length; i++) {
       let stepText = "";
       let watchdog: number | null = null;
@@ -178,7 +191,13 @@ export async function runHeadlessPlaybook(
             if (fp) reads.add(fp);
           }
         } else if (e.kind === "permission-request") {
-          const externalRead = settings.playbookExternalTools && isReadOnlyExternalTool(e.tool);
+          // A server outside the automation's `mcp:` list may still have loaded
+          // (one Exo had not seen yet): its tools stay unusable.
+          if (!toolInMcpScope(e.tool, opts.mcp)) {
+            e.resolve({ behavior: "deny", message: "This automation's mcp: list does not include that server." });
+            return;
+          }
+          const externalRead = (opts.mcp ? opts.mcp.length > 0 : settings.playbookExternalTools) && isReadOnlyExternalTool(e.tool);
           if (READ_ONLY_TOOLS.has(e.tool) || OBSIDIAN_READ_TOOLS.has(e.tool) || externalRead) {
             e.resolve({ behavior: "allow" });
             return;

@@ -30,6 +30,7 @@ import { dailyPulseMetaLabel } from "../../core/daily-pulse";
 import { formatAge } from "../../core/actions-hub";
 import type { HubTabContext } from "./shared";
 import { openAutomationEditor, editingState } from "./automation-editor";
+import { describeAutomationInChat, duplicate } from "./automation-actions";
 
 export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext): Promise<void> {
   host.empty();
@@ -89,6 +90,8 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
     editingState.slug = null;
     ctx.rerender();
   };
+  const words = foot.createEl("button", { cls: "mva-btn", text: "Describe it in a chat" });
+  words.onclick = () => void describeAutomationInChat(ctx.plugin);
 
   renderLegacyRuns(host, runs, autos.map((a) => a.name), ctx);
 }
@@ -165,6 +168,10 @@ function renderCard(
       ctx.rerender();
     });
   };
+
+  const copy = actions.createDiv({ cls: "mva-ag-action", attr: { "aria-label": "Duplicate (paused)", role: "button", tabindex: "0" } });
+  setIcon(copy, "copy");
+  clickable(copy, () => void duplicate(ctx.plugin, a).then(() => ctx.rerender()));
 
   const toggle = actions.createDiv({ cls: "mva-ag-toggle", attr: { role: "button", tabindex: "0" } });
   toggle.toggleClass("is-on", a.enabled);

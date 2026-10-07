@@ -105,6 +105,9 @@ export interface AgentContract {
   /** Slugs this agent may hand work to via `invoke_agent`. */
   canCall: string[];
   triggers: AgentTrigger[];
+  /** External MCP servers a run may load (core/mcp-scope.ts). Absent = the
+   *  global setting decides; empty = none. Set only by automations. */
+  mcp?: string[];
 }
 
 /** A resolved agent: brain + contract. */
@@ -175,6 +178,10 @@ function unquote(value: string): string {
  * trigger through the sidecar round-trip vanished before this existed.
  */
 function stripInlineComment(s: string): string {
+  // A quoted value may hold " # " as text: only what follows the closing quote
+  // can be a comment.
+  const quoted = s.trim().match(/^("(?:[^"\\]|\\.)*"|'[^']*')(.*)$/);
+  if (quoted) return quoted[1] + quoted[2].replace(/\s+#(?=\s|$).*$/, "");
   return s.replace(/\s+#(?=\s|$).*$/, "");
 }
 

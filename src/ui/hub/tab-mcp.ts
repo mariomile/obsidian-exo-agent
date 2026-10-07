@@ -227,6 +227,11 @@ function buildMcpRow(it: DiscoveryItem, ourNames: Set<string>, documented: Set<s
     if (it.status === "failed") {
       const b = right.createEl("button", { cls: "mva-btn", text: "Reconnect" });
       b.onclick = () => void doReconnect(ctx, b);
+    } else if (it.source === "claude-connector" && (it.status === "needs-auth" || it.status === "disabled")) {
+      // claude.ai connectors are authorised and switched on in the account,
+      // not by this CLI: send Mario where the toggle actually lives.
+      const b = right.createEl("button", { cls: "mva-btn", text: "Open in claude.ai" });
+      b.onclick = () => window.open("https://claude.ai/settings/connectors");
     } else if (it.status === "needs-auth" || it.status === "disabled") {
       // "disabled" here covers a claude.ai connector turned off at its own
       // source: login can't flip that account-level toggle, but it's the
