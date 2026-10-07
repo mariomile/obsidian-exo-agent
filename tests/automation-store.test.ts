@@ -89,8 +89,20 @@ describe("AutomationStore", () => {
     await store.refresh();
     await store.archive("x");
     expect(files.has("_system/automations/x.md")).toBe(false);
-    expect(files.has(".archive/automations/x.md")).toBe(true);
+    expect(files.has(".archive/_system/automations/x.md")).toBe(true);
     expect(store.get("x")).toBeNull();
+  });
+
+  it("never overwrites an earlier archived copy", async () => {
+    const { adapter, files } = fakeVault({
+      "_system/automations/x.md": "---\nname: X\n---\nNew",
+      ".archive/_system/automations/x.md": "---\nname: X\n---\nOld",
+    });
+    const store = new AutomationStore(adapter, paths);
+    await store.refresh();
+    await store.archive("x");
+    expect(files.get(".archive/_system/automations/x.md")).toContain("Old");
+    expect([...files.keys()].some((k) => /^\.archive\/_system\/automations\/x-\d+\.md$/.test(k))).toBe(true);
   });
 });
 

@@ -17,7 +17,7 @@ import {
   serializeAutomation,
   type Automation,
 } from "../core/automation-model";
-import { automationFromAgent, automationFromPlaybook, scheduleRunKeys } from "../core/automation-model";
+import { archivedAutomationPath, automationFromAgent, automationFromPlaybook, scheduleRunKeys } from "../core/automation-model";
 import { slugifyAgent } from "../core/agents";
 import type { ExoPaths } from "../core/paths";
 import { adaptAppToAgentVault, type AgentVaultAdapter } from "./agent-store";
@@ -108,16 +108,16 @@ export class AutomationStore {
     for (const cb of this.listeners) cb();
   }
 
-  /** Move the file to `.archive/automations/` — never delete. */
+  /** Move the file to the same path under `.archive/` — never delete. */
   async archive(slug: string): Promise<void> {
     const from = this.filePath(slug);
     if (!(await this.vault.exists(from))) {
       this.items.delete(slug);
       return;
     }
-    await this.vault.ensureFolder(".archive/automations");
-    let to = `.archive/automations/${slug}.md`;
-    if (await this.vault.exists(to)) to = `.archive/automations/${slug}-${Date.now()}.md`;
+    let to = archivedAutomationPath(this.paths.automations, slug);
+    await this.vault.ensureFolder(to.slice(0, to.lastIndexOf("/")));
+    if (await this.vault.exists(to)) to = to.replace(/\.md$/, `-${Date.now()}.md`);
     await this.vault.rename(from, to);
     this.items.delete(slug);
     for (const cb of this.listeners) cb();

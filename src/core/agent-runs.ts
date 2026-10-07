@@ -79,6 +79,26 @@ export function dueScheduledAgentRuns(
   return out;
 }
 
+/**
+ * Stamp "now" on every schedule slot that has no cursor yet, and return how
+ * many were stamped. A missing cursor reads as "never ran", which is due at
+ * once: without this a new automation saved at 22:00 with `daily 07:00` (or a
+ * when-line edited, or a paused one switched on) fires on the next tick
+ * instead of at its next 07:00. Runs before `dueScheduledAgentRuns`.
+ */
+export function seedUnseenSlots(agents: AgentDef[], lastRun: Record<string, number>, now: number): number {
+  let seeded = 0;
+  for (const agent of agents) {
+    if (!agent.contract.enabled) continue;
+    for (const key of scheduleSlotKeys(agent)) {
+      if (lastRun[key] !== undefined) continue;
+      lastRun[key] = now;
+      seeded++;
+    }
+  }
+  return seeded;
+}
+
 /** When a scheduled agent will next fire (Cockpit/pane display). */
 export function nextScheduledSlot(cadence: Cadence, lastRun: number, now: number): number {
   return isDue(cadence, lastRun, now) ? now : currentSlotStart(cadence, now);

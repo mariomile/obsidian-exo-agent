@@ -26,7 +26,7 @@ const automation = (over: Partial<Automation>): Automation => ({
 function fakeApp(autos: Automation[]) {
   const items = new Map(autos.map((a) => [a.slug, a]));
   const exo = {
-    settings: { customPrompts: [{ name: "Distill", prompt: "distill" }] },
+    settings: { customPrompts: [{ name: "Distill", prompt: "distill" }], scheduledLastRun: {} as Record<string, number> },
     saveSettings: vi.fn(async () => undefined),
     loadAutomationRuns: vi.fn(async () => []),
     restoreAutomationRun: vi.fn(async () => []),
@@ -123,6 +123,30 @@ describe("automation tools (v2, file-backed)", () => {
     const { app, exo } = fakeApp([automation({ slug: "morning-digest", name: "Morning Digest" })]);
     await toolHandler(app, "manage_automation")({ action: "update", name: "Morning Digest", mode: "propose" }, {});
     expect(exo.automationStore.save).toHaveBeenCalledWith(expect.objectContaining({ mode: "propose" }));
+  });
+
+  it("refuses act mode with no write scope, saving nothing", async () => {
+    const { app, exo } = fakeApp([]);
+    const result = await toolHandler(app, "manage_automation")({ action: "create", name: "Fixer", prompt: "Fix.", mode: "act" }, {});
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(text).toContain("Act mode needs");
+    expect(exo.automationStore.save).not.toHaveBeenCalled();
+  });
+
+  it("delete archives and drops the scheduler cursors", async () => {
+    const { app, exo } = fakeApp([automation({ slug: "morning-digest", name: "Morning Digest" })]);
+    exo.settings.scheduledLastRun = { "agent:morning-digest::schedule daily 07": 1, "agent:other": 2 };
+    await toolHandler(app, "manage_automation")({ action: "delete", name: "Morning Digest" }, {});
+    expect(exo.automationStore.archive).toHaveBeenCalledWith("morning-digest");
+    expect(exo.settings.scheduledLastRun).toEqual({ "agent:other": 2 });
+  });
+
+  it("duplicate saves a paused copy", async () => {
+    const { app, exo } = fakeApp([automation({ slug: "morning-digest", name: "Morning Digest" })]);
+    await toolHandler(app, "manage_automation")({ action: "duplicate", name: "Morning Digest" }, {});
+    expect(exo.automationStore.save).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Morning Digest (copy)", slug: "morning-digest-copy", enabled: false }),
+    );
   });
 
   it("run_now routes through runAutomationNow", async () => {

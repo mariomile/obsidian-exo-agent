@@ -175,6 +175,10 @@ function unquote(value: string): string {
  * trigger through the sidecar round-trip vanished before this existed.
  */
 function stripInlineComment(s: string): string {
+  // A quoted value may hold " # " as text: only what follows the closing quote
+  // can be a comment.
+  const quoted = s.trim().match(/^("(?:[^"\\]|\\.)*"|'[^']*')(.*)$/);
+  if (quoted) return quoted[1] + quoted[2].replace(/\s+#(?=\s|$).*$/, "");
   return s.replace(/\s+#(?=\s|$).*$/, "");
 }
 

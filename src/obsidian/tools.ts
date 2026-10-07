@@ -23,9 +23,12 @@ import { parseTasksFile } from "../core/tasks";
 import { unreviewedWriteRuns } from "../core/automations";
 import { parseDuration, formatDuration } from "../core/agents";
 import {
+  automationRunKeysIn,
+  duplicateAutomation,
   formatWhen,
   modeSentence,
   parseWhen,
+  validateAutomation,
   whenSentence,
   type Automation,
   type AutomationMode,
@@ -1077,9 +1080,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
 
   const manageAutomation = tool(
     "manage_automation",
-    `Create, update, pause, resume, delete (archive), or run an Exo automation — a readable file the scheduler executes. \`when\` lines use the readable grammar: \`daily 08:00\`, \`weekly mon 07:00\`, \`hourly\`, \`on create in _inbox/**\`, \`on tag #x\`. Mode \`act\` lets runs edit vault notes (checkpointed + restorable) — confirm with Mario before setting it. run_now executes immediately (may take minutes) and reports to ${paths.reports}/.`,
+    `Create, update, duplicate (the copy starts paused), pause, resume, delete (archive), or run an Exo automation — a readable file the scheduler executes. \`when\` lines use the readable grammar: \`daily 08:00\`, \`weekly mon 07:00\`, \`hourly\`, \`on create in _inbox/**\`, \`on tag #x\`. Mode \`act\` lets runs edit vault notes (checkpointed + restorable) — confirm with Mario before setting it. run_now executes immediately (may take minutes) and reports to ${paths.reports}/.`,
     {
-      action: z.enum(["create", "update", "pause", "resume", "delete", "run_now"]),
+      action: z.enum(["create", "update", "duplicate", "pause", "resume", "delete", "run_now"]),
       name: z.string().describe("Automation name (or slug for existing ones)."),
       description: z.string().optional(),
       prompt: z.string().optional().describe("The playbook body. Required for create unless agent is set."),
@@ -1087,6 +1090,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       when: z.array(z.string()).optional().describe("Replaces every when-line."),
       mode: z.enum(["report", "propose", "act"]).optional(),
       write_scope: z.array(z.string()).optional().describe("Folders/globs act|propose runs may write in."),
+      cooldown: z.string().optional().describe("Least time between two event-started runs, like 15m or 2h."),
     },
     async (args) => {
       const exo = getExo(app);
@@ -1129,11 +1133,13 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
           mode: (args.mode as AutomationMode) ?? "report",
           scope: args.write_scope ?? [],
           canCall: [],
-          cooldownMs: DEFAULT_AUTOMATION_COOLDOWN_MS,
+          cooldownMs: args.cooldown ? (parseDuration(args.cooldown) ?? NaN) : DEFAULT_AUTOMATION_COOLDOWN_MS,
           enabled: true,
           agent: args.agent,
           prompt: args.prompt ?? "",
         };
+        const problems = validateAutomation(a);
+        if (problems.length) return err(`Not saved: ${problems.join(" ")}`);
         await store.save(a);
         return ok(`Automation created: ${a.name} (${store.filePath(slug)}) — ${a.when.map(formatWhen).join(" · ") || "no when-lines yet"}, ${modeSentence(a.mode)}.`);
       }
@@ -1141,7 +1147,15 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       if (!auto) return ok(`No automation named "${args.name}" — see list_automations.`);
       if (args.action === "delete") {
         await store.archive(auto.slug);
-        return ok(`Automation "${auto.name}" archived to .archive/automations/.`);
+        const lastRun = exo.settings.scheduledLastRun;
+        for (const k of automationRunKeysIn(lastRun, auto.slug)) delete lastRun[k];
+        await exo.saveSettings();
+        return ok(`Automation "${auto.name}" archived under .archive/.`);
+      }
+      if (args.action === "duplicate") {
+        const copy = duplicateAutomation(auto, new Set(store.list().map((x) => x.slug)));
+        await store.save(copy);
+        return ok(`Duplicated as "${copy.name}" (${store.filePath(copy.slug)}), paused: resume it when it is ready.`);
       }
       if (args.action === "pause" || args.action === "resume") {
         await store.save({ ...auto, enabled: args.action === "resume" });
@@ -1159,6 +1173,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       if (args.agent !== undefined) a.agent = args.agent || undefined;
       if (args.mode) a.mode = args.mode;
       if (args.write_scope) a.scope = args.write_scope;
+      if (args.cooldown !== undefined) a.cooldownMs = parseDuration(args.cooldown) ?? NaN;
+      const problems = validateAutomation(a);
+      if (problems.length) return err(`Not saved: ${problems.join(" ")}`);
       await store.save(a);
       return ok(`Automation updated: ${a.name} — ${a.when.map(formatWhen).join(" · ") || "no when-lines"}, ${a.enabled ? "on" : "paused"}, ${modeSentence(a.mode)}.`);
     }

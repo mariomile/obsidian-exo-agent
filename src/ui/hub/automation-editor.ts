@@ -13,16 +13,19 @@
 import { Notice, setIcon } from "obsidian";
 import { clickable } from "../dom";
 import { openablePopover } from "../popover";
+import { formatDuration, parseDuration } from "../../core/agents";
 import {
   DEFAULT_AUTOMATION_COOLDOWN_MS,
   formatWhen,
   parseWhen,
+  validateAutomation,
   whenSentence,
   type Automation,
   type AutomationMode,
   type AutomationWhen,
 } from "../../core/automation-model";
 import { automationSlug } from "../../obsidian/automation-store";
+import { archiveAutomation, duplicate } from "./automation-actions";
 import type { HubTabContext } from "./shared";
 
 /** What the tab consults before rendering: are we editing, and what. */
@@ -112,6 +115,15 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
   head.createDiv({ cls: "mva-auto2-ed-title", text: existing ? "Edit automation" : "New automation" });
   head.createDiv({ cls: "mva-auto-spacer" });
   if (existing) {
+    const dup = head.createEl("button", { cls: "mva-btn", text: "Duplicate" });
+    dup.onclick = () => {
+      dup.setAttr("disabled", "true");
+      void duplicate(ctx.plugin, existing).then((copy) => {
+        new Notice(`Saved "${copy.name}", paused.`);
+        editingState.slug = copy.slug;
+        ctx.rerender();
+      });
+    };
     const open = head.createEl("button", { cls: "mva-btn", text: "Open note" });
     open.onclick = () => void ctx.app.workspace.openLinkText(store.filePath(existing.slug), "", "tab");
   }
@@ -168,7 +180,7 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
     scopeBox = null;
     if (draft.mode === "report") return;
     scopeBox = modeField.createDiv({ cls: "mva-auto2-scope" });
-    scopeBox.createDiv({ cls: "mva-pv-label", text: "Folders it may write in (empty = nowhere)" });
+    scopeBox.createDiv({ cls: "mva-pv-label", text: "Folders it may write in, comma-separated" });
     const input = scopeBox.createEl("input", {
       cls: "mva-pv-input",
       attr: { type: "text", placeholder: "_inbox, Atlas, Active" },
@@ -253,6 +265,12 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
   prompt.value = draft.prompt;
   prompt.oninput = () => (draft.prompt = prompt.value);
 
+  // ── cooldown ──────────────────────────────────────────────────────────
+  const coolField = field("Cooldown: the least time between two runs a vault event starts");
+  const cool = coolField.createEl("input", { cls: "mva-pv-input", attr: { type: "text", placeholder: "15m" } });
+  cool.value = formatDuration(draft.cooldownMs);
+  cool.oninput = () => (draft.cooldownMs = parseDuration(cool.value) ?? NaN);
+
   // ── footer: delete · cancel · save ────────────────────────────────────
   const foot = pane.createDiv({ cls: "mva-auto2-ed-foot" });
   if (existing) {
@@ -271,25 +289,22 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
         }, 4000);
         return;
       }
-      void store.archive(existing.slug).then(close);
+      void archiveAutomation(ctx.plugin, existing.slug).then(close);
     };
   }
   foot.createDiv({ cls: "mva-auto-spacer" });
+  const problems = pane.createDiv({ cls: "mva-auto2-warn" });
+  pane.insertBefore(problems, foot);
   const cancel = foot.createEl("button", { cls: "mva-btn", text: "Cancel" });
   cancel.onclick = close;
   const save = foot.createEl("button", { cls: "mva-btn mva-auto2-save", text: "Save" });
   save.onclick = () => {
-    if (!draft.name.trim()) {
-      new Notice("Give the automation a name.");
-      name.focus();
-      return;
-    }
-    if (!draft.prompt.trim() && !draft.agent && !draft.system) {
-      new Notice("Write a prompt, or bind an agent that carries its own.");
-      prompt.focus();
-      return;
-    }
-    if (!draft.slug) draft.slug = automationSlug(draft.name);
+    const errors = validateAutomation(draft);
+    const slug = draft.slug || automationSlug(draft.name);
+    if (!existing && store.get(slug)) errors.push(`An automation called "${store.get(slug)?.name}" already exists: pick another name.`);
+    problems.setText(errors.join(" "));
+    if (errors.length) return;
+    draft.slug = slug;
     save.setAttr("disabled", "true");
     void store.save(draft).then(close);
   };
@@ -384,6 +399,7 @@ function whenPicker(
         tag.onchange = () => {
           const parsed = parseWhen(`on tag ${tag.value}`);
           if (parsed) onPick(parsed);
+          else new Notice(`"${tag.value}" is not a tag: one word, like #todo.`);
         };
       }
       if (current) {
