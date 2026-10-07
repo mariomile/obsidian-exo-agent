@@ -248,7 +248,7 @@ class ClaudeSession implements AgentSession {
         // local Thymer port) are unaffected: those fail only when their app is down.
         // Also defaults an idle timeout for external MCP tool calls, so a hung
         // server fails the call instead of freezing the turn (core/mcp-guard.ts).
-        env: claudeCliEnv(process.env, opts.cli.pathEnv),
+        env: { ...claudeCliEnv(process.env, opts.cli.pathEnv), ...(opts.waitForMcp ? { MCP_CONNECTION_NONBLOCKING: "false" } : {}) },
         includePartialMessages: true,
         // Keep a short tail of CLI stderr so an opaque execution error (empty
         // `result`) can still surface actionable detail. Bounded ring buffer.

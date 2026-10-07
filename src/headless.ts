@@ -147,6 +147,7 @@ export async function runHeadlessPlaybook(
       // opt in per settings: fastStartup=false lets the CLI load external MCP
       // servers; the resolver below still auto-denies anything that mutates.
       fastStartup: opts.mcp ? opts.mcp.length === 0 : !settings.playbookExternalTools,
+      waitForMcp: opts.mcp ? opts.mcp.length > 0 : settings.playbookExternalTools,
       ...(opts.mcp?.length ? { mcpOnly: { allow: opts.mcp, known: settings.knownMcpServers ?? [] } } : {}),
       // Claude: in-process vault tools, same options as the Codex bridge above.
       obsidianServer:

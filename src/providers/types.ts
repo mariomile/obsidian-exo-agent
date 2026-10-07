@@ -140,6 +140,10 @@ export interface SessionOpts {
    *  server in `known` or the config files is denied. Ignored when
    *  `fastStartup` already skips them all. */
   mcpOnly?: { allow: string[]; known: string[] };
+  /** Hold the first turn until external MCP servers have connected. A
+   *  one-shot headless run otherwise starts while claude.ai connectors are
+   *  still "pending" and sees none of their tools (measured, CLI 2.1.293). */
+  waitForMcp?: boolean;
   /** Run Claude Code hooks (.claude/settings.json). CC parity — on by default. */
   runHooks?: boolean;
   /** Resume a prior on-disk session id when (re)creating the session. */
