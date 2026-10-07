@@ -10,6 +10,7 @@ import { initialDailyPulseReviewState, type DailyPulseReviewState } from "./core
 import type { MemorySetup } from "./core/vault-setup";
 import { exoPaths, LEGACY_MEMORY_ROOT } from "./core/paths";
 import type { StoredShareRole } from "./core/collab-bridge";
+import type { ScheduledPrompt } from "./core/scheduled-prompts";
 
 /** Legacy default for the request-queue folder (kept for existing installs).
  *  Exported because the settings tab uses it as the field placeholder. */
@@ -166,6 +167,8 @@ export interface MVASettings {
    *  ID. A list of its own rather than a share of `chatsCollapsed`: the two are
    *  keyed in different namespaces — core/chat-list-state. */
   chatsCollapsedParents: string[];
+  /** Prompts waiting to run in a chat at a set time (core/scheduled-prompts). */
+  scheduledPrompts: ScheduledPrompt[];
   /** LEGACY scheduled playbook runs ("<Prompt name> | daily" per line) — migrated
    *  into `automations` on load, then cleared. Kept only for the migration path. */
   scheduledRuns: string;
@@ -317,6 +320,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   chatsCollapsed: [],
   chatsAutoSettleDays: 3,
   chatsCollapsedParents: [],
+  scheduledPrompts: [],
   scheduledRuns: "",
   automations: [],
   automationsMigrated: false,

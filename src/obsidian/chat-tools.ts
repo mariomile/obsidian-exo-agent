@@ -5,13 +5,15 @@ import { ok, err, getExo } from "./tool-kit";
 import type { AnyTool } from "./sdk-tool";
 import type ExoPlugin from "../main";
 import { formatChatTranscript } from "../core/delegation";
+import { describeScheduled, formatWhen, parseWhen, SCHEDULE_REPEATS, type ScheduleRepeat } from "../core/scheduled-prompts";
 
 /** Read-only chat tools, auto-allowed without a permission card. */
-export const CHAT_READ_TOOLS = ["mcp__obsidian__read_chat", "mcp__obsidian__task_status"];
+export const CHAT_READ_TOOLS = ["mcp__obsidian__read_chat", "mcp__obsidian__task_status", "mcp__obsidian__list_scheduled_tasks"];
 
 /** The view-side delegation module, loaded on call: a static import would pull
  *  view.ts into the tool registry's module graph. */
 const delegation = () => import("../ui/delegation");
+const scheduler = () => import("../ui/scheduled-runner");
 const plugin = (app: App): ExoPlugin | null => (getExo(app) as unknown as ExoPlugin | null);
 
 /**
@@ -100,5 +102,54 @@ export function buildChatTools(app: App, convoId: string, orchestration: boolean
     },
   );
 
-  return [updateChat, readChat, sendToChat, ...(orchestration ? [taskStatus, taskCancel] : [])];
+  // T3 Code's `schedule_task`: by default the run comes back to this chat.
+  const scheduleTask = tool(
+    "schedule_task",
+    "Schedule a prompt to run later, once or on a repeat. By default it arrives in this chat as a message, so you pick the thread back up; set new_chat for a fresh chat on every run. Give `at` as local time YYYY-MM-DDTHH:MM, or `in_minutes`. If Obsidian is closed at that time, it runs on the next open and says it was late. Report the time back to the user.",
+    {
+      prompt: z.string().describe("What to do when it runs, written as an instruction to yourself."),
+      at: z.string().optional().describe("Local date and time, YYYY-MM-DDTHH:MM."),
+      in_minutes: z.number().optional().describe("Minutes from now, instead of `at`."),
+      repeat: z.enum(SCHEDULE_REPEATS as [ScheduleRepeat, ...ScheduleRepeat[]]).optional().describe("Omit for once."),
+      new_chat: z.boolean().optional().describe("Run in a new chat each time instead of this one."),
+    },
+    async (args) => {
+      const p = plugin(app);
+      if (!p) return err("Exo isn't loaded.");
+      if (!args.prompt.trim()) return err("The prompt is empty.");
+      const dueAt = parseWhen({ at: args.at, inMinutes: args.in_minutes }, Date.now());
+      if (dueAt === null) return err("Give a future `at` (YYYY-MM-DDTHH:MM, local time) or a positive `in_minutes`.");
+      const s = await (await scheduler()).addScheduled(p, { prompt: args.prompt.trim(), dueAt, target: args.new_chat ? "new" : convoId, repeat: args.repeat });
+      return ok(`Scheduled ${s.id} for ${formatWhen(dueAt)}${s.repeat ? `, repeating ${s.repeat}` : ""}.`);
+    },
+  );
+
+  const listScheduledTasks = tool(
+    "list_scheduled_tasks",
+    "List every scheduled prompt, soonest first: id, next run, repeat, the chat it runs in, and the prompt.",
+    {},
+    async () => {
+      const p = plugin(app);
+      if (!p) return err("Exo isn't loaded.");
+      const s = await scheduler();
+      const list = s.listScheduled(p);
+      return ok(list.length ? list.map((x) => describeScheduled(x, s.targetTitle(p, x.target))).join("\n") : "Nothing is scheduled.");
+    },
+  );
+
+  const cancelScheduledTask = tool(
+    "cancel_scheduled_task",
+    "Cancel a scheduled prompt by id (from schedule_task or list_scheduled_tasks). A repeating one stops for good.",
+    { id: z.string().describe("The scheduled prompt id.") },
+    async (args) => {
+      const p = plugin(app);
+      if (!p) return err("Exo isn't loaded.");
+      return (await (await scheduler()).cancelScheduled(p, args.id)) ? ok(`Cancelled ${args.id}.`) : err(`No scheduled prompt ${args.id}.`);
+    },
+  );
+
+  return [
+    updateChat, readChat, sendToChat, scheduleTask, listScheduledTasks, cancelScheduledTask,
+    ...(orchestration ? [taskStatus, taskCancel] : []),
+  ];
 }

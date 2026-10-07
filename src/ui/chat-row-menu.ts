@@ -17,6 +17,7 @@ import { canSettleRow } from "../core/settle-note";
 import { activeConvoId, applyLifecycle, settleToNote } from "./convo-bridge";
 import { snoozePresets } from "../core/thread-lifecycle";
 import { retitleWithNotice } from "./chat-commands";
+import { ScheduleModal } from "./scheduled-ui";
 
 /** What the menu needs from whoever opened it: the two hosts it calls into,
  *  and a way to ask for a repaint once a mutation lands. */
@@ -58,6 +59,9 @@ armed = false,
         ctx.plugin.setConvoPinned(r.id, !r.pinned);
         ctx.repaint();
       }),
+  );
+  menu.addItem((i) =>
+    i.setTitle("Schedule a prompt here…").setIcon("calendar-clock").onClick(() => new ScheduleModal(ctx.app, ctx.plugin, r.id).open()),
   );
   // The lifecycle verbs, from T3 Code (core/thread-lifecycle). Absent where
   // they would be refused: nothing is hidden while it waits on you, and nothing
