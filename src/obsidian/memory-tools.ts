@@ -17,7 +17,7 @@ import type { AnyTool } from "./sdk-tool";
 /** Read-only memory tool names, auto-allowed without a permission card. */
 export const MEMORY_READ_TOOLS = ["mcp__obsidian__recent_chats", "mcp__obsidian__search_chats"];
 
-export function buildMemoryTools(app: App, caps: MemoryCaps): AnyTool[] {
+export function buildMemoryTools(app: App, caps: MemoryCaps, convoId?: string): AnyTool[] {
   const recentChats = tool(
     "recent_chats",
     "Read your own recent conversations with the user (current and archived chats): per chat the title, date, what the user wrote, your final answer and the notes you produced. Use it when the user asks what you discussed, decided or produced recently.",
@@ -48,7 +48,7 @@ export function buildMemoryTools(app: App, caps: MemoryCaps): AnyTool[] {
       if (!exo) return err("Exo isn't loaded.");
       if (args.query.trim().length < MIN_SEARCH_CHARS) return err(`Query needs at least ${MIN_SEARCH_CHARS} characters.`);
       const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
-      const hits = searchChats(await exo.readConversationStore(), args.query, limit);
+      const hits = searchChats(await exo.readConversationStore(), args.query, limit, convoId);
       return ok(formatChatHits(hits, args.query));
     }
   );

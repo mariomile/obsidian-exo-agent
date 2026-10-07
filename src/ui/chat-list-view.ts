@@ -455,13 +455,13 @@ export class ChatListView extends ItemView {
   /* ------------------------------ sections ------------------------------ */
 
   private collapsed(key: ChatSectionKey): boolean {
-    return isSectionCollapsed(this.plugin.settings.chatsCollapsed, key);
+    return isSectionCollapsed(this.plugin.settings.chatsCollapsed, key, this.query.trim().length > 0);
   }
 
-  /** Flip one section and persist it. The whole point of the state is that it
-   *  survives a reload, so the write happens on the gesture rather than on some
-   *  later save — a crash between the two would silently discard the choice. */
+  /** Flip one section and persist it on the gesture, not on some later save:
+   *  the state must survive a reload, and a crash in between would drop it. */
   private toggleSection(key: ChatSectionKey): void {
+    if (this.query.trim()) return; // sections stay open while searching
     this.plugin.settings.chatsCollapsed = toggleSectionCollapsed(
       this.plugin.settings.chatsCollapsed,
       key,
@@ -658,8 +658,8 @@ export class ChatListView extends ItemView {
   /** One model builder for both densities, so `reconcileList` sees a single
    *  keyed identity per conversation even when a row crosses a section. */
   private rowModel(r: ChatRow, now: number): CardModel {
-    // Running, open or pinned: something you are actively choosing between.
-    const rich = r.lane != null || r.open || r.pinned;
+    // Running, open or pinned, or a search hit whose matching line must show.
+    const rich = r.lane != null || r.open || r.pinned || !!r.snippet;
     // The rendered AGE LABEL, not the raw `updatedAt` — see `chatRowSig`, which
     // owns the rest of that argument and everything a painted row depends on.
     const age = rowAge(r, now);

@@ -25,7 +25,7 @@
 import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-cards";
 import { groupByTime, type TimeGroupLabel } from "./history";
 import { groupAcrossHomes, groupByParent, type GroupedConvo } from "./child-tree";
-import { findInChat, fold } from "./chat-search";
+import { findInChat, fold, snippetAround } from "./chat-search";
 import type { ChatMessage } from "./recent-chats";
 import {
   autoSettleMs,
@@ -131,6 +131,9 @@ export interface ChatRow {
    *  less. Always false at depth 1 — a grandchild renders beside its parent,
    *  not under it. */
   hasChildren: boolean;
+  /** A search matched inside the chat and `preview` holds the matching line,
+   *  so the row needs its second line even where it would be compact. */
+  snippet?: true;
   /** Present only while the conversation is running or blocked. */
   lane?: "running" | "needs-input";
   reason?: NeedsInputReason;
@@ -488,15 +491,19 @@ export function buildChatList(
   const mode = opts.mode ?? "activity";
   const visible = sources.filter((s) => !s.archived && deriveLane(s).lane !== "idle");
   const searching = opts.query.trim().length > 0;
-  // Title and preview first; then what was said in the chat (core/chat-search),
-  // whose matching line replaces the preview so the row shows WHY it matched.
+  // A title match stands on its own. Otherwise the matching line of the chat
+  // (core/chat-search), or of the preview, replaces the preview so the row
+  // shows WHY it matched, also where it would be a one-line compact row.
   const snippets = new Map<string, string>();
+  const firstToken = fold(opts.query).split(/\s+/).find(Boolean) ?? "";
   const matched = searching
     ? visible.filter((s) => {
-        if (matchesQuery(s, opts.query)) return true;
+        if (matchesQuery({ title: s.title, preview: "" }, opts.query)) return true;
         const hit = s.messages ? findInChat({ id: s.id, title: s.title, messages: s.messages }, opts.query) : null;
-        if (hit) snippets.set(s.id, hit.snippet);
-        return hit !== null;
+        const inPreview = matchesQuery(s, opts.query);
+        if (hit && hit.source !== "title") snippets.set(s.id, hit.snippet);
+        else if (inPreview) snippets.set(s.id, snippetAround(s.preview, firstToken));
+        return hit !== null || inPreview;
       })
     : visible;
 
@@ -521,7 +528,7 @@ export function buildChatList(
   for (const s of matched) {
     const row = stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now, quietMs);
     const snippet = snippets.get(s.id);
-    if (snippet) row.preview = snippet;
+    if (snippet) Object.assign(row, { preview: snippet, snippet: true });
     rows.push(row);
   }
 

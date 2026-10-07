@@ -186,7 +186,11 @@ const flipCollapsed = (collapsed: readonly string[] | undefined, key: string): s
 export function isSectionCollapsed(
   collapsed: readonly string[] | undefined,
   key: ChatSectionKey,
+  searching = false,
 ): boolean {
+  // A search opens every section: Settled starts folded, so its hits would
+  // otherwise show only as a count while Related hits sit open above them.
+  if (searching) return false;
   // The two shelves start folded, as in T3: put-away chats are a click away,
   // never in the way. The user's choice to OPEN one is what gets stored.
   if (SHELVES.has(key)) return !isCollapsed(collapsed, `expanded:${key}`);
