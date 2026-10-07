@@ -6344,6 +6344,9 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-mcp-extra { resize: vertical; min-height: 48px; font-family: var(--font-monospace); }
 .mva-mcp-modal-err { color: var(--text-error); font-size: 12px; min-height: 16px; margin-top: 4px; }
 .mva-mcp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.mva-sched-choice { display: flex; flex-wrap: wrap; gap: 6px; }
+.mva-sched-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.mva-sched-text, .mva-forked-from { flex: 1; min-width: 0; font-size: var(--font-ui-small); color: var(--text-muted); overflow-wrap: anywhere; }
 
 /* Goal pill — /goal loop status shown above the composer input */
 .mva-goal-pill {

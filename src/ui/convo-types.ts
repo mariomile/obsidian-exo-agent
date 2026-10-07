@@ -83,6 +83,8 @@ export interface ConvoData {
    *  loses its parentage on reload would jump out from under its parent and
    *  read as an unexplained chat nobody started. */
   parentConvoId?: string;
+  /** Convo id this chat was forked from (core/fork): the "Forked from" link. */
+  forkedFrom?: string;
   /** Reports from finished children this conversation has not yet handed to its
    *  model. Persisted (capped, see `MAX_PENDING_CHILD_REPORTS`) because it is
    *  the ONLY path by which a delegated conversation's output reaches the
@@ -163,6 +165,7 @@ export interface Convo {
    *  Denormalized from the ledger's `parent` (the source of truth) so the chats
    *  sidebar can indent without reading tasks.md. Persisted. */
   parentConvoId?: string;
+  forkedFrom?: string;
   /** Reports from finished child tasks, waiting to be handed to this
    *  conversation's model on its NEXT turn. Persisted (capped): the next turn
    *  can happen after a restart just as easily as before one, and this queue is

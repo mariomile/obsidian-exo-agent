@@ -50,6 +50,7 @@ import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
+import { forkMessages, renderForkedFrom } from "./ui/fork-link";
 import { retitleWithNotice } from "./ui/chat-commands";
 import { clearChildBlock, resetAgentChain, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
 import { PARENT_STOPPED, spawnCancelledByStop } from "./core/delegation";
@@ -1062,6 +1063,7 @@ export class ChatView extends ItemView {
         settledAt: d.settledAt,
         unsettledAt: d.unsettledAt,
         parentConvoId: d.parentConvoId,
+        forkedFrom: d.forkedFrom,
         pendingChildReports: reviveChildReports(d.pendingChildReports),
         titleLocked: d.titleLocked === true,
         readIndex: d.readIndex, // the read position: absent = never read (core/reentry)
@@ -1147,6 +1149,7 @@ export class ChatView extends ItemView {
       ...(c.settledOverride ? { settledOverride: c.settledOverride, settledAt: c.settledAt } : {}),
       ...(c.unsettledAt ? { unsettledAt: c.unsettledAt } : {}),
       ...(c.parentConvoId ? { parentConvoId: c.parentConvoId } : {}),
+      ...(c.forkedFrom ? { forkedFrom: c.forkedFrom } : {}),
       // Capped at the queue itself (core/child-reports), so this writes exactly
       // what the parent is holding. An unread child report that did not survive
       // the reload left the sidebar advertising news it could never deliver.
@@ -1872,18 +1875,15 @@ export class ChatView extends ItemView {
     this.persist();
   }
 
-  /** Fork the active conversation into a new tab. The transcript is copied but
-   *  the provider session is not: reusing the same opaque session id makes the
-   *  original and fork share hidden context and breaks branch isolation. */
-  private forkConversation(src: Convo): void {
+  /** Fork into a new tab up to message `upTo` (core/fork). Never copy the session:
+   *  a shared session id would give both the same hidden context. */
+  private forkConversation(src: Convo, upTo?: number): void {
     const c = this.makeConvo();
     c.title = src.title ? `${src.title} (fork)` : "Fork";
     c.provider = src.provider;
     c.model = src.model;
-    c.sessionId = undefined;
-    c.messages = src.messages.map((m) =>
-      m.role === "assistant" ? { role: "assistant", segments: [...m.segments] } : { ...m }
-    );
+    c.forkedFrom = src.id;
+    c.messages = forkMessages(src.messages, upTo);
     c.updatedAt = Date.now();
     this.renderConvoDom(c);
     this.convos.push(c);
@@ -2649,6 +2649,7 @@ export class ChatView extends ItemView {
   /** Rebuild a conversation's DOM from its persisted messages. */
   private renderConvoDom(c: Convo): void {
     c.listEl.empty();
+    if (c.forkedFrom) renderForkedFrom(this, c.listEl, c.forkedFrom);
     let lastUser = "";
     for (const [i, m] of c.messages.entries()) {
       // `data-msg` = the MESSAGE index, which is what the re-entry band anchors on: a `.mva-turn` does NOT always have a message behind it (`ui/reentry.ts` `anchorTurn`).
@@ -3347,9 +3348,9 @@ export class ChatView extends ItemView {
       };
     }
 
-    const fork = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Fork into new tab" } });
+    const fork = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Fork from here" } });
     setIcon(fork, "git-compare-arrows");
-    fork.onclick = () => this.forkConversation(convo ?? this.active);
+    fork.onclick = () => this.forkConversation(convo ?? this.active, turnMessageIndex(turnEl) ?? undefined);
 
     const rewind = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Rewind here (conversation only)" } });
     setIcon(rewind, "undo-2");

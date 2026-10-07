@@ -56,6 +56,7 @@ import {
 import { reconcileList, type CardModel } from "./keyed-reconcile";
 import { clickable, isolateActivation } from "./dom";
 import { recallChats, reindexChats, recallHost, isRecallUnavailable } from "./chat-recall";
+import { addScheduledButton } from "./scheduled-ui";
 
 export const CHATS_VIEW_TYPE = "exo-chats";
 export const CHATS_ICON = "hi-messages";
@@ -188,11 +189,10 @@ export class ChatListView extends ItemView {
     const add = head.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "New chat" } });
     setIcon(add, "plus");
     add.onclick = () => void this.plugin.newConversation();
+    addScheduledButton(head, this.plugin);
 
-    // Above the search field, below the header: the first thing read on the way
-    // in, and the one band of the pane a filter or a collapsed section cannot
-    // empty. Built once and left empty — an empty strip collapses to nothing in
-    // CSS (`:empty`), so at rest the pane looks exactly as it did before.
+    // Above the search field: the one band no filter or collapsed section can
+    // empty. Built once and left empty; `:empty` collapses it in CSS.
     this.needsHost = root.createDiv({ cls: "mva-chats-needs" });
 
     const search = root.createEl("input", {

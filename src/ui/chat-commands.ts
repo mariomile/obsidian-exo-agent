@@ -25,6 +25,18 @@ export function registerChatCommands(plugin: ExoPlugin): void {
     name: "Search chats",
     callback: () => void searchChatsCommand(plugin),
   });
+  // Scheduled prompts (core/scheduled-prompts): in this chat by default. Loaded
+  // on call, like `settleActive` below, to keep view.ts out of this module graph.
+  plugin.addCommand({
+    id: "schedule-prompt",
+    name: "Schedule a prompt",
+    callback: () => void import("./scheduled-ui").then((m) => new m.ScheduleModal(plugin.app, plugin, plugin.activeConvoId() ?? undefined).open()),
+  });
+  plugin.addCommand({
+    id: "scheduled-prompts",
+    name: "Show scheduled prompts",
+    callback: () => void import("./scheduled-ui").then((m) => new m.ScheduledListModal(plugin.app, plugin).open()),
+  });
   plugin.addCommand({
     id: "retitle-chat",
     name: "Retitle this chat",

@@ -24,6 +24,7 @@ import {
   activateChats as activateChatsView,
 } from "./ui/view-registry";
 import { registerChatCommands } from "./ui/chat-commands";
+import { startScheduledPrompts } from "./ui/scheduled-runner";
 import { registerFormatCommands } from "./editor/format-commands";
 import { registerExoIcons } from "./ui/icons";
 import { AgentPicker, PlaybookPicker } from "./ui/pickers";
@@ -608,6 +609,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       callback: () => void this.openCockpit(),
     });
     registerChatCommands(this);
+    startScheduledPrompts(this);
     registerFormatCommands(this);
     this.addCommand({
       id: "open-proposals",
@@ -1024,7 +1026,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    * an explicit user action (`revealConversation`) may reveal. The leaf is
    * created inactive in the right sidebar; the sidebar stays collapsed.
    */
-  private async ensureChatView(): Promise<void> {
+  async ensureChatView(): Promise<void> {
     const { workspace } = this.app;
     if (workspace.getLeavesOfType(VIEW_TYPE).length > 0) return;
     const leaf = workspace.getRightLeaf(false);
