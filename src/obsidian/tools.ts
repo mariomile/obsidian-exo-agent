@@ -1202,7 +1202,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     ...(memory.ledgerWrite ? [captureDecision, openLoop, closeLoopTool] : []),
     // `rethink_memory` also needs a live view bridge to render its diff.
     ...(memory.rethink && rethinkBridge ? [rethinkMemory] : []),
-    ...buildMemoryTools(app, memory),
+    ...buildMemoryTools(app, memory, parentConvoId),
     ...(orchestrationEnabled ? [addTask, listTasks] : []),
     ...(orchestrationEnabled && parentConvoId ? [spawnTask] : []),
     ...(parentConvoId ? buildChatTools(app, parentConvoId, orchestrationEnabled) : []),

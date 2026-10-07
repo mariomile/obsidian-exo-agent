@@ -79,14 +79,17 @@ export function findInChat(
 const SOURCE_RANK: Record<ChatHitSource, number> = { title: 0, user: 1, assistant: 2 };
 
 /** Every chat that matches, one hit each: title and user hits first, then
- *  answers, newest chat first inside each. */
+ *  answers, newest chat first inside each. `excludeId` leaves out the chat the
+ *  search runs from: the question that asked for the search always matches. */
 export function searchChats(
   chats: readonly Parameters<typeof findInChat>[0][],
   query: string,
   limit = 50,
+  excludeId?: string,
 ): ChatSearchHit[] {
   const hits: ChatSearchHit[] = [];
   for (const c of chats) {
+    if (c.id === excludeId) continue;
     const h = findInChat(c, query);
     if (h) hits.push(h);
   }

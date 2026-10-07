@@ -67,6 +67,11 @@ describe("searchChats", () => {
     expect(formatChatHits(hits, "kore")).toContain("id new");
     expect(formatChatHits([], "zz")).toBe('No chats match "zz".');
   });
+
+  it("leaves out the chat the search runs from", () => {
+    const chats = [chat("self", [{ role: "user", text: "find kore" }]), chat("other", [{ role: "user", text: "kore" }])];
+    expect(searchChats(chats, "kore", 50, "self").map((h) => h.id)).toEqual(["other"]);
+  });
 });
 
 describe("chats sidebar search looks inside the chat", () => {
@@ -97,11 +102,20 @@ describe("chats sidebar search looks inside the chat", () => {
     const row = vm.sections.flatMap((x) => x.items)[0];
     expect(row?.id).toBe("c1");
     expect(row?.preview).toBe("We settled on usage-based pricing.");
+    expect(row?.snippet).toBe(true);
   });
 
-  it("leaves the preview alone when the title or preview already matched", () => {
+  it("shows the matching line for a hit in the preview of a compact row", () => {
+    const s = src({ preview: "First we argued. Then we chose to park the idea for now." });
+    const row = buildChatList([s], { query: "park", now: 1000 }).sections.flatMap((x) => x.items)[0];
+    expect(row?.snippet).toBe(true);
+    expect(row?.preview).toContain("park the idea");
+  });
+
+  it("leaves the preview alone when the title already matched", () => {
     const s = src({ title: "Pricing", messages: [{ role: "user", text: "pricing again" }] });
     const row = buildChatList([s], { query: "pricing", now: 1000 }).sections.flatMap((x) => x.items)[0];
     expect(row?.preview).toBe("hello");
+    expect(row?.snippet).toBeUndefined();
   });
 });

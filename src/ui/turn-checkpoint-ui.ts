@@ -39,6 +39,13 @@ export function addTurnCheckpointActions(
   const revert = acts.createSpan({ cls: "mva-src-act", attr: { "aria-label": "Revert this turn" } });
   setIcon(revert, "undo-2");
   let armedUntil = 0;
+  let disarmTimer = 0;
+  const disarm = () => {
+    armedUntil = 0;
+    window.clearTimeout(disarmTimer);
+    revert.removeClass("is-armed");
+    revert.setAttr("aria-label", "Revert this turn");
+  };
   clickable(revert, (e) => {
     e.stopPropagation();
     const ref = holder.checkpointRef;
@@ -47,11 +54,11 @@ export function addTurnCheckpointActions(
       armedUntil = Date.now() + 3000;
       revert.addClass("is-armed");
       revert.setAttr("aria-label", "Click again to revert this turn");
-      window.setTimeout(() => revert.removeClass("is-armed"), 3000);
+      window.clearTimeout(disarmTimer);
+      disarmTimer = window.setTimeout(disarm, 3000);
       return;
     }
-    armedUntil = 0;
-    revert.removeClass("is-armed");
+    disarm();
     void revertTurn(vault(), ref).then((r) => {
       new Notice(r ? revertSummary(r.actions, r.failed) : "Couldn't revert this turn.", 8000);
     });
