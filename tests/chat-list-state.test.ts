@@ -56,6 +56,12 @@ describe("section collapse", () => {
     expect(isSectionCollapsed([], "pinned")).toBe(false);
   });
 
+  it("opens every section while searching, shelves included", () => {
+    expect(isSectionCollapsed(undefined, "settled")).toBe(true);
+    expect(isSectionCollapsed(undefined, "settled", true)).toBe(false);
+    expect(isSectionCollapsed(["inbox"], "inbox", true)).toBe(false);
+  });
+
   it("reads a collapsed key back", () => {
     expect(isSectionCollapsed(["inbox"], "inbox")).toBe(true);
     expect(isSectionCollapsed(["inbox"], "pinned")).toBe(false);
