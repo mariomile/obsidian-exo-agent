@@ -2744,6 +2744,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         write,
         agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
         codexBridge: await this.headlessBridge(),
+        mcp: agent.contract.mcp,
       };
       // Claude delegates to a true isolated subagent via an inline Agent()
       // instruction (buildAgentRunPrompt). Codex has no such primitive — its own

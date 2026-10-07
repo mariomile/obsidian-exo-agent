@@ -58,6 +58,9 @@ export interface MVASettings {
   permissionMode: PermissionMode;
   autoAllowRead: boolean;
   fastStartup: boolean;
+  /** Every external MCP server name a headless run has seen load; what an
+   *  automation's `mcp:` list denies the rest from (core/mcp-scope.ts). */
+  knownMcpServers: string[];
   /** Start the CLI session in the background when Exo opens, so the first
    *  message skips the cold start. */
   prewarmSession: boolean;
@@ -276,6 +279,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   permissionMode: "default",
   autoAllowRead: true,
   fastStartup: true,
+  knownMcpServers: [],
   prewarmSession: true,
   runHooks: true,
   enableGoal: true,

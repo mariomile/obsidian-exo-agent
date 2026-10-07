@@ -1040,7 +1040,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       if (!autos.length) lines.push("No automations yet.");
       for (const a of autos) {
         const say = a.when.map(whenSentence).join(" · ") || "never (no when-lines)";
-        const via = a.agent ? ` · via agent ${a.agent}` : "";
+        const via = (a.agent ? ` · via agent ${a.agent}` : "") + (a.mcp ? ` · mcp: ${a.mcp.length ? a.mcp.join(", ") : "none"}` : "");
         lines.push(`- [${a.slug}] ${a.name} — ${say} · ${modeSentence(a.mode)} · ${a.enabled ? "on" : "paused"}${via}`);
       }
       for (const e of store.errors()) {
@@ -1091,6 +1091,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       mode: z.enum(["report", "propose", "act"]).optional(),
       write_scope: z.array(z.string()).optional().describe("Folders/globs act|propose runs may write in."),
       cooldown: z.string().optional().describe("Least time between two event-started runs, like 15m or 2h."),
+      mcp: z.array(z.string()).nullable().optional().describe("External MCP servers a run may load, by CLI name (\"claude.ai Gmail\", \"perplexity\"). [] = none, only Exo's vault tools; null = back to the global setting."),
     },
     async (args) => {
       const exo = getExo(app);
@@ -1137,6 +1138,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
           enabled: true,
           agent: args.agent,
           prompt: args.prompt ?? "",
+          ...(args.mcp ? { mcp: args.mcp } : {}),
         };
         const problems = validateAutomation(a);
         if (problems.length) return err(`Not saved: ${problems.join(" ")}`);
@@ -1174,6 +1176,8 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       if (args.mode) a.mode = args.mode;
       if (args.write_scope) a.scope = args.write_scope;
       if (args.cooldown !== undefined) a.cooldownMs = parseDuration(args.cooldown) ?? NaN;
+      if (args.mcp === null) delete a.mcp;
+      else if (args.mcp) a.mcp = args.mcp;
       const problems = validateAutomation(a);
       if (problems.length) return err(`Not saved: ${problems.join(" ")}`);
       await store.save(a);

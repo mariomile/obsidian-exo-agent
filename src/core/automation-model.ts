@@ -57,6 +57,9 @@ export interface Automation {
   canCall: string[];
   /** Minimum ms between two event-triggered runs. */
   cooldownMs: number;
+  /** External MCP servers a run may load, by CLI name (`claude.ai Gmail`).
+   *  Absent = the global setting decides; empty = none (core/mcp-scope.ts). */
+  mcp?: string[];
   enabled: boolean;
   /** Markdown body — the playbook itself. */
   prompt: string;
@@ -204,6 +207,7 @@ export function parseAutomationFile(
     canCall: fmList(fm, "can_call"),
     system: systemRaw === "daily-pulse" ? "daily-pulse" : undefined,
     cooldownMs,
+    ...(/^mcp:/m.test(fm) ? { mcp: fmList(fm, "mcp") } : {}),
     enabled: fmScalar(fm, "enabled") === "true",
     prompt: stripFrontmatter(raw).trim(),
   };
@@ -212,7 +216,7 @@ export function parseAutomationFile(
   return { automation, warnings };
 }
 
-const KNOWN_KEYS = new Set(["name", "description", "icon", "when", "mode", "scope", "agent", "can_call", "system", "cooldown", "enabled"]);
+const KNOWN_KEYS = new Set(["name", "description", "icon", "when", "mode", "scope", "agent", "can_call", "system", "cooldown", "enabled", "mcp"]);
 
 /** Top-level keys the model does not own, each with its indented or `- `
  *  continuation lines, in file order. */
@@ -249,6 +253,7 @@ export function serializeAutomation(a: Automation): string {
   if (a.canCall.length) lines.push(`can_call: [${a.canCall.join(", ")}]`);
   if (a.system) lines.push(`system: ${a.system}`);
   lines.push(`cooldown: ${formatDuration(a.cooldownMs)}`);
+  if (a.mcp) lines.push(`mcp: [${a.mcp.map((n) => `"${n.replace(/"/g, "")}"`).join(", ")}]`);
   lines.push(`enabled: ${a.enabled}`);
   if (a.extra?.length) lines.push(...a.extra);
   lines.push("---", "", a.prompt, "");
@@ -320,6 +325,7 @@ export function contractFromAutomation(a: Automation): import("./agents").AgentC
     scope: { read: [], write: a.scope },
     canCall: a.canCall,
     triggers: a.when,
+    ...(a.mcp ? { mcp: [...a.mcp] } : {}),
   };
 }
 
@@ -380,6 +386,7 @@ export function duplicateAutomation(a: Automation, takenSlugs: ReadonlySet<strin
     when: a.when.map((w) => ({ ...w })),
     scope: [...a.scope],
     canCall: [...a.canCall],
+    ...(a.mcp ? { mcp: [...a.mcp] } : {}),
     ...(a.extra ? { extra: [...a.extra] } : {}),
   };
 }

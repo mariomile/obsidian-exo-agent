@@ -105,6 +105,9 @@ export interface AgentContract {
   /** Slugs this agent may hand work to via `invoke_agent`. */
   canCall: string[];
   triggers: AgentTrigger[];
+  /** External MCP servers a run may load (core/mcp-scope.ts). Absent = the
+   *  global setting decides; empty = none. Set only by automations. */
+  mcp?: string[];
 }
 
 /** A resolved agent: brain + contract. */

@@ -26,6 +26,7 @@ import {
 } from "../../core/automation-model";
 import { automationSlug } from "../../obsidian/automation-store";
 import { archiveAutomation, duplicate } from "./automation-actions";
+import { renderMcpField } from "./automation-mcp-field";
 import type { HubTabContext } from "./shared";
 
 /** What the tab consults before rendering: are we editing, and what. */
@@ -50,7 +51,7 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
   const store = ctx.plugin.automationStore;
   const existing = editingState.slug ? store.get(editingState.slug) : null;
   const draft: Automation = existing
-    ? { ...existing, when: existing.when.map((w) => ({ ...w })), scope: [...existing.scope] }
+    ? { ...existing, when: existing.when.map((w) => ({ ...w })), scope: [...existing.scope], ...(existing.mcp ? { mcp: [...existing.mcp] } : {}) }
     : {
         slug: "",
         name: "",
@@ -255,6 +256,9 @@ export function openAutomationEditor(host: HTMLElement, ctx: HubTabContext): voi
     e.stopPropagation();
     agentPopover.toggle();
   });
+
+  // ── external tools (MCP) ──────────────────────────────────────────────
+  renderMcpField(field("External tools (MCP servers) a run may load"), draft, ctx.plugin);
 
   // ── prompt ────────────────────────────────────────────────────────────
   const promptField = field("The prompt — what a run is told to do");

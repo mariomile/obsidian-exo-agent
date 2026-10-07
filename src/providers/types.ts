@@ -136,6 +136,10 @@ export interface SessionOpts {
   toolsEnabled: boolean;
   /** Skip external MCP servers for faster cold start. */
   fastStartup: boolean;
+  /** Load only these external MCP servers (core/mcp-scope.ts): every other
+   *  server in `known` or the config files is denied. Ignored when
+   *  `fastStartup` already skips them all. */
+  mcpOnly?: { allow: string[]; known: string[] };
   /** Run Claude Code hooks (.claude/settings.json). CC parity — on by default. */
   runHooks?: boolean;
   /** Resume a prior on-disk session id when (re)creating the session. */

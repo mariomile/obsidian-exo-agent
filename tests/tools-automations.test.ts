@@ -141,6 +141,15 @@ describe("automation tools (v2, file-backed)", () => {
     expect(exo.settings.scheduledLastRun).toEqual({ "agent:other": 2 });
   });
 
+  it("sets and clears the mcp list", async () => {
+    const { app, exo } = fakeApp([automation({ slug: "morning-digest", name: "Morning Digest" })]);
+    const run = toolHandler(app, "manage_automation");
+    await run({ action: "update", name: "Morning Digest", mcp: ["claude.ai Gmail"] }, {});
+    expect(exo.automationStore.save).toHaveBeenLastCalledWith(expect.objectContaining({ mcp: ["claude.ai Gmail"] }));
+    await run({ action: "update", name: "Morning Digest", mcp: null }, {});
+    expect(exo.automationStore.save.mock.calls.at(-1)?.[0].mcp).toBeUndefined();
+  });
+
   it("duplicate saves a paused copy", async () => {
     const { app, exo } = fakeApp([automation({ slug: "morning-digest", name: "Morning Digest" })]);
     await toolHandler(app, "manage_automation")({ action: "duplicate", name: "Morning Digest" }, {});
