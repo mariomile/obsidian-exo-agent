@@ -69,7 +69,10 @@ export function journalLine(agentName: string, at: number, summary: string, time
  */
 export function appendUnderHeading(content: string, heading: string, line: string): string {
   const lines = content.split(/\r?\n/);
-  const headingIdx = lines.findIndex((l) => l.trim() === heading);
+  // Match on the heading's text at any level: the user may demote the section
+  // to fit their note, and a second section at the end would follow.
+  const text = heading.replace(/^#+\s*/, "");
+  const headingIdx = lines.findIndex((l) => /^#+\s/.test(l.trim()) && l.trim().replace(/^#+\s*/, "") === text);
 
   if (headingIdx === -1) {
     const body = content.replace(/\s+$/, "");
@@ -79,7 +82,7 @@ export function appendUnderHeading(content: string, heading: string, line: strin
 
   // Walk to the end of this section: the next heading of the same or higher
   // level, or the end of the note.
-  const level = heading.match(/^#+/)?.[0].length ?? 2;
+  const level = lines[headingIdx].trim().match(/^#+/)?.[0].length ?? 2;
   let end = lines.length;
   for (let i = headingIdx + 1; i < lines.length; i++) {
     const h = lines[i].match(/^(#+)\s/);

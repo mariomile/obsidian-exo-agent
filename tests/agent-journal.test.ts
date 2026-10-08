@@ -94,6 +94,13 @@ describe("appendUnderHeading", () => {
     expect(out.indexOf("did a thing")).toBeLessThan(out.indexOf("# Top"));
   });
 
+  it("finds the section after the user changed its heading level", () => {
+    const before = ["### 🤖 Agenti", "", "- 08:00 **A** — first", "", "### Meetings", "- call"].join("\n");
+    const out = appendUnderHeading(before, JOURNAL_HEADING, line);
+    expect(out.match(/🤖 Agenti/g)).toHaveLength(1);
+    expect(out.indexOf("did a thing")).toBeLessThan(out.indexOf("### Meetings"));
+  });
+
   it("handles an empty note", () => {
     expect(appendUnderHeading("", JOURNAL_HEADING, line)).toBe(`${JOURNAL_HEADING}\n\n${line}\n`);
   });
