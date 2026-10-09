@@ -1,7 +1,7 @@
 {
 	"id": "exo-agent",
 	"name": "Exo Agent",
-	"version": "0.43.0",
+	"version": "0.43.1",
 	"minAppVersion": "1.8.7",
 	"description": "An agentic AI assistant in your sidebar, powered by the Claude or Codex CLI. Your vault becomes its working directory — with a refined, theme-aware chat UI.",
 	"author": "Mario Miletta",
