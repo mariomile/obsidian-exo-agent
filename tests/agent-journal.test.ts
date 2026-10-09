@@ -95,10 +95,10 @@ describe("appendUnderHeading", () => {
   });
 
   it("finds the section after the user changed its heading level", () => {
-    const before = ["### 🤖 Agenti", "", "- 08:00 **A** — first", "", "### Meetings", "- call"].join("\n");
+    const before = ["## 🤖 Agents", "", "- 08:00 **A** — first", "", "## Meetings", "- call"].join("\n");
     const out = appendUnderHeading(before, JOURNAL_HEADING, line);
-    expect(out.match(/🤖 Agenti/g)).toHaveLength(1);
-    expect(out.indexOf("did a thing")).toBeLessThan(out.indexOf("### Meetings"));
+    expect(out.match(/🤖 Agents/g)).toHaveLength(1);
+    expect(out.indexOf("did a thing")).toBeLessThan(out.indexOf("## Meetings"));
   });
 
   it("handles an empty note", () => {

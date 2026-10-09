@@ -13,7 +13,7 @@ export const JOURNAL_MARKER = "JOURNAL:";
 
 /** Heading the lines are collected under, so they stay together and a human
  *  can fold them away. */
-export const JOURNAL_HEADING = "## 🤖 Agenti";
+export const JOURNAL_HEADING = "### 🤖 Agents";
 
 /** A journal line is a glance, not a report. Anything longer is a report that
  *  lost its way. */
