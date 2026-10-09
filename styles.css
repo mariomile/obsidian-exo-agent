@@ -372,21 +372,17 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-normal);
 }
 .mva-tab.is-active {
-  /* Accent layered over the visible hover fill (not raw --background-primary),
-     so the active tab reads clearly on dark themes and stays a step above a
-     plain hover. Flat inset ring instead of a floating drop-shadow — matches
-     the native, chrome-flat feel of the header icon buttons. */
-  background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-modifier-hover));
+  /* A neutral fill one step above hover, no ring and no accent: the tab is
+     chrome, and a ring turned it into a floating button. */
+  background: color-mix(in srgb, var(--text-normal) 10%, transparent);
   color: var(--text-normal);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
 }
 .mva-tab.is-active .mva-tab-title {
   font-weight: 500;
 }
 /* Status mark — one 6px slot, five states, zero pictograms. Absence of a mark
    IS the idle state in WIDE mode: nothing to know, nothing drawn — the title
-   next to it is what says the tab exists. Dense mode takes that carrier away
-   and has to compensate; see `.is-dense … .is-idle` further down. The slot
+   next to it is what says the tab exists, in both densities. The slot
    carries state and nothing else: the provider colour is NOT painted here, because a
    filled brand dot and a filled `unread` dot differ only in hue — and with a
    user-configurable accent they can be the same hue. */
@@ -587,64 +583,52 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-tab-agents-icon.is-spinning .svg-icon {
   animation: mva-spin 1.1s linear infinite;
 }
-/* Dense strip — a non-active tab is a status mark and nothing else. Measured on
-   a real sidebar pane: 356px of usable strip against the ~980px six wide tabs
-   ask for, so only two of the six were reachable and the rest sat behind a
-   scrollbar that is hidden by design. The title a wide tab shows at 170px is
-   ~14 characters of a sentence that starts the same way as every other one in
-   the strip, so the widest possible tab buys no recognition — dense pays ~18px
-   for the one thing that does distinguish them (state and position) and puts
-   the title on hover, where it can be read whole.
+/* Dense mode: every non-active tab keeps a short title instead of shrinking to
+   its status mark. A row of marks reads as anonymous dots; the first words of a
+   title are what tells two chats apart, and the full title is on hover.
 
-   The title, the pin and the × are not hidden here: `buildTab` does not create
-   them at all, so there is nothing left to hide. No `transition` on any of
-   these selectors either — motion in this strip means "this is happening now",
-   and animating a relayout would compete with the one signal that must catch
-   the eye.
+   The pin and the × are not hidden here: `buildTab` does not create them in
+   dense, so there is nothing left to hide. No `transition` on these selectors:
+   motion in this strip means "this is happening now".
 
-   Padding only, and deliberately NO `max-width: none`. It would buy nothing for
-   a dense tab (18px of content, or ~48px with the agents badge — the 170px cap
-   never binds) and would silently uncap the ONE tab still painting a title, in
-   the mode entered exactly when width is scarcest. `chooseDensity` subtracts
-   `STRIP_ACTIVE_TAB_PX = 170` as the active tab's cost; the CSS must not then
-   let it cost more, or a 40-character title eats the budget the five mark-only
-   tabs were supposed to free and the strip scrolls again. */
+   Non-active tabs share what is left and shrink to 56px, about seven
+   characters, before the strip scrolls. The active tab never shrinks and gives
+   back part of its 170px (`STRIP_ACTIVE_TAB_PX`, the budget `chooseDensity`
+   reserves for it) so the others keep a readable word. */
 .mva-tabstrip.is-dense .mva-tab {
-  padding: 4px 6px;
+  padding: 4px 8px;
 }
-/* Idle has to become visible here, and ONLY here.
-   DO NOT delete this to "restore consistency" with the wide-mode rule above.
-   The five-state vocabulary rests on an unstated premise: that something else
-   already says the tab exists, so absence can mean "nothing to report". In wide
-   mode that something is the title. Dense removes it, so the mark inherits a
-   second job — existence, on top of state — and in a grammar where "I am here"
-   and "nothing is happening" are both drawn as nothing, an idle tab renders as
-   an 18px invisible clickable slot. You cannot click what you cannot see.
-   Faint, then, but not absent: visible without becoming a sixth state.
-   Only where the premise actually fails — not on the active tab, which keeps
-   its title and its background, and never over `.is-blocked`, whose accent mark
-   outranks every state and must not lose to a higher-specificity baseline.
-
-   WHY 50% AND NOT MORE. It has to stay under `stopped`, which is the nearest
-   neighbour: same colour (`--text-faint`), but drawn as a 1px ring, and a 1px
-   ring on a 6px disc covers ~55% of it. So a FILLED dot at more than ~55%
-   opacity carries more ink than the state it must stay beneath, however faint
-   it looks in isolation — measured at 60% it did. 50% sits below that ceiling
-   and still well above the theme's own hairline. The other four are untouched:
-   they win on hue (`error`, `unread`), on motion (`streaming`) and on form
-   (`stopped` is hollow where this is filled). */
+.mva-tabstrip.is-dense .mva-tab:not(.is-active) {
+  flex: 0 1 auto;
+  min-width: 56px;
+  max-width: 96px;
+}
+.mva-tabstrip.is-dense .mva-tab.is-active {
+  flex-shrink: 0;
+  max-width: 128px;
+}
+/* An idle mark draws nothing but still takes its 6px slot and a gap. In a tab
+   this narrow those 12px are two more letters of title. */
 .mva-tabstrip.is-dense .mva-tab:not(.is-active):not(.is-blocked) .mva-tab-mark.is-idle {
-  background: color-mix(in srgb, var(--text-faint) 50%, transparent);
+  display: none;
 }
 /* The boundary between the pinned block and the rest, drawn once for the whole
-   group at 1px instead of an 11px pin on every tab in it. A border on the tab
-   that opens the group and never a node between tabs: `.mva-tabs` holds only
-   keyed children, and a foreign element there takes an index and shifts every
-   tab after it out of order. */
+   group. A pseudo-element on the tab that opens the group, never a node between
+   tabs: `.mva-tabs` holds only keyed children, and a foreign element there takes
+   an index and shifts every tab after it out of order. Not a border either: on a
+   rounded tab a border curves into a half frame around the tab. */
 .mva-tabstrip.is-dense .mva-tab.is-first-unpinned {
-  border-left: 1px solid var(--background-modifier-border);
-  margin-left: 4px;
-  padding-left: 8px;
+  position: relative;
+  margin-left: 9px;
+}
+.mva-tabstrip.is-dense .mva-tab.is-first-unpinned::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--background-modifier-border);
 }
 /* Chat column + Recap Rail wrapper. A plain vertical flex by default (the chat
    behaves exactly as before); becomes a row only in the wide full-page layout. */

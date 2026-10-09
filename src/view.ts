@@ -1678,11 +1678,10 @@ export class ChatView extends ItemView {
    */
   private buildTab(c: Convo, vm: TabVM, f: TabFacts): HTMLElement {
     const { agents, pinned, active: isActive, placeholder } = f;
-    // In dense mode a non-active tab is its status mark and nothing else. The
-    // title it would have shown at 170px is ~14 characters of a sentence that
-    // starts the same way as every other one in the strip — the widest possible
-    // tab buying no recognition — so it costs ~18px instead of 170 and the title
-    // arrives on hover, where it can be read in full.
+    // In dense mode a non-active tab keeps a short title (CSS caps it) and
+    // drops the pin and the ×. Marks alone read as a row of anonymous dots: the
+    // first words of a title are what tells two chats apart, and the full title
+    // still arrives on hover.
     const bare = f.density === "dense" && !isActive;
     const tab = createDiv({ cls: "mva-tab" + (isActive ? " is-active" : "") });
     const title = placeholder ? "New chat" : c.title || "New chat";
@@ -1711,29 +1710,24 @@ export class ChatView extends ItemView {
     // One 6px slot, five states, zero pictograms — and nothing else: the
     // provider colour deliberately does NOT live here.
     //
-    // The class is stamped for EVERY state, `idle` included. It used to be
-    // omitted, on the reasoning that idle draws nothing and so needs no hook —
-    // but dense mode gives idle something to draw (see the `.is-idle` rule in
-    // styles.css), and a hook the CSS can name beats selecting idle as "none of
-    // the other four": that form has to be extended by hand for every state
-    // added later, and out-specifies the new state's own rule when it is not.
+    // The class is stamped for EVERY state, `idle` included: a hook the CSS can
+    // name beats selecting idle as "none of the other four", which has to be
+    // extended by hand for every state added later.
     const mark = tab.createSpan({ cls: "mva-tab-mark" });
     mark.addClass(`is-${vm.state}`);
 
-    if (!bare) {
-      const titleEl = tab.createSpan({ cls: "mva-tab-title" + (placeholder ? " is-placeholder" : "") });
-      if (placeholder) {
-        setIcon(titleEl, "pencil");
-        titleEl.append("New chat");
-      } else {
-        titleEl.setText(title);
-      }
-
-      // Pinned is a noun, so it gets an icon (states never do). Dropped in dense
-      // for the same reason the title is: the separator says "these are the
-      // pinned ones" once for the whole group, at 1px, instead of 11px per tab.
-      if (pinned) setIcon(tab.createSpan({ cls: "mva-tab-pin" }), "pin");
+    const titleEl = tab.createSpan({ cls: "mva-tab-title" + (placeholder ? " is-placeholder" : "") });
+    if (placeholder) {
+      setIcon(titleEl, "pencil");
+      titleEl.append("New chat");
+    } else {
+      titleEl.setText(title);
     }
+
+    // Pinned is a noun, so it gets an icon (states never do). Dropped in dense:
+    // the separator says "these are the pinned ones" once for the whole group,
+    // at 1px, instead of 11px per tab.
+    if (pinned && !bare) setIcon(tab.createSpan({ cls: "mva-tab-pin" }), "pin");
 
     // Per-tab agent count: how many subagents/background tasks THIS chat is
     // running right now — local to its own tab, so a busy background chat is
@@ -1773,8 +1767,8 @@ export class ChatView extends ItemView {
       });
     }
     if (bare) {
-      // Dense mode drops the title from the tab itself; the native tooltip is
-      // where it reads in full — platform-positioned and platform-dismissed,
+      // Dense mode cuts the title short; the native tooltip is where it reads
+      // in full — platform-positioned and platform-dismissed,
       // instead of a hand-tracked floating label that could drift once its tab
       // moved out from under it.
       setTooltip(tab, title);
