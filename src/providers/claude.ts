@@ -773,9 +773,9 @@ export const claudeAdapter: ProviderAdapter = {
   iconTinted: true,
 
   models(): ModelOption[] {
-    // Pinned, verified model IDs (checked 2026-09-29 against the Claude Code
-    // model-config reference). Add newer ones here as they ship. Users can also type any
-    // custom model id in settings.
+    // Pinned, verified model IDs (checked 2026-10-12 against the Claude Platform
+    // models overview and deprecations pages: all listed ids are Active). Add newer
+    // ones here as they ship. Users can also type any custom model id in settings.
     return [
       { id: "claude-fable-5-1", label: "Fable 5.1" },
       { id: "claude-fable-5", label: "Fable 5" },
@@ -785,6 +785,7 @@ export const claudeAdapter: ProviderAdapter = {
       { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
       { id: "claude-sonnet-5", label: "Sonnet 5" },
       { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+      { id: "claude-haiku-5-5", label: "Haiku 5.5" },
       { id: "claude-haiku-4-5", label: "Haiku 4.5" },
     ];
   },

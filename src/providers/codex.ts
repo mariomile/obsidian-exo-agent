@@ -173,17 +173,19 @@ export const codexAdapter: ProviderAdapter = {
   iconTinted: false,
 
   models(): ModelOption[] {
-    // Verified live via app-server `model/list` on codex-cli 0.156.1
-    // (checked 2026-09-23), in catalog priority order. Users can also type any
-    // custom model id in settings.
+    // Fallback when the CLI's live `model/list` catalog isn't available yet.
+    // Checked 2026-10-12 against developers.openai.com/codex/models: GPT-5.5
+    // retires from Codex with ChatGPT sign-in on 2026-10-14, so it's no longer
+    // offered (a saved gpt-5.5 stays selected; API-key users can still run it).
+    // Users can also type any custom model id in settings.
     return [
       { id: "gpt-6-astra", label: "GPT-6 Astra" },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
       { id: "gpt-6-sol", label: "GPT-6 Sol" },
       { id: "gpt-6-luna", label: "GPT-6 Luna" },
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
       { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-      { id: "gpt-5.5", label: "GPT-5.5" },
     ];
   },
 

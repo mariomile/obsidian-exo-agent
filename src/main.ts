@@ -1304,8 +1304,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       const cli = await resolveCli("claude", this.settings.claudeBin);
       const session = ADAPTERS.claude.createSession({
         cli,
-        model: "claude-haiku-4-5", // product default — cheap/fast one-liner
-        effort: "default",
+        model: "claude-haiku-5-5", // product default — cheap/fast one-liner
+        effort: "low", // Haiku 5.5 thinks by default; a title doesn't need it
         cwd: this.vaultPath(),
         permissionMode: "default",
         toolsEnabled: false, // title only — no tools
@@ -1383,7 +1383,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     // init + the API round trip. A 15s default could never succeed, so every
     // call site already overrode it; the default was a trap for the next one.
     const { signal, timeoutMs = 90_000, onUsage } = opts;
-    const model = opts.model || this.settings.backgroundModel || "claude-sonnet-5";
+    const model = opts.model || this.settings.backgroundModel || "claude-sonnet-5-5";
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     if (signal.aborted) ctrl.abort();
