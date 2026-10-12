@@ -312,7 +312,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   convoSeed: 0,
   backgroundPassesEnabled: true,
   backgroundDailyTokenBudget: 200000,
-  backgroundModel: "claude-sonnet-5",
+  backgroundModel: "claude-sonnet-5-5",
   backgroundBudgetLedger: { dateUTC: "", tokensUsed: 0 },
   proposalKernelEnabled: true,
   proposalTurnSuggestions: false,

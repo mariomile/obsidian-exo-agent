@@ -173,7 +173,7 @@ export class MVASettingTab extends PluginSettingTab {
       .setDesc("Extra Claude model ids (comma- or newline-separated) added to the model picker and the default-model dropdown above.")
       .addTextArea((t) =>
         t
-          .setPlaceholder("claude-opus-4-6\nclaude-sonnet-4-6")
+          .setPlaceholder("claude-opus-4-7\nclaude-opus-4-6")
           .setValue(s.claudeCustomModels)
           .onChange(async (v) => {
             s.claudeCustomModels = v;
@@ -188,7 +188,7 @@ export class MVASettingTab extends PluginSettingTab {
       .setDesc("Extra Codex model ids (comma- or newline-separated) added to the model picker and the default-model dropdown above.")
       .addTextArea((t) =>
         t
-          .setPlaceholder("gpt-5.6-terra\ngpt-5.4-mini")
+          .setPlaceholder("gpt-5.5\ngpt-5.6-terra")
           .setValue(s.codexCustomModels)
           .onChange(async (v) => {
             s.codexCustomModels = v;
