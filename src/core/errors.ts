@@ -11,8 +11,8 @@ export function describeCliFailure(raw: string): { message: string; hint?: strin
 
   // Auth first: an auth failure can also mention "error"/"exited", so it must win
   // over the generic crash patterns below.
-  if (/not logged in|invalid api key|please run \/login|\/login\b|unauthorized|not authenticated/.test(m)) {
-    return { message: "The CLI isn't authenticated — run `claude` once in a terminal to log in." };
+  if (isCliAuthFailure(m)) {
+    return { message: "The CLI isn't logged in, or its login expired. Run `claude auth login` in a terminal, then retry." };
   }
 
   // Claude-plan usage limit (claude.ai subscription). Distinct from an API-key
@@ -76,6 +76,16 @@ export function describeCliFailure(raw: string): { message: string; hint?: strin
 }
 
 /** Exact provider-stream failures that the session recovery ladder can heal. */
+/** The CLI has no usable login: never logged in, or its OAuth token expired and
+ *  the refresh failed ("Failed to authenticate: OAuth session expired and could
+ *  not be refreshed"). Not a session death: resuming or recapping cannot heal
+ *  it, only a new `claude auth login` can. */
+export function isCliAuthFailure(raw: string): boolean {
+  return /not logged in|invalid api key|please run \/login|\/login\b|unauthorized|not authenticated|failed to authenticate|oauth session expired|oauth token (has )?expired/.test(
+    (raw || "").toLowerCase(),
+  );
+}
+
 export function isEndedSessionFailure(raw: string): boolean {
   return /claude session ended|session stream ended/.test((raw || "").toLowerCase());
 }
