@@ -301,3 +301,21 @@ describe("stopAction", () => {
     expect(stopAction(true, STOP_ESCALATION_GRACE_MS)).toBe("dispose");
   });
 });
+
+describe("expired CLI login", () => {
+  const RAW = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+  it("is not a recoverable session death, despite saying 'session expired'", () => {
+    expect(isRecoverableSessionError(RAW)).toBe(false);
+  });
+
+  it("drops the live process, keeps the id, and never enters the ladder", () => {
+    for (const resumeRisky of [false, true]) {
+      for (const isRecoveryRetry of [false, true]) {
+        expect(
+          resolveRecovery({ poisoned: true, stopped: false, isRecoveryRetry, resumeRisky, authFailed: true })
+        ).toEqual({ footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false });
+      }
+    }
+  });
+});

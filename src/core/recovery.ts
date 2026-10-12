@@ -3,7 +3,7 @@
  */
 import type { Message, Segment } from "./model";
 import { planRecapLabel } from "./plan";
-import { isEndedSessionFailure } from "./errors";
+import { isCliAuthFailure, isEndedSessionFailure } from "./errors";
 
 /**
  * True when an error message signals a *recoverable* session death — the kind
@@ -20,6 +20,8 @@ import { isEndedSessionFailure } from "./errors";
  */
 export function isRecoverableSessionError(msg: string): boolean {
   const m = (msg || "").toLowerCase();
+  // "OAuth session expired" is a dead login, not a dead session.
+  if (isCliAuthFailure(m)) return false;
   if (/session expired|session not found|invalid session|session invalid|process exited with code/.test(m)) {
     return true;
   }
@@ -63,6 +65,8 @@ export type RecoveryInput = {
   stopped: boolean;
   isRecoveryRetry: boolean;
   resumeRisky: boolean;
+  /** The turn failed because the CLI has no usable login (see `isCliAuthFailure`). */
+  authFailed?: boolean;
 };
 
 /**
@@ -100,7 +104,14 @@ export type RecoveryPlan = {
  *   in the original); resumeRisky is left as-is. No session action, no footer.
  */
 export function resolveRecovery(s: RecoveryInput): RecoveryPlan {
-  const { poisoned, stopped, isRecoveryRetry, resumeRisky } = s;
+  const { poisoned, stopped, isRecoveryRetry, resumeRisky, authFailed } = s;
+  if (authFailed && !stopped) {
+    // A dead login is not a crashed session: resuming, recapping or wiping the
+    // id cannot heal it, and every attempt fails the same way. Drop the live
+    // process so the next message spawns one that reads the new login, keep the
+    // id so it resumes this conversation, and leave the ladder disarmed.
+    return { footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false };
+  }
   if (poisoned && !stopped) {
     if (isRecoveryRetry) {
       // The stage-2 recap retry itself poisoned — nuclear reset (loop guard).

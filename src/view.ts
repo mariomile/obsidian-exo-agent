@@ -149,7 +149,7 @@ import { advanceBoundary } from "./core/stream-scan";
 import { mergeTouched, WRITE_TOOLS } from "./core/touched";
 import { terminalConvoState } from "./core/convo-state";
 import { allowKey, permArgText, permRuleLine, decidePermission } from "./core/permissions";
-import { describeCliFailure } from "./core/errors";
+import { describeCliFailure, isCliAuthFailure } from "./core/errors";
 import { isReadOnlyExternalTool } from "./core/headless-tools";
 import {
   createWorkflowSignal,
@@ -5280,6 +5280,7 @@ export class ChatView extends ItemView {
     // dropSession never runs — the CLI session stays poisoned and every later turn
     // re-errors. Track it here and reset the session at turn end.
     let poisoned = false;
+    let authFailed = false;
 
     // Diagnostics: first-delta latency markers (logged once per turn, deltas are
     // otherwise never logged — noise) + tool-id → name so result lines read well.
@@ -5696,7 +5697,8 @@ export class ChatView extends ItemView {
             // on-disk transcript survives and a fresh process can resume it, so we
             // recover in two stages. The footer reflects which stage this is.
             poisoned = true;
-            if (this.renderError(ctx, e.message, c, text).showRecoveryFooter) {
+            authFailed = isCliAuthFailure(e.message);
+            if (this.renderError(ctx, e.message, c, text).showRecoveryFooter && !authFailed) {
               ctx.bodyEl.createSpan({ cls: "mva-faint", text: this.recoveryFooter(c, !!opts?.isRecoveryRetry) });
             }
             this.notifyOnce(ctx, "error", "Exo — error", e.message.slice(0, 80));
@@ -5829,6 +5831,7 @@ export class ChatView extends ItemView {
           }
           this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
         } else {
+          authFailed = isCliAuthFailure(msg);
           this.renderError(ctx, msg, c, text);
           new Notice(msg);
           this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
@@ -5918,6 +5921,7 @@ export class ChatView extends ItemView {
         stopped: c.stopped,
         isRecoveryRetry: !!opts?.isRecoveryRetry,
         resumeRisky: !!c.resumeRisky,
+        authFailed,
       });
       if (plan.session !== "none") this.dropSession(c, `recovery-${plan.session}`);
       if (plan.session === "drop-clear-id") c.sessionId = undefined;
@@ -6069,7 +6073,7 @@ export class ChatView extends ItemView {
   /** Inline error, upgraded to a setup card when the CLI isn't ready. */
   private renderErrorBody(body: HTMLElement, message: string, c: Convo, retryText: string): void {
     let actionHost: HTMLElement;
-    if (/not found|not logged in|sign in|run it once/i.test(message)) {
+    if (isCliAuthFailure(message) || /not found|sign in|run it once/i.test(message)) {
       const card = body.createDiv({ cls: "mva-onboard" });
       setIcon(card.createDiv({ cls: "mva-onboard-icon" }), "plug-zap");
       card.createDiv({ cls: "mva-onboard-title", text: `${ADAPTERS[c.provider].displayName} isn't ready` });

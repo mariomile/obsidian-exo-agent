@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeCliFailure } from "../src/core/errors";
+import { describeCliFailure, isCliAuthFailure } from "../src/core/errors";
 
 describe("describeCliFailure", () => {
   it("maps error_during_execution / EDE diagnostics to a transient-crash message + hint", () => {
@@ -56,14 +56,14 @@ describe("describeCliFailure", () => {
       "Error: unauthorized",
     ]) {
       const r = describeCliFailure(raw);
-      expect(r?.message).toMatch(/isn't authenticated/i);
+      expect(r?.message).toMatch(/isn't logged in/i);
     }
   });
 
   it("prefers the auth message when a crash string also mentions auth", () => {
     // "not logged in" must win over "process exited".
     const r = describeCliFailure("process exited with code 1: not logged in");
-    expect(r?.message).toMatch(/isn't authenticated/i);
+    expect(r?.message).toMatch(/isn't logged in/i);
   });
 
   it("is case-insensitive", () => {
@@ -103,5 +103,18 @@ describe("describeCliFailure", () => {
     ]) {
       expect(describeCliFailure(raw)).toBeNull();
     }
+  });
+});
+
+describe("isCliAuthFailure", () => {
+  it("recognizes an expired OAuth login and points at claude auth login", () => {
+    const raw = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    expect(isCliAuthFailure(raw)).toBe(true);
+    expect(describeCliFailure(raw)?.message).toMatch(/claude auth login/);
+  });
+
+  it("does not flag a plain session death", () => {
+    expect(isCliAuthFailure("Session expired, please start a new one")).toBe(false);
+    expect(isCliAuthFailure("process exited with code 1")).toBe(false);
   });
 });

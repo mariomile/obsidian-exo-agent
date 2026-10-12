@@ -3,6 +3,7 @@ import { homedir } from "os";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "fs";
 import { dirname } from "path";
 import { pickWindowsPrefix, resolveWindowsBin, spawnSpec, windowsPathEnv } from "./core/win-cli";
+import { isCliAuthFailure } from "./core/errors";
 
 /** A resolved CLI invocation: the binary plus an enriched PATH for the spawn. */
 export interface ResolvedCli {
@@ -542,8 +543,8 @@ export function describeError(e: unknown, cliName = "CLI"): string {
   }
   if (e instanceof Error) {
     const msg = e.message || "";
-    if (/not logged in|unauthorized|authentication/i.test(msg)) {
-      return `${cliName} is not logged in — run it once in a terminal to sign in.`;
+    if (/authentication/i.test(msg) || isCliAuthFailure(msg)) {
+      return `${cliName} is not logged in or its login expired: run it once in a terminal to sign in.`;
     }
     return msg || `${cliName} error.`;
   }
