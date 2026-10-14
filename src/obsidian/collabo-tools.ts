@@ -7,7 +7,7 @@
  * owner promotes a proposal to canonical text in the web client; an agent that
  * could accept its own suggestion would make the review gate decorative.
  */
-import { z } from "zod";
+import * as z from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import type { App } from "obsidian";
 import { ok, err, getExo } from "./tool-kit";

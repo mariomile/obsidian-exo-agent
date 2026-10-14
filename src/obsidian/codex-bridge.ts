@@ -7,7 +7,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "http";
 import { randomBytes, timingSafeEqual } from "crypto";
-import { z } from "zod";
+import * as z from "zod";
 import type { AnyTool } from "./sdk-tool";
 
 

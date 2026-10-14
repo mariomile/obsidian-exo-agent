@@ -1,5 +1,6 @@
 import { App, TFile, getAllTags } from "obsidian";
-import { z } from "zod";
+import * as z from "zod";
+import { en } from "zod/locales";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { resolveLink, neighborhood, basename } from "./graph";
 import { exoPaths, LEGACY_MEMORY_ROOT, type ExoPaths } from "../core/paths";
@@ -46,6 +47,13 @@ import { memoryCaps, type MemoryCaps } from "../core/memory-caps";
 import { DEFAULT_SETTINGS } from "../settings-schema";
 import { buildMemoryTools, MEMORY_READ_TOOLS } from "./memory-tools";
 import { searchVaultNotes } from "./vault-search";
+
+// English issue messages, stated rather than inherited. `import * as z` lets
+// esbuild drop zod's ~200KB of unused locales, but zod is `sideEffects: false`,
+// so its own `config(en())` survives only while the bundle happens to wrap zod
+// in a lazy init. Configured here, the messages the model reads on a bad tool
+// call never depend on how the bundle is laid out.
+z.config(en());
 
 /** Tool-registry memory caps when the caller passes none: a chat with the
  *  default settings (tests and standalone callers). */
