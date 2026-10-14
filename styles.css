@@ -4512,27 +4512,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-caps::-webkit-scrollbar {
   display: none;
 }
-.mva-caps-card {
-  border: var(--mva-card-border);
-  border-radius: var(--mva-card-radius);
-  padding: var(--mva-card-pad);
-}
-.mva-caps-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 9px;
-}
-.mva-caps-title {
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--text-normal);
-}
-.mva-caps-sub {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  font-family: var(--font-monospace);
-}
 .mva-caps-body {
   display: flex;
   flex-wrap: wrap;
@@ -4569,24 +4548,12 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-caps-chip.is-off {
   opacity: 0.55;
 }
-.mva-caps-tier-caption {
-  text-transform: none;
-  letter-spacing: normal;
-  font-weight: 400;
-  color: var(--text-faint);
-}
 /* Action chips (Memory card): a glyph replaces the dot, since these mean
    "click to run/open" rather than "this is on/off". Accent-tinted so the
    truly clickable rows stand out from the plain status chips around them. */
 .mva-caps-chip.is-action {
   gap: 5px;
   font-weight: 550;
-}
-.mva-caps-glyph {
-  font-size: 10px;
-  line-height: 1;
-  flex-shrink: 0;
-  color: var(--mva-brand, var(--interactive-accent));
 }
 .mva-caps-chip.is-action.is-clickable {
   color: var(--text-normal);
@@ -4596,25 +4563,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-caps-chip.is-action.is-clickable:hover {
   background: color-mix(in srgb, var(--mva-brand, var(--interactive-accent)) 18%, var(--background-modifier-hover));
   border-color: var(--mva-brand, var(--interactive-accent));
-}
-.mva-caps-chip.is-action.is-off .mva-caps-glyph {
-  color: var(--text-faint);
-}
-.mva-caps-chip-hint {
-  font-size: 10px;
-  font-style: italic;
-  color: var(--text-faint);
-}
-/* Config chips (System card): keep the on/off dot (they report a state) but
-   add a trailing gear so they read as "click to configure", not "click to
-   run" — the same row grammar as an action chip, a different affordance. */
-.mva-caps-glyph.is-gear {
-  font-size: 9.5px;
-  margin-left: 1px;
-  color: var(--text-faint);
-}
-.mva-caps-chip.is-clickable:hover .mva-caps-glyph.is-gear {
-  color: var(--text-muted);
 }
 
 /* ------------------------------ keyframes ----------------------------- */
@@ -5824,31 +5772,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-ck-foot { color: var(--text-faint); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: 6px; }
 .mva-ck-foot:hover { color: var(--text-muted); }
 
-/* --------------------------- Learning loop --------------------------- */
-.mva-ll { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 10px;
-  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
-  font-size: var(--font-ui-smaller); color: var(--text-muted); }
-.mva-ll-icon svg { width: 13px; height: 13px; color: var(--interactive-accent); }
-.mva-ll-icon.is-working svg { animation: mva-ll-pulse var(--mva-heartbeat) ease-in-out infinite; }
-.mva-ll-icon.is-ok svg { color: var(--mva-ok); }
-@keyframes mva-ll-pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .mva-ll-icon.is-working svg { animation: none; } }
-.mva-ll-label { flex: 1; }
-.mva-ll-btn { cursor: pointer; padding: 2px 10px; border-radius: var(--radius-s);
-  border: 1px solid var(--background-modifier-border); color: var(--text-normal); }
-.mva-ll-btn:hover { border-color: var(--background-modifier-border-hover); background: var(--background-modifier-hover); }
-.mva-ll-x { cursor: pointer; display: inline-flex; color: var(--text-faint); }
-.mva-ll-x:hover { color: var(--text-muted); }
-.mva-ll-x svg { width: 12px; height: 12px; }
-.mva-ll.is-review { flex-direction: column; align-items: stretch; gap: 6px; }
-.mva-ll-chev { cursor: pointer; display: inline-flex; color: var(--text-faint); }
-.mva-ll-chev:hover { color: var(--text-muted); }
-.mva-ll-chev svg { width: 13px; height: 13px; }
-.mva-ll-head .mva-ll-label { cursor: pointer; }
-.mva-ll-head { display: flex; align-items: center; gap: 8px; }
-.mva-ll-preview { white-space: pre-wrap; color: var(--text-faint); background: var(--background-secondary);
-  border-radius: var(--radius-s); padding: 6px 8px; max-height: 140px; overflow-y: auto; }
-
 /* --------------------------- automations tab ---------------------------- */
 /* Same form recipe as the prompt-vars/task modals: quiet labels, chip+popover
    selects, .mva-btn buttons. Only layout deltas live here. Hosted in the
@@ -5858,42 +5781,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-muted);
   margin: 2px 0 14px;
 }
-.mva-auto-row {
-  padding: 8px 0;
-  border-top: 1px solid var(--background-modifier-border);
-}
-.mva-auto-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
 .mva-auto-spacer { flex: 1; }
-.mva-auto-toggle { cursor: pointer; }
 .mva-sel-chip.is-off { opacity: 0.55; }
-.mva-auto-meta,
-.mva-auto-warn,
-.mva-auto-empty {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-faint);
-  margin-top: 4px;
-}
-.mva-auto-warn {
-  color: var(--mva-caution);
-  display: -webkit-box;
-  max-width: 52ch;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.mva-auto-x {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-faint);
-  cursor: pointer;
-}
-.mva-auto-x:hover { color: var(--text-muted); }
-.mva-auto-x svg { width: 14px; height: 14px; }
 /* Hub search box (MCP + Skills). */
 .mva-hub-search {
   display: flex;
@@ -5923,9 +5812,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-hub-sched { display: inline-flex; align-items: center; gap: 4px; }
 .mva-hub-sched-icon { display: inline-flex; }
 .mva-hub-sched-icon svg { width: 11px; height: 11px; }
-/* Unknown-playbook marker inside the picker chip (replaces the old text glyph). */
-.mva-auto-chip-warn { display: inline-flex; margin-left: 4px; color: var(--text-warning, var(--text-muted)); }
-.mva-auto-chip-warn svg { width: 12px; height: 12px; }
 .mva-auto-foot { margin: 10px 0 4px; }
 .mva-auto-popfield {
   display: flex;
@@ -5937,39 +5823,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 .mva-auto-popfield .mva-pv-label { margin: 0; }
 .mva-auto-hour { width: 64px; }
-/* The "N triggers" disclosure chip and the list it expands into. A caret
-   rotates open rather than a plus/minus swap — same wash-family motion as
-   every other chip, no new easing introduced. */
-.mva-auto-multitrigger::after {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg) translateY(-1px);
-  transition: transform var(--mva-t);
-}
-.mva-auto-multitrigger.is-open::after { transform: rotate(-135deg) translateY(1px); }
-@media (prefers-reduced-motion: reduce) {
-  .mva-auto-multitrigger::after { transition: none; }
-}
-.mva-auto-triggerlist {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
-  padding: 6px 0 2px;
-  border-top: 1px solid var(--background-modifier-border);
-}
-.mva-auto-triggerrow { display: flex; }
-.mva-auto-triggerrow .mva-sel-chip {
-  color: var(--text-muted);
-  background: var(--background-secondary);
-}
-.mva-auto-runs { margin-top: 14px; }
 .mva-auto-runrow {
   display: flex;
   align-items: center;
@@ -6351,27 +6204,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   cursor: pointer;
 }
 
-/* Agent rows in the Automations tab: chips sit under the name, same recipe as
-   a playbook row's controls. */
-.mva-auto-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 5px;
-}
-
-/* Agent automation rows: the sentence leads, the controls follow. */
-.mva-auto-say {
-  margin-top: 3px;
-  color: var(--text-normal);
-  font-size: var(--font-ui-smaller);
-}
-.mva-auto-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 7px;
-}
 /* Option rows that carry an explanation need room for two lines. */
 .mva-sel-opt-tall {
   align-items: flex-start;
@@ -6385,14 +6217,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   margin-top: 1px;
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
-}
-
-/* Trigger popover: a labelled field per parameter, same recipe as the
-   playbook cadence popover. */
-.mva-auto-popnote {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--background-modifier-border);
 }
 
 /* ------------------------- automations tab (v2) -------------------------- */
