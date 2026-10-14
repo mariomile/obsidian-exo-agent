@@ -13,7 +13,7 @@
  * in OBSIDIAN_READ_TOOLS).
  */
 import { App } from "obsidian";
-import { z } from "zod";
+import * as z from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { homedir } from "os";
 import { readFile } from "fs/promises";

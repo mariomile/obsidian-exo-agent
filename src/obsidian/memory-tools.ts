@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { z } from "zod";
+import * as z from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import type { MemoryCaps } from "../core/memory-caps";
 import { formatRecentChats } from "../core/recent-chats";

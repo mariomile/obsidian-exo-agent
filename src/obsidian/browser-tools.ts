@@ -8,7 +8,7 @@
  * with a fake bridge and mirrors the askBridge/rethinkBridge pattern:
  * tools.ts must never import view or controller code.
  */
-import { z } from "zod";
+import * as z from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ok, err } from "./tool-kit";

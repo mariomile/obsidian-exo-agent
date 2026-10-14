@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { z } from "zod";
+import * as z from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { ok, err, getExo } from "./tool-kit";
 import type { AnyTool } from "./sdk-tool";
