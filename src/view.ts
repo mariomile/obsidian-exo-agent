@@ -101,7 +101,7 @@ import {
   type Message,
 } from "./core/model";
 import { maxIdSuffix, makeIdAllocator } from "./core/ids";
-import { partitionConvos } from "./core/persistence";
+import { archiveSignature, partitionConvos } from "./core/persistence";
 import { planRetention, pinnedIdsOf, retentionBudgetBytes } from "./core/retention";
 import {
   planWorkingSet,
@@ -328,6 +328,7 @@ export class ChatView extends ItemView {
    *  pending write is flushed synchronously on close. */
   private persistTimer: number | null = null;
   private persistScheduledAt = 0;
+  private lastArchiveSig = "";
   private static readonly PERSIST_DEBOUNCE_MS = 1500;
   private static readonly PERSIST_MAX_WAIT_MS = 8000;
   /** How many tabs must retire in ONE wave before `applyWorkingSet` says so.
@@ -1293,7 +1294,8 @@ export class ChatView extends ItemView {
     });
     // Archive store is best-effort and shares the same serialized write queue; a
     // failure just retries on the next persist (the flag stays in memory).
-    void this.plugin.saveArchivedConversations(archived);
+    const sig = archiveSignature(archived);
+    if (sig !== this.lastArchiveSig) void this.plugin.saveArchivedConversations(archived).then((ok) => { if (ok) this.lastArchiveSig = sig; });
   }
 
   /* ------------------------- conversations -------------------------- */
