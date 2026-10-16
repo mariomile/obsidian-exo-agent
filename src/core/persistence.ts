@@ -93,3 +93,18 @@ export function partitionConvos<T extends { archived?: boolean }>(
   for (const c of all) (c.archived ? archived : live).push(c);
   return { live, archived };
 }
+
+/**
+ * Cheap identity of the archive payload, so a persist rewrites the archive
+ * store only when it changed. Archived chats are frozen (a resumed turn
+ * un-archives), so every top-level field plus the message COUNT catches every
+ * change without serializing the transcripts on each turn.
+ */
+export function archiveSignature(convos: readonly object[]): string {
+  return JSON.stringify(
+    convos.map((c) => {
+      const msgs = (c as { messages?: unknown }).messages;
+      return { ...c, messages: Array.isArray(msgs) ? msgs.length : 0 };
+    }),
+  );
+}

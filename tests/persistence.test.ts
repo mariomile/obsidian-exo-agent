@@ -5,6 +5,7 @@ import {
   planPersistedConvos,
   parseConversationsSource,
   partitionConvos,
+  archiveSignature,
 } from "../src/core/persistence";
 import { DEFAULT_SETTINGS, persistViewState, type MVASettings } from "../src/settings-schema";
 
@@ -335,5 +336,35 @@ describe("the conversation id high-water mark", () => {
     // The read side of the same rule, in view.ts's restore().
     const view = readFileSync(join(__dirname, "../src/view.ts"), "utf8");
     expect(view).toMatch(/convoSeed = Math\.max\(convoSeed, this\.plugin\.settings\.convoSeed \?\? 0, maxIdSuffix\(/);
+  });
+});
+
+describe("archiveSignature", () => {
+  const chat = (over: Record<string, unknown> = {}) => ({
+    id: "a",
+    title: "Old chat",
+    updatedAt: 1,
+    harvestedIndex: 3,
+    messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "hello" }],
+    ...over,
+  });
+
+  it("is stable for an unchanged archive", () => {
+    expect(archiveSignature([chat()])).toBe(archiveSignature([chat()]));
+  });
+
+  it("changes when a chat is archived or un-archived", () => {
+    expect(archiveSignature([chat(), chat({ id: "b" })])).not.toBe(archiveSignature([chat()]));
+  });
+
+  it("changes when any top-level field or the message count changes", () => {
+    const base = archiveSignature([chat()]);
+    expect(archiveSignature([chat({ title: "Renamed" })])).not.toBe(base);
+    expect(archiveSignature([chat({ harvestedIndex: 4 })])).not.toBe(base);
+    expect(archiveSignature([chat({ messages: [] })])).not.toBe(base);
+  });
+
+  it("does not serialize the transcripts", () => {
+    expect(archiveSignature([chat()])).not.toContain("hello");
   });
 });
