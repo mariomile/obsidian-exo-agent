@@ -26,7 +26,7 @@ import {
 import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { MarkdownView, TFile } from "obsidian";
 import type ExoPlugin from "../main";
-import { gatherOutgoing, defaultExcludePrefixes } from "./connections";
+import { gatherOutgoing, defaultExcludePrefixes, OutgoingIndexCache } from "./connections";
 import { loadIgnoreStore } from "./ignore-store";
 import { openMentionPopover } from "./popover";
 import type { FlatOutgoing } from "./mentions-core";
@@ -69,6 +69,13 @@ function fileForView(plugin: ExoPlugin, view: EditorView): TFile | null {
 }
 
 export function mentionsExtension(plugin: ExoPlugin) {
+  // One target index shared by every editor, invalidated by the events that
+  // change the target set; registered on the plugin so they unload with it.
+  const index = new OutgoingIndexCache(plugin.app);
+  plugin.registerEvent(plugin.app.vault.on("create", (f) => index.onFileEvent(f)));
+  plugin.registerEvent(plugin.app.vault.on("delete", (f) => index.onFileEvent(f)));
+  plugin.registerEvent(plugin.app.vault.on("rename", (f) => index.onFileEvent(f)));
+  plugin.registerEvent(plugin.app.metadataCache.on("changed", (f) => index.onMetadataChanged(f)));
   const plug = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
@@ -123,7 +130,7 @@ export function mentionsExtension(plugin: ExoPlugin) {
         const file = fileForView(plugin, view);
         if (!file) return;
         const ignore = await loadIgnoreStore(plugin.app, plugin.paths.mentions);
-        const flats = await gatherOutgoing(plugin.app, file, ignore, {
+        const flats = await gatherOutgoing(plugin.app, file, index, ignore, {
           stem: !!plugin.settings.connectionsStemming,
           text: view.state.doc.toString(),
           excludePrefixes: defaultExcludePrefixes(plugin.paths.root),

@@ -264,26 +264,73 @@ export function outgoingMentions(
   targets: MentionTarget[],
   opts: MentionOptions & { selfPath?: string } = {},
 ): OutgoingMatch[] {
+  return outgoingMentionsIndexed(text, buildMentionIndex(targets, opts), opts.selfPath);
+}
+
+/** Every target's alias sequences, normalized once (stemmed when `stem` is on)
+ *  and bucketed by their first token, so a body pass looks each token up once
+ *  instead of re-scanning the body per target. Build it once, reuse it across
+ *  passes until the target set changes. */
+export interface MentionIndex {
+  stem: boolean;
+  targets: MentionTarget[];
+  /** First normalized token -> entries in (target, alias) order. */
+  byFirst: Map<string, Array<{ target: number; seq: string[] }>>;
+}
+
+export function buildMentionIndex(targets: MentionTarget[], opts: MentionOptions = {}): MentionIndex {
+  const doStem = opts.stem ?? false;
+  const byFirst = new Map<string, Array<{ target: number; seq: string[] }>>();
+  targets.forEach((t, target) => {
+    for (const raw of buildAliasSet(t, opts)) {
+      const seq = doStem ? raw.map((w) => stem(w)) : raw;
+      const bucket = byFirst.get(seq[0]);
+      if (bucket) bucket.push({ target, seq });
+      else byFirst.set(seq[0], [{ target, seq }]);
+    }
+  });
+  return { stem: doStem, targets, byFirst };
+}
+
+/**
+ * {@link outgoingMentions} over a prebuilt {@link MentionIndex}. Same output:
+ * targets in index order, each with its ranges ordered by start and, at equal
+ * start, by alias order (token starts strictly increase, and a bucket holds
+ * its entries in alias order).
+ */
+export function outgoingMentionsIndexed(text: string, index: MentionIndex, selfPath?: string): OutgoingMatch[] {
   const tokens = wordTokens(text);
   const spans = wikilinkSpans(text);
-  const doStem = opts.stem ?? false;
-  const out: OutgoingMatch[] = [];
-  for (const t of targets) {
-    if (t.path === opts.selfPath) continue;
-    const aliasSet = buildAliasSet(t, opts);
-    if (aliasSet.length === 0) continue;
-    const ranges: MentionRange[] = [];
-    for (const seq of aliasSet) {
-      for (const r of findSequence(tokens, seq, doStem)) {
-        if (!spans.some((s) => overlaps(r, s))) ranges.push(r);
+  const normed = tokens.map((t) => norm(t.text, index.stem));
+  const byTarget = new Map<number, MentionRange[]>();
+  for (let i = 0; i < normed.length; i++) {
+    const bucket = index.byFirst.get(normed[i]);
+    if (!bucket) continue;
+    for (const { target, seq } of bucket) {
+      const n = seq.length;
+      if (i + n > normed.length || index.targets[target].path === selfPath) continue;
+      let ok = true;
+      for (let j = 1; j < n; j++) {
+        if (normed[i + j] !== seq[j]) {
+          ok = false;
+          break;
+        }
       }
-    }
-    if (ranges.length > 0) {
-      ranges.sort((a, b) => a.start - b.start);
-      out.push({ targetPath: t.path, targetBasename: t.basename, ranges });
+      if (!ok) continue;
+      const r = { start: tokens[i].start, end: tokens[i + n - 1].end };
+      if (spans.some((s) => overlaps(r, s))) continue;
+      const ranges = byTarget.get(target);
+      if (ranges) ranges.push(r);
+      else byTarget.set(target, [r]);
     }
   }
-  return out;
+  return [...byTarget.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([target, ranges]) => ({
+      targetPath: index.targets[target].path,
+      targetBasename: index.targets[target].basename,
+      ranges,
+    }));
 }
 
 export interface FlatOutgoing {

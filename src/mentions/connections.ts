@@ -6,11 +6,12 @@
  * matching/scoring/mutation logic is pure and unit-tested in `mentions-core`.
  */
 
-import { App, TFile } from "obsidian";
+import { App, TFile, type TAbstractFile } from "obsidian";
 import { backlinks, relatedFromFrontmatter } from "../obsidian/graph";
 import {
   unlinkedMentions,
-  outgoingMentions,
+  buildMentionIndex,
+  outgoingMentionsIndexed,
   flattenOutgoing,
   rankConnections,
   applyLinks,
@@ -20,6 +21,7 @@ import {
   type ConnectionItem,
   type RankInput,
   type FlatOutgoing,
+  type MentionIndex,
 } from "./mentions-core";
 import { fold } from "./tokenizer";
 import { isIgnored, filterIgnored, type IgnoreStore, EMPTY_IGNORE_STORE } from "./store-core";
@@ -147,21 +149,68 @@ function mtimeOf(app: App, path: string): number {
 
 /* ---------------------- outgoing (inline) ---------------------- */
 
+/** A note's `aliases` frontmatter as strings, read from the cached metadata. */
+function aliasesOf(app: App, file: TFile): string[] {
+  const rawAliases: unknown = app.metadataCache.getFileCache(file)?.frontmatter?.aliases;
+  return Array.isArray(rawAliases)
+    ? rawAliases.map(String)
+    : rawAliases
+      ? [String(rawAliases)]
+      : [];
+}
+
 /** Build a mention target for every markdown note, pulling `aliases` from the
- *  cached frontmatter (no body reads — cheap enough to run per keystroke-debounce). */
+ *  cached frontmatter (no body reads). */
 function allTargets(app: App, excludePrefixes: string[]): MentionTarget[] {
   const out: MentionTarget[] = [];
   for (const f of app.vault.getMarkdownFiles()) {
     if (excludePrefixes.some((p) => f.path.startsWith(p))) continue;
-    const rawAliases: unknown = app.metadataCache.getFileCache(f)?.frontmatter?.aliases;
-    const aliases = Array.isArray(rawAliases)
-      ? rawAliases.map(String)
-      : rawAliases
-        ? [String(rawAliases)]
-        : [];
-    out.push({ path: f.path, basename: f.basename, aliases });
+    out.push({ path: f.path, basename: f.basename, aliases: aliasesOf(app, f) });
   }
   return out;
+}
+
+/**
+ * The outgoing-mention target index, kept across typing passes so a pass no
+ * longer walks every note and re-tokenizes every title. Rebuilt lazily on the
+ * next pass after anything that changes the target set: a markdown note (or a
+ * folder) created, deleted or renamed, or a note's `aliases` edited. A body-only
+ * edit keeps the index. The caller wires the vault and metadataCache events.
+ */
+export class OutgoingIndexCache {
+  private index: MentionIndex | null = null;
+  private key = "";
+  private excludePrefixes: string[] = [];
+  private aliasesByPath = new Map<string, string[]>();
+
+  constructor(private readonly app: App) {}
+
+  get(stem: boolean, excludePrefixes: string[]): MentionIndex {
+    const key = `${stem}\n${excludePrefixes.join("\n")}`;
+    if (this.index === null || key !== this.key) {
+      const targets = allTargets(this.app, excludePrefixes);
+      this.aliasesByPath = new Map(targets.map((t) => [t.path, t.aliases]));
+      this.excludePrefixes = excludePrefixes;
+      this.index = buildMentionIndex(targets, { stem });
+      this.key = key;
+    }
+    return this.index;
+  }
+
+  /** Vault `create`/`delete`/`rename`. Attachments never change the target set. */
+  onFileEvent(file: TAbstractFile): void {
+    if (!(file instanceof TFile) || file.extension === "md") this.index = null;
+  }
+
+  /** metadataCache `changed`: rebuild only when the note's aliases moved, or
+   *  for a scanned note the index has not seen. */
+  onMetadataChanged(file: TFile): void {
+    if (this.index === null || file.extension !== "md") return;
+    if (this.excludePrefixes.some((p) => file.path.startsWith(p))) return;
+    const known = this.aliasesByPath.get(file.path);
+    const current = aliasesOf(this.app, file);
+    if (!known || known.length !== current.length || known.some((a, i) => a !== current[i])) this.index = null;
+  }
 }
 
 /**
@@ -173,16 +222,17 @@ function allTargets(app: App, excludePrefixes: string[]): MentionTarget[] {
 export async function gatherOutgoing(
   app: App,
   file: TFile,
+  index: OutgoingIndexCache,
   ignore: IgnoreStore = EMPTY_IGNORE_STORE,
   opts: { stem?: boolean; excludePrefixes?: string[]; text?: string } = {},
 ): Promise<FlatOutgoing[]> {
   const excludePrefixes = opts.excludePrefixes ?? DEFAULT_EXCLUDE_PREFIXES;
   const raw = opts.text ?? (await app.vault.cachedRead(file));
-  const targets = allTargets(app, excludePrefixes);
-  const matches = outgoingMentions(blankFrontmatter(raw), targets, {
-    stem: opts.stem ?? false,
-    selfPath: file.path,
-  });
+  const matches = outgoingMentionsIndexed(
+    blankFrontmatter(raw),
+    index.get(opts.stem ?? false, excludePrefixes),
+    file.path,
+  );
   const flat = flattenOutgoing(matches);
   return flat.filter((f) => !isIgnored(ignore, fold(f.targetBasename), file.path));
 }
