@@ -1,7 +1,7 @@
 import { App, TFile, getAllTags } from "obsidian";
 import * as z from "zod";
 import { en } from "zod/locales";
-import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import { resolveLink, neighborhood, basename } from "./graph";
 import { exoPaths, LEGACY_MEMORY_ROOT, type ExoPaths } from "../core/paths";
 import { gatherConnections, linkMentionsIn, defaultExcludePrefixes } from "../mentions/connections";
@@ -198,6 +198,7 @@ export interface ObsidianToolOpts {
  * {@link createObsidianToolServer} for the Claude Agent SDK.
  */
 export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[] {
+  const { tool } = claudeSdk();
   const {
     memory = DEFAULT_TOOL_MEMORY,
     askBridge,
@@ -1248,7 +1249,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
  */
 export function createObsidianToolServer(app: App, opts: ObsidianToolOpts) {
   const alwaysLoad = opts.alwaysLoad ?? true;
-  return createSdkMcpServer({
+  return claudeSdk().createSdkMcpServer({
     name: "obsidian",
     version: "1.0.0",
     alwaysLoad,

@@ -9,7 +9,7 @@
  * tools.ts must never import view or controller code.
  */
 import * as z from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ok, err } from "./tool-kit";
 import {
@@ -70,6 +70,7 @@ function targetOf(args: { ref?: string; selector?: string }): ElementTarget | st
 }
 
 export function buildBrowserTools(bridge: BrowserBridge): AnyTool[] {
+  const { tool } = claudeSdk();
   const browserOpen = tool(
     "browser_open",
     "Open the shared agent-browser tab in the workspace (creating it if needed) and take control of it for this conversation. Use it to research a source IN FRONT of Mario; he sees the same page you read, which beats a blind web fetch whenever the source matters. Optionally pass a url to navigate immediately. If another conversation was driving the tab, this takes over (say so).",

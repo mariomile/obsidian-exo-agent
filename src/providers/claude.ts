@@ -1,9 +1,5 @@
-import {
-  query,
-  type Query,
-  type SDKControlGetUsageResponse,
-  type SDKUserMessage,
-} from "@anthropic-ai/claude-agent-sdk";
+import type { Query, SDKControlGetUsageResponse, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "./sdk-loader";
 import type {
   AgentEvent,
   AgentSession,
@@ -196,7 +192,7 @@ class ClaudeSession implements AgentSession {
 
   constructor(opts: SessionOpts) {
     this.sessionId = opts.resumeSessionId;
-    this.q = query({
+    this.q = claudeSdk().query({
       // The generator yields structurally-valid SDKUserMessages, but our internal
       // UserContent (`Array<Record<string, unknown>>`, built in send() where image
       // blocks carry `media_type: string`) is intentionally looser than the SDK's

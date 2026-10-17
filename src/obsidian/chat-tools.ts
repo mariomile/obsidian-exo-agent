@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
 import * as z from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import { ok, err, getExo } from "./tool-kit";
 import type { AnyTool } from "./sdk-tool";
 import type ExoPlugin from "../main";
@@ -24,6 +24,7 @@ const plugin = (app: App): ExoPlugin | null => (getExo(app) as unknown as ExoPlu
  * "this chat" to act on.
  */
 export function buildChatTools(app: App, convoId: string, orchestration: boolean): AnyTool[] {
+  const { tool } = claudeSdk();
   const updateChat = tool(
     "update_chat",
     "Change the title of the chat you are running in. Use `regenerate_title` when the conversation has moved on and its title no longer says what it is about; use `rename` only when the user asks for a specific title. Do not retitle on your own initiative after every turn.",
