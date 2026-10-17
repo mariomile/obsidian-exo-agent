@@ -455,21 +455,19 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     registerExoIcons();
     registerExoViews(this);
 
-    // In-note AI: a floating toolbar over the selection (Edit / Continue / Ask
-    // Exo). Registered once; gated live behind the `inlineAi` setting, so
-    // toggling it off makes the extension inert without a reload.
-    this.registerEditorExtension(inlineAiExtension(this));
-
-    // Selection observer: reports the active editor's selection to the composer
-    // so it shows an ambient "Selection" chip. Registered once; gated live
-    // behind `showSelectionChip`, so toggling it off makes it inert.
-    this.registerEditorExtension(selectionObserverExtension(this));
-
-    // In-document Connections: underline outgoing unlinked mentions + a
-    // bottom suggested-links block. Registered once; both surfaces are gated
-    // live behind settings (default off) so the extension is inert until
-    // enabled — no reload needed to toggle.
-    this.registerEditorExtension(mentionsExtension(this));
+    // One registration for all three: each call makes Obsidian reconfigure
+    // every open editor (~5ms apiece with a dozen notes open).
+    this.registerEditorExtension([
+      // In-note AI: floating toolbar over the selection (Edit / Continue / Ask
+      // Exo). Gated live behind `inlineAi`, so it is inert when off, no reload.
+      inlineAiExtension(this),
+      // Selection observer: feeds the composer's ambient "Selection" chip.
+      // Gated live behind `showSelectionChip`.
+      selectionObserverExtension(this),
+      // In-document Connections: unlinked-mention underlines + a bottom
+      // suggested-links block. Gated live behind settings (default off).
+      mentionsExtension(this),
+    ]);
 
     this.addRibbonIcon(EXO_ICON, "Open Exo", () => this.activateView());
     // Cockpit + Connections are reached from the Exo header's Apps menu, not a
