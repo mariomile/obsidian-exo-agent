@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
 import * as z from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import type { MemoryCaps } from "../core/memory-caps";
 import { formatRecentChats } from "../core/recent-chats";
 import { formatChatHits, MIN_SEARCH_CHARS, searchChats } from "../core/chat-search";
@@ -18,6 +18,7 @@ import type { AnyTool } from "./sdk-tool";
 export const MEMORY_READ_TOOLS = ["mcp__obsidian__recent_chats", "mcp__obsidian__search_chats"];
 
 export function buildMemoryTools(app: App, caps: MemoryCaps, convoId?: string): AnyTool[] {
+  const { tool } = claudeSdk();
   const recentChats = tool(
     "recent_chats",
     "Read your own recent conversations with the user (current and archived chats): per chat the title, date, what the user wrote, your final answer and the notes you produced. Use it when the user asks what you discussed, decided or produced recently.",

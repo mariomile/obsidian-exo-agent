@@ -14,7 +14,7 @@
  */
 import { App } from "obsidian";
 import * as z from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import { homedir } from "os";
 import { readFile } from "fs/promises";
 import {
@@ -187,6 +187,7 @@ function automationReport(exo: ExoToolHost, now: number): string[] {
 /* -------------------------------- tools -------------------------------- */
 
 export function buildCapabilityTools(app: App) {
+  const { tool } = claudeSdk();
   const listCapabilities = tool(
     "list_capabilities",
     "Show what Exo currently has wired up: MCP servers (with live connection status and the notes describing what each is for), skills (in-vault, importable from other projects/Codex, or already global), automations and playbooks. Use it before changing anything with manage_mcp_server or manage_skill, before using an MCP server you haven't used in this conversation (its notes say what it's for and what to avoid), and whenever Mario asks what Exo can do or why a tool isn't available.",

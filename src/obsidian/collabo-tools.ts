@@ -8,7 +8,7 @@
  * could accept its own suggestion would make the review gate decorative.
  */
 import * as z from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSdk } from "../providers/sdk-loader";
 import type { App } from "obsidian";
 import { ok, err, getExo } from "./tool-kit";
 import { obsidianHttp } from "./collabo-http";
@@ -97,6 +97,7 @@ async function run(fn: () => Promise<ReturnType<typeof ok>>): Promise<ReturnType
 }
 
 export function buildCollaboTools(bridge: CollaboToolBridge): AnyTool[] {
+  const { tool } = claudeSdk();
   const listShares = tool(
     "collabo_list_shares",
     "List the notes connected to Exo Collabo, with the slug, role and whether each one is yours or was received from someone else. Start here: every other collabo tool needs a slug.",
