@@ -1024,11 +1024,6 @@ export class ChatView extends ItemView {
       ...(Array.isArray(live) ? live : []),
       ...(Array.isArray(archivedRaw) ? archivedRaw : []),
     ];
-    // Only build transcript DOM for conversations that will actually be shown
-    // (open tabs + the active one). Everything else renders lazily on first
-    // open (switchTo) — with dozens of stored conversations this is the bulk
-    // of the view's startup cost.
-    const wantDom = new Set([...(this.plugin.settings.openTabIds ?? []), this.plugin.settings.activeTabId]);
     // First pass: seed the id counter from the highest numeric id suffix present,
     // NOT the conversation count — ids climb past the count after deletions and
     // history trimming, so a count-based seed produces colliding ids.
@@ -1051,6 +1046,7 @@ export class ChatView extends ItemView {
       const c: Convo = {
         id,
         listEl: createDiv({ cls: "mva-list" }),
+        drawn: false, // only the active chat is drawn below; the rest on first use
         title: d.title || "New chat",
         sessionId: d.sessionId,
         archived: d.archived === true,
@@ -1090,7 +1086,6 @@ export class ChatView extends ItemView {
         compactNudged: false,
         harvestedIndex: d.harvestedIndex,
       };
-      if (wantDom.has(c.id)) this.renderConvoDom(c);
       this.wireScroll(c);
       this.convos.push(c);
     }
@@ -1110,13 +1105,8 @@ export class ChatView extends ItemView {
     if (!this.openTabs.includes(this.active.id)) this.openTabs.push(this.active.id);
     if (this.openTabs.length === 0) this.openTabs = [this.active.id];
 
-    // Safety: if the active fell back to a convo outside the saved tab set
-    // (stale activeTabId), its DOM wasn't pre-built above — build it now.
-    if (this.active.messages.length && this.active.listEl.childElementCount === 0) {
-      this.renderConvoDom(this.active);
-    }
     this.listHost.empty();
-    this.listHost.appendChild(this.active.listEl);
+    this.listHost.appendChild(this.transcript(this.active));
     if (this.active.messages.length === 0) this.renderEmptyState();
     this.refreshProviderUI();
     this.refreshTabs(); // the strip AND the resume verbs: boot IS a re-entry moment
@@ -1304,6 +1294,7 @@ export class ChatView extends ItemView {
     const c: Convo = {
       id: `c${++convoSeed}`,
       listEl: createDiv({ cls: "mva-list" }),
+      drawn: false,
       title: "New chat",
       // New chats start from the defaults in settings, not from the open chat.
       provider: this.plugin.settings.provider,
@@ -1428,11 +1419,8 @@ export class ChatView extends ItemView {
     // A fresh tab should always start pinned so you see the latest content.
     this.pinnedToBottom = true;
     this.updateJumpPill();
-    // Lazily build the transcript DOM on first open (restore() skips convos
-    // that weren't in the saved tab set).
-    if (c.messages.length && c.listEl.childElementCount === 0) this.renderConvoDom(c);
     this.listHost.empty();
-    this.listHost.appendChild(c.listEl);
+    this.listHost.appendChild(this.transcript(c));
     if (c.listEl.childElementCount === 0) this.renderEmptyState();
     reenterActive(c, this.reentryHost); // "since you left", same gate: the chats sidebar switches chat with this pane collapsed
     this.syncActiveSurfaces(c);
@@ -2518,8 +2506,7 @@ export class ChatView extends ItemView {
     next.lastActiveAt = Date.now();
     next.retiredAt = undefined;
     if (!this.openTabs.includes(next.id)) this.openTabs.push(next.id);
-    if (next.messages.length && next.listEl.childElementCount === 0) this.renderConvoDom(next);
-    next.listEl.hide(); // gallery is on top; reveal happens on hideGallery/switchTo
+    this.transcript(next).hide(); // gallery is on top; reveal happens on hideGallery/switchTo
     this.listHost.appendChild(next.listEl);
     if (next.listEl.childElementCount === 0) this.renderEmptyState();
     this.syncActiveSurfaces(next);
@@ -2627,8 +2614,17 @@ export class ChatView extends ItemView {
     }
   }
 
+  /** First step of every new turn: draws the history BEFORE the turn pushes
+   *  its message, or a never-drawn chat would draw that message twice. */
   private clearEmptyState(c: Convo = this.active): void {
-    c.listEl.querySelector(".mva-empty")?.remove();
+    this.transcript(c).querySelector(".mva-empty")?.remove();
+  }
+
+  /** A chat's list with its history drawn. Every append to a transcript goes
+   *  through here (see `Convo.drawn`). */
+  transcript(c: Convo): HTMLElement {
+    if (!c.drawn) this.renderConvoDom(c);
+    return c.listEl;
   }
 
   /** Re-render the empty state (surfacing) when the active note changes, or
@@ -2644,6 +2640,7 @@ export class ChatView extends ItemView {
 
   /** Rebuild a conversation's DOM from its persisted messages. */
   private renderConvoDom(c: Convo): void {
+    c.drawn = true;
     c.listEl.empty();
     if (c.forkedFrom) renderForkedFrom(this, c.listEl, c.forkedFrom);
     let lastUser = "";
@@ -2892,7 +2889,7 @@ export class ChatView extends ItemView {
     }
     const at = Date.now();
     c.messages.push(auto ? { role: "user", text, at, auto } : { role: "user", text, at });
-    const el = c.listEl.createDiv({ cls: auto ? "mva-turn mva-user is-auto" : "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
+    const el = this.transcript(c).createDiv({ cls: auto ? "mva-turn mva-user is-auto" : "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
     const bubble = el.createDiv({ cls: "mva-bubble mva-type-body" });
     if (images?.length) {
       const strip = bubble.createDiv({ cls: "mva-bubble-images" });
@@ -2921,7 +2918,7 @@ export class ChatView extends ItemView {
 
   private addAssistantTurn(c: Convo, userText: string): AssistantCtx {
     this.clearEmptyState(c);
-    const el = c.listEl.createDiv({ cls: "mva-turn mva-assistant" });
+    const el = this.transcript(c).createDiv({ cls: "mva-turn mva-assistant" });
     const bodyEl = el.createDiv({ cls: "mva-assistant-body" });
     const thinking = bodyEl.createDiv({ cls: "mva-thinking" });
     thinking.createSpan({ cls: "mva-thinking-dot" });
@@ -5071,7 +5068,7 @@ export class ChatView extends ItemView {
       c.pendingEl = null;
       return;
     }
-    if (!c.pendingEl) c.pendingEl = c.listEl.createDiv({ cls: "mva-queue" });
+    if (!c.pendingEl) c.pendingEl = this.transcript(c).createDiv({ cls: "mva-queue" });
     c.pendingEl.empty();
     c.queue.forEach((q, i) => {
       const row = c.pendingEl!.createDiv({ cls: "mva-queued" });
@@ -5611,7 +5608,7 @@ export class ChatView extends ItemView {
           break;
         case "compact": {
           this.diag.push("turn", "compact boundary");
-          const div = c.listEl.createDiv({ cls: "mva-compact-divider" });
+          const div = this.transcript(c).createDiv({ cls: "mva-compact-divider" });
           setIcon(div.createSpan({ cls: "mva-compact-icon" }), "scissors");
           div.createSpan({ text: "Context compacted" });
           this.scrollConvo(c);
