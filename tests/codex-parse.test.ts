@@ -23,6 +23,7 @@ describe("handleCodexLine — new codex exec --json schema (0.142.x)", () => {
     const texts = events.filter((e) => e.kind === "text-delta").map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["Eseguo il comando.", "\n\n```text\nhello-exo\n```"]);
     expect(state.streamed).toBe(true);
+    expect(events.map((event) => event.kind)).toEqual(["text-delta", "text-end", "text-delta", "text-end"]);
   });
 
   it("maps command_execution start/end to Bash tool events", () => {
@@ -84,7 +85,7 @@ describe("handleCodexLine — new codex exec --json schema (0.142.x)", () => {
       '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"PONG"}}',
       '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":1}}',
     ]);
-    expect(events.map((e) => e.kind)).toEqual(["notice", "text-delta", "usage"]);
+    expect(events.map((e) => e.kind)).toEqual(["notice", "text-delta", "text-end", "usage"]);
     expect(events[1]).toMatchObject({ kind: "text-delta", text: "PONG" });
   });
 
@@ -110,7 +111,8 @@ describe("handleCodexLine — legacy msg schema", () => {
   });
 
   it("still buffers final agent_message for close-time fallback", () => {
-    const { state } = run(['{"msg":{"type":"agent_message","message":"final"}}']);
+    const { state, events } = run(['{"msg":{"type":"agent_message","message":"final"}}']);
+    expect(events).toEqual([{ kind: "text-end" }]);
     expect(state.finalText).toBe("final");
   });
 

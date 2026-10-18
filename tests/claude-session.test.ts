@@ -209,3 +209,36 @@ describe("ClaudeSession native quota windows", () => {
     session.dispose();
   });
 });
+
+describe("ClaudeSession parent text boundaries", () => {
+  beforeEach(() => { fake = makeFakeQuery(); });
+
+  test("ends parent text before the turn finishes and ignores nested agent boundaries", async () => {
+    const session = claudeAdapter.createSession(OPTS);
+    const events: AgentEvent[] = [];
+    const turn = session.send("hi", (e) => events.push(e));
+    const stream = (event: unknown, parent_tool_use_id: string | null = null) =>
+      fake.push({ type: "stream_event", parent_tool_use_id, event });
+    stream({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Parent" } });
+    stream({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Child" } }, "agent-1");
+    stream({ type: "content_block_stop", index: 0 }, "agent-1");
+    stream({ type: "message_stop" }, "agent-1");
+    stream({ type: "content_block_stop", index: 1 }); // another block cannot end parent text
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    expect(events).toEqual([{ kind: "text-delta", text: "Parent" }]);
+    stream({ type: "content_block_stop", index: 0 });
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(events[1]).toEqual({ kind: "text-end" });
+    expect(events.some((e) => e.kind === "turn-end")).toBe(false);
+    stream({ type: "message_stop" }); // no duplicate ending
+    stream({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Resumed" } });
+    stream({ type: "message_stop" }); // message boundary fallback
+    fake.push({ type: "result", subtype: "success", result: "done" });
+    await turn;
+    expect(events.filter((e) => e.kind === "text-delta" || e.kind === "text-end")).toEqual([
+      { kind: "text-delta", text: "Parent" }, { kind: "text-end" },
+      { kind: "text-delta", text: "Resumed" }, { kind: "text-end" },
+    ]);
+    session.dispose();
+  });
+});

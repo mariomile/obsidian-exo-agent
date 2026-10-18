@@ -21,6 +21,8 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypa
  */
 export type AgentEvent =
   | { kind: "text-delta"; text: string }
+  /** The current assistant text block ended; the turn may still be running. */
+  | { kind: "text-end" }
   | { kind: "thinking-delta"; text: string }
   | { kind: "tool-call-start"; id: string; name: string; input: unknown; parentId?: string }
   | { kind: "tool-call-result"; id: string; ok: boolean; output: string; parentId?: string }

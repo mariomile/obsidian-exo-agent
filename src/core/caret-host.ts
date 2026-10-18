@@ -9,6 +9,7 @@ export interface CaretNode {
   tagName: string;
   lastElementChild: CaretNode | null;
   textContent: string | null;
+  classList?: Pick<DOMTokenList, "contains">;
 }
 
 /** Block-ish elements the walk may descend into (never inline: STRONG/EM/A/SPAN). */
@@ -31,6 +32,7 @@ export function caretHost(tail: CaretNode): CaretNode | null {
   let cur = tail.lastElementChild;
   if (!cur || !BLOCKS.has(cur.tagName)) return null;
   while (cur.lastElementChild && BLOCKS.has(cur.lastElementChild.tagName)) {
+    if (cur.classList?.contains("mva-ui-preview")) return null;
     cur = cur.lastElementChild;
   }
   if (!HOSTS.has(cur.tagName)) return null;

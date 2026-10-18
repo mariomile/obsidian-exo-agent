@@ -64,6 +64,8 @@ import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
 import { clickable } from "./ui/dom";
 import { swapTailChild } from "./ui/tail-child";
+import { mountFileUiPreview, renderChatMarkdown, UI_PREVIEW_PROMPT } from "./obsidian/ui-previews";
+import { disposeTranscriptPreviews } from "./obsidian/preview-lifecycle";
 import { StepsRun } from "./ui/steps";
 import { firstErrorLine, stepPlacement, isSubagentTool, shouldFoldStepsRun } from "./core/steps";
 import { agentTaskRow } from "./core/agent-task";
@@ -784,7 +786,7 @@ export class ChatView extends ItemView {
       cli,
       model: c.model,
       effort: effortFor(c.provider, c.model, s.effort),
-      systemPrompt: s.systemPrompt || undefined,
+      systemPrompt: [s.systemPrompt, UI_PREVIEW_PROMPT].filter(Boolean).join("\n\n"),
       cwd: this.vaultPath(),
       permissionMode: s.permissionMode,
       toolsEnabled: s.toolsEnabled,
@@ -2452,6 +2454,7 @@ export class ChatView extends ItemView {
     const c = this.convos.find((x) => x.id === id) ?? (this.active?.id === id ? this.active : undefined);
     if (!c) return false;
     this.dropSession(c, "user-delete");
+    disposeTranscriptPreviews(c.listEl);
     // Visual order captured BEFORE either splice below, same reasoning as
     // `closeTab` / `setConvoArchived`: pinned status is still readable off
     // `this.convos` at this point, and `c.id` is still in `this.openTabs`.
@@ -2664,7 +2667,7 @@ export class ChatView extends ItemView {
         for (const s of m.segments) {
           if (s.t === "text") {
             flushRun();
-            void MarkdownRenderer.render(this.app, s.md, body.createDiv({ cls: "mva-bubble mva-type-body markdown-rendered" }), "", this);
+            void renderChatMarkdown(this.app, s.md, body.createDiv({ cls: "mva-bubble mva-type-body markdown-rendered" }), "", this);
             full += s.md;
           } else if (s.t === "error") {
             flushRun();
@@ -3066,6 +3069,7 @@ export class ChatView extends ItemView {
       openCards: ctx.openCards,
       textStreaming: ctx.textStreaming,
     });
+    if (a !== "caret") this.clearCaret(ctx);
     if (a === "working") this.ensureWorking(ctx);
     else this.hideWorking(ctx);
   }
@@ -3207,9 +3211,7 @@ export class ChatView extends ItemView {
       if (this.plugin.settings.featureWikilinkify) {
         md = wikilinkify(md, [...ctx.sources, ...ctx.touched.map((t) => t.path)]);
       }
-      void MarkdownRenderer.render(this.app, md, el, "", child).then(() => {
-        this.clearCaret(ctx);
-      });
+      void renderChatMarkdown(this.app, md, el, "", child);
       return;
     }
 
@@ -3220,18 +3222,18 @@ export class ChatView extends ItemView {
       const block = ctx.curTextEl.createDiv({ cls: "mva-md-block markdown-rendered" });
       // Insert the stable block before the tail so ordering stays correct.
       if (ctx.tailEl) ctx.curTextEl.insertBefore(block, ctx.tailEl);
-      void MarkdownRenderer.render(this.app, raw.slice(ctx.stableLen, b), block, "", this);
+      void renderChatMarkdown(this.app, raw.slice(ctx.stableLen, b), block, "", this);
       ctx.stableLen = b;
     }
     if (!ctx.tailEl) ctx.tailEl = ctx.curTextEl.createDiv({ cls: "mva-md-tail markdown-rendered" });
     const tail = ctx.tailEl;
     const child = swapTailChild(this, ctx);
     tail.empty();
-    void MarkdownRenderer.render(this.app, raw.slice(ctx.stableLen), tail, "", child).then(() => {
+    void renderChatMarkdown(this.app, raw.slice(ctx.stableLen), tail, "", child).then(() => {
       // Keep at most one caret — on the tail that's currently streaming. Skip if
       // the segment was interrupted while this render was in flight (tailEl was
       // reset), so an in-flight tick can't resurrect an orphaned caret.
-      if (ctx.tailEl !== tail || !tail.isConnected) return;
+      if (ctx.tailEl !== tail || ctx.tailChild !== child || !tail.isConnected || !ctx.textStreaming) return;
       // Turn already finalized (flushRender ran + swept): a late-resolving render
       // tick must never resurrect a caret after cleanup — the invariant that closes
       // the orphaned-caret race regardless of which timing triggered it.
@@ -3266,13 +3268,13 @@ export class ChatView extends ItemView {
    *  renderer state, and clear the caret left on the abandoned tail. Call at every
    *  site that interrupts a text segment (todos, tool card, permission, ask, error). */
   private resetTextStream(ctx: AssistantCtx): void {
+    // Finish the segment under a fresh child before releasing the transient tail.
+    // Its rendered components must survive the following tool/ask/error event.
+    if (ctx.curTextEl) this.renderText(ctx);
     ctx.curTextEl = null;
     ctx.stableLen = 0;
     ctx.tailEl = null;
-    if (ctx.tailChild) {
-      this.removeChild(ctx.tailChild);
-      ctx.tailChild = null;
-    }
+    ctx.tailChild = null;
     ctx.scanPos = 0;
     ctx.fenceOpen = false;
     ctx.lastBoundary = 0;
@@ -3712,7 +3714,7 @@ export class ChatView extends ItemView {
    *  is null (it didn't exist), so no restore is offered there. */
   private buildArtifactCard(parent: HTMLElement, path: string, checkpoint?: Checkpoint): void {
     const lower = path.toLowerCase();
-    const isHtml = lower.endsWith(".html") || lower.endsWith(".htm");
+    const isHtml = /\.(?:html?|svg)$/.test(lower);
     const file = this.app.vault.getAbstractFileByPath(path);
     const exists = file instanceof TFile;
 
@@ -3771,14 +3773,7 @@ export class ChatView extends ItemView {
     }
 
     if (isHtml) {
-      const frame = card.createDiv({ cls: "mva-artifact-frame" });
-      const iframe = frame.createEl("iframe");
-      iframe.setAttr("sandbox", "allow-scripts"); // no allow-same-origin: isolated from the app
-      iframe.src = this.app.vault.getResourcePath(file);
-      frame.onclick = (e) => {
-        e.stopPropagation();
-        openAction();
-      };
+      mountFileUiPreview(this.app, this, card, file);
     } else {
       const frame = card.createDiv({ cls: "mva-artifact-frame is-md" });
       const body = frame.createDiv({ cls: "mva-artifact-md markdown-rendered" });
@@ -5304,6 +5299,10 @@ export class ChatView extends ItemView {
           this.appendText(ctx, e.text);
           this.syncWorking(ctx); // the streaming caret is the feedback
           break;
+        case "text-end":
+          ctx.textStreaming = false;
+          this.syncWorking(ctx);
+          break;
         case "thinking-delta":
           if (!sawThinking) {
             sawThinking = true;
@@ -5460,7 +5459,7 @@ export class ChatView extends ItemView {
           if (e.ok && wp) {
             const rel = this.relPath(wp);
             const lower = rel.toLowerCase();
-            const isHtml = lower.endsWith(".html") || lower.endsWith(".htm");
+            const isHtml = /\.(?:html?|svg)$/.test(lower);
             const isNewMd = lower.endsWith(".md") && ctx.createdPaths.has(rel);
             if ((isHtml || isNewMd) && !ctx.artifacts.has(rel)) {
               ctx.artifacts.add(rel);

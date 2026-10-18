@@ -11,6 +11,11 @@ function n(tagName: string, text: string | null, children: CaretNode[] = []): Ca
 }
 
 describe("caretHost", () => {
+  it("never places the writing caret inside an interactive preview", () => {
+    const preview = n("DIV", null, [n("DIV", "Preview help text")]);
+    preview.classList = { contains: name => name === "mva-ui-preview" };
+    expect(caretHost(n("DIV", null, [preview]))).toBeNull();
+  });
   it("returns null for an empty tail (no element children)", () => {
     expect(caretHost(n("DIV", ""))).toBeNull();
   });

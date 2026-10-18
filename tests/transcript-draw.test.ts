@@ -69,6 +69,8 @@ class El {
     return hits;
   }
   querySelector(sel: string): El | null { return this.querySelectorAll(sel)[0] ?? null; }
+  closest(sel: string): El | null { return this.cls.includes(sel.replace(/^\./, "")) ? this : this.parent?.closest(sel) ?? null; }
+  contains(node: El): boolean { return this === node || this.children.some(child => child.contains(node)); }
 }
 
 let View: typeof ChatView;
@@ -98,6 +100,7 @@ const viewWith = (all: Convo[]): ChatView => {
     attachTouched: vi.fn(),
     attachActions: vi.fn(),
     clickable: vi.fn(),
+    register: vi.fn(),
   });
   return v as unknown as ChatView;
 };
