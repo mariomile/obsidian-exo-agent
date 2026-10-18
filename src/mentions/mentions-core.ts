@@ -254,19 +254,6 @@ function overlaps(a: MentionRange, b: MentionRange): boolean {
   return a.start < b.end && a.end > b.start;
 }
 
-/**
- * Find every outgoing unlinked mention of any `target` in `text`. Skips ranges
- * that fall inside an existing wikilink and the note's own title. One tokenize
- * pass over the body; each target matched by its folded alias sequence.
- */
-export function outgoingMentions(
-  text: string,
-  targets: MentionTarget[],
-  opts: MentionOptions & { selfPath?: string } = {},
-): OutgoingMatch[] {
-  return outgoingMentionsIndexed(text, buildMentionIndex(targets, opts), opts.selfPath);
-}
-
 /** Every target's alias sequences, normalized once (stemmed when `stem` is on)
  *  and bucketed by their first token, so a body pass looks each token up once
  *  instead of re-scanning the body per target. Build it once, reuse it across
@@ -293,12 +280,14 @@ export function buildMentionIndex(targets: MentionTarget[], opts: MentionOptions
 }
 
 /**
- * {@link outgoingMentions} over a prebuilt {@link MentionIndex}. Same output:
- * targets in index order, each with its ranges ordered by start and, at equal
- * start, by alias order (token starts strictly increase, and a bucket holds
- * its entries in alias order).
+ * Find every outgoing unlinked mention of any indexed target in `text`. Skips
+ * ranges that fall inside an existing wikilink and the note at `selfPath`. One
+ * tokenize pass over the body; each token looks up only the alias sequences
+ * that start with it. Output: targets in index order, each with its ranges
+ * ordered by start and, at equal start, by alias order (token starts strictly
+ * increase, and a bucket holds its entries in alias order).
  */
-export function outgoingMentionsIndexed(text: string, index: MentionIndex, selfPath?: string): OutgoingMatch[] {
+export function outgoingMentions(text: string, index: MentionIndex, selfPath?: string): OutgoingMatch[] {
   const tokens = wordTokens(text);
   const spans = wikilinkSpans(text);
   const normed = tokens.map((t) => norm(t.text, index.stem));

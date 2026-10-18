@@ -6,7 +6,6 @@ import {
   buildMentionIndex,
   flattenOutgoing,
   outgoingMentions,
-  outgoingMentionsIndexed,
   stem,
   wikilinkSpans,
   type MentionOptions,
@@ -134,7 +133,7 @@ const OPTION_SETS: Array<MentionOptions> = [
   { stem: true, minTitleLen: 1, stopwords: new Set() },
 ];
 
-describe("outgoingMentionsIndexed equals the pre-index algorithm", () => {
+describe("outgoingMentions equals the pre-index algorithm", () => {
   it("matches on 2000 synthetic texts x 4 option sets x self/no-self (16000 comparisons)", () => {
     const r = rng(20261018);
     let compared = 0;
@@ -147,7 +146,7 @@ describe("outgoingMentionsIndexed equals the pre-index algorithm", () => {
         for (const selfPath of [undefined, self]) {
           const opts = { ...o, selfPath };
           const want = oldOutgoingMentions(text, targets, opts);
-          const got = outgoingMentions(text, targets, opts);
+          const got = outgoingMentions(text, buildMentionIndex(targets, o), selfPath);
           expect(got).toEqual(want);
           expect(flattenOutgoing(got)).toEqual(flattenOutgoing(want));
           compared++;
@@ -168,7 +167,7 @@ describe("outgoingMentionsIndexed equals the pre-index algorithm", () => {
       for (let c = 0; c < 300; c++) {
         const text = makeText(r);
         const self = pick(r, targets).path;
-        expect(outgoingMentionsIndexed(text, index, self)).toEqual(
+        expect(outgoingMentions(text, index, self)).toEqual(
           oldOutgoingMentions(text, targets, { stem: doStem, selfPath: self }),
         );
       }
@@ -185,10 +184,10 @@ describe("outgoingMentionsIndexed equals the pre-index algorithm", () => {
     const text = "prices and price, Product market fit [[Product]] perche PMF products";
     for (const doStem of [false, true]) {
       const want = oldOutgoingMentions(text, targets, { stem: doStem });
-      expect(outgoingMentions(text, targets, { stem: doStem })).toEqual(want);
+      expect(outgoingMentions(text, buildMentionIndex(targets, { stem: doStem }))).toEqual(want);
     }
     // With stemming the two aliases of Price hit the same span twice; both survive.
-    const stemmed = outgoingMentions(text, targets, { stem: true });
+    const stemmed = outgoingMentions(text, buildMentionIndex(targets, { stem: true }));
     const price = stemmed.find((m) => m.targetBasename === "Price");
     expect(price?.ranges.filter((x) => x.start === 0).length).toBe(2);
   });
@@ -206,20 +205,34 @@ function md(path: string): TFile {
   });
 }
 
+/** A fake app whose vault/metadataCache `on` record handlers, so a test can
+ *  `emit` the events the cache registered on its owner. */
 function fakeApp(files: TFile[], aliases: Map<string, unknown>) {
   let walks = 0;
+  const handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+  const on = (prefix: string) => (name: string, fn: (...args: unknown[]) => void) => {
+    const key = `${prefix}:${name}`;
+    handlers.set(key, [...(handlers.get(key) ?? []), fn]);
+    return {};
+  };
   const app = {
     vault: {
+      on: on("vault"),
       getMarkdownFiles: () => {
         walks++;
         return files.filter((f) => f.extension === "md");
       },
     },
     metadataCache: {
+      on: on("metadataCache"),
       getFileCache: (f: TFile) => (aliases.has(f.path) ? { frontmatter: { aliases: aliases.get(f.path) } } : null),
     },
   } as unknown as App;
-  return { app, walks: () => walks };
+  const emit = (key: string, ...args: unknown[]) => {
+    for (const fn of handlers.get(key) ?? []) fn(...args);
+  };
+  const owner = { registerEvent: () => {} };
+  return { app, owner, emit, walks: () => walks };
 }
 
 describe("OutgoingIndexCache", () => {
@@ -228,43 +241,47 @@ describe("OutgoingIndexCache", () => {
   it("reuses the index across passes and rebuilds only on a target-set change", () => {
     const files = [md("A/Pricing.md"), md("A/Growth Loop.md"), md("Journal/Daily/2026-10-18.md")];
     const aliases = new Map<string, unknown>([["A/Pricing.md", ["Prices"]]]);
-    const { app, walks } = fakeApp(files, aliases);
-    const cache = new OutgoingIndexCache(app);
+    const { app, owner, emit, walks } = fakeApp(files, aliases);
+    const cache = new OutgoingIndexCache(app, owner);
 
     const first = cache.get(false, EXCL);
     expect(cache.get(false, EXCL)).toBe(first);
     expect(walks()).toBe(1);
 
     // Body-only edit: aliases unchanged, index kept.
-    cache.onMetadataChanged(files[0]);
+    emit("metadataCache:changed", files[0]);
     expect(cache.get(false, EXCL)).toBe(first);
     // Excluded note edited: ignored.
-    cache.onMetadataChanged(files[2]);
-    expect(cache.get(false, EXCL)).toBe(first);
-    // Attachment created: ignored.
-    cache.onFileEvent(md("A/img.png"));
+    emit("metadataCache:changed", files[2]);
     expect(cache.get(false, EXCL)).toBe(first);
     expect(walks()).toBe(1);
 
     // Alias edit: rebuilt, and the new alias matches.
     aliases.set("A/Pricing.md", ["Prices", "Tariffe"]);
-    cache.onMetadataChanged(files[0]);
+    emit("metadataCache:changed", files[0]);
     const second = cache.get(false, EXCL);
     expect(second).not.toBe(first);
-    expect(outgoingMentionsIndexed("le tariffe", second).map((m) => m.targetBasename)).toEqual(["Pricing"]);
+    expect(outgoingMentions("le tariffe", second).map((m) => m.targetBasename)).toEqual(["Pricing"]);
 
     // A scanned note the index has never seen: rebuilt.
     files.push(md("A/Agent.md"));
-    cache.onMetadataChanged(files[3]);
+    emit("metadataCache:changed", files[3]);
     const third = cache.get(false, EXCL);
     expect(third).not.toBe(second);
 
-    // Markdown create/delete/rename and folder events: rebuilt.
-    cache.onFileEvent(md("A/New.md"));
-    const fourth = cache.get(false, EXCL);
-    expect(fourth).not.toBe(third);
-    cache.onFileEvent({ path: "A" } as unknown as TFile);
-    expect(cache.get(false, EXCL)).not.toBe(fourth);
+    // Any create/delete/rename, file or folder: rebuilt.
+    let last = third;
+    for (const [event, file] of [
+      ["vault:create", md("A/New.md")],
+      ["vault:create", md("A/img.png")],
+      ["vault:delete", md("A/New.md")],
+      ["vault:rename", { path: "B" }],
+    ] as const) {
+      emit(event, file, "old/path.md");
+      const next = cache.get(false, EXCL);
+      expect(next, event).not.toBe(last);
+      last = next;
+    }
 
     // Stemming flip or different exclusions: rebuilt for that key.
     const plain = cache.get(false, EXCL);
@@ -278,8 +295,8 @@ describe("OutgoingIndexCache", () => {
       ["A/Pricing.md", "Prices"],
       ["A/Product Market Fit.md", ["PMF", 42]],
     ]);
-    const { app } = fakeApp(files, aliases);
-    const cache = new OutgoingIndexCache(app);
+    const { app, owner } = fakeApp(files, aliases);
+    const cache = new OutgoingIndexCache(app, owner);
     const targets: MentionTarget[] = [
       { path: "A/Pricing.md", basename: "Pricing", aliases: ["Prices"] },
       { path: "A/Product Market Fit.md", basename: "Product Market Fit", aliases: ["PMF", "42"] },
@@ -287,9 +304,23 @@ describe("OutgoingIndexCache", () => {
     ];
     const text = "prices, product market fit, pmf 42 perche x";
     for (const doStem of [false, true]) {
-      expect(outgoingMentionsIndexed(text, cache.get(doStem, EXCL), "B/Perché.md")).toEqual(
+      expect(outgoingMentions(text, cache.get(doStem, EXCL), "B/Perché.md")).toEqual(
         oldOutgoingMentions(text, targets, { stem: doStem, selfPath: "B/Perché.md" }),
       );
     }
+  });
+
+  it("drops a note renamed away from markdown (.md -> .txt)", () => {
+    const pricing = md("A/Pricing.md");
+    const files = [pricing, md("A/Growth Loop.md")];
+    const { app, owner, emit } = fakeApp(files, new Map());
+    const cache = new OutgoingIndexCache(app, owner);
+    expect(outgoingMentions("our pricing", cache.get(false, EXCL)).map((m) => m.targetBasename)).toEqual(["Pricing"]);
+
+    // Obsidian passes the file as it is AFTER the rename, plus the old path.
+    const renamed = md("A/Pricing.txt");
+    files[0] = renamed;
+    emit("vault:rename", renamed, pricing.path);
+    expect(outgoingMentions("our pricing", cache.get(false, EXCL))).toEqual([]);
   });
 });

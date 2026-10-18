@@ -10,6 +10,7 @@ import {
   applyLink,
   applyLinks,
   outgoingMentions,
+  buildMentionIndex,
   flattenOutgoing,
   wikilinkSpans,
   STOPWORDS,
@@ -173,17 +174,17 @@ describe("outgoingMentions — inline (this note cites others)", () => {
   ];
 
   it("finds a bare outgoing mention", () => {
-    const out = outgoingMentions("our pricing is set", targets, {});
+    const out = outgoingMentions("our pricing is set", buildMentionIndex(targets));
     expect(out.map((m) => m.targetBasename)).toContain("Pricing");
   });
 
   it("skips text already inside a wikilink", () => {
-    const out = outgoingMentions("our [[Pricing]] is set", targets, {});
+    const out = outgoingMentions("our [[Pricing]] is set", buildMentionIndex(targets));
     expect(out).toEqual([]);
   });
 
   it("skips the note's own title", () => {
-    const out = outgoingMentions("pricing pricing", targets, { selfPath: "Atlas/Pricing.md" });
+    const out = outgoingMentions("pricing pricing", buildMentionIndex(targets), "Atlas/Pricing.md");
     expect(out).toEqual([]);
   });
 
@@ -193,7 +194,7 @@ describe("outgoingMentions — inline (this note cites others)", () => {
   });
 
   it("flattenOutgoing keeps the longer span on overlap", () => {
-    const out = outgoingMentions("we hit product market fit", targets, {});
+    const out = outgoingMentions("we hit product market fit", buildMentionIndex(targets));
     const flat = flattenOutgoing(out);
     // "Product Market Fit" (long) beats the "product" substring under "Pricing"? no —
     // only PMF matches here; assert the phrase span is kept whole and once.

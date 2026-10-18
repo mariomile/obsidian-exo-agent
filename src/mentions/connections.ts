@@ -6,12 +6,12 @@
  * matching/scoring/mutation logic is pure and unit-tested in `mentions-core`.
  */
 
-import { App, TFile, type TAbstractFile } from "obsidian";
+import { App, TFile, type Component } from "obsidian";
 import { backlinks, relatedFromFrontmatter } from "../obsidian/graph";
 import {
   unlinkedMentions,
   buildMentionIndex,
-  outgoingMentionsIndexed,
+  outgoingMentions,
   flattenOutgoing,
   rankConnections,
   applyLinks,
@@ -173,9 +173,10 @@ function allTargets(app: App, excludePrefixes: string[]): MentionTarget[] {
 /**
  * The outgoing-mention target index, kept across typing passes so a pass no
  * longer walks every note and re-tokenizes every title. Rebuilt lazily on the
- * next pass after anything that changes the target set: a markdown note (or a
- * folder) created, deleted or renamed, or a note's `aliases` edited. A body-only
- * edit keeps the index. The caller wires the vault and metadataCache events.
+ * next pass after anything that can change the target set: any file or folder
+ * created, deleted or renamed (a rename's old path counts too, so `.md -> .txt`
+ * drops the target), or a note's `aliases` edited. A body-only edit keeps the
+ * index. The events are registered on `owner`, so they unload with it.
  */
 export class OutgoingIndexCache {
   private index: MentionIndex | null = null;
@@ -183,7 +184,18 @@ export class OutgoingIndexCache {
   private excludePrefixes: string[] = [];
   private aliasesByPath = new Map<string, string[]>();
 
-  constructor(private readonly app: App) {}
+  constructor(
+    private readonly app: App,
+    owner: Pick<Component, "registerEvent">,
+  ) {
+    const drop = () => {
+      this.index = null;
+    };
+    owner.registerEvent(app.vault.on("create", drop));
+    owner.registerEvent(app.vault.on("delete", drop));
+    owner.registerEvent(app.vault.on("rename", drop));
+    owner.registerEvent(app.metadataCache.on("changed", (f) => this.onMetadataChanged(f)));
+  }
 
   get(stem: boolean, excludePrefixes: string[]): MentionIndex {
     const key = `${stem}\n${excludePrefixes.join("\n")}`;
@@ -197,14 +209,9 @@ export class OutgoingIndexCache {
     return this.index;
   }
 
-  /** Vault `create`/`delete`/`rename`. Attachments never change the target set. */
-  onFileEvent(file: TAbstractFile): void {
-    if (!(file instanceof TFile) || file.extension === "md") this.index = null;
-  }
-
   /** metadataCache `changed`: rebuild only when the note's aliases moved, or
    *  for a scanned note the index has not seen. */
-  onMetadataChanged(file: TFile): void {
+  private onMetadataChanged(file: TFile): void {
     if (this.index === null || file.extension !== "md") return;
     if (this.excludePrefixes.some((p) => file.path.startsWith(p))) return;
     const known = this.aliasesByPath.get(file.path);
@@ -228,7 +235,7 @@ export async function gatherOutgoing(
 ): Promise<FlatOutgoing[]> {
   const excludePrefixes = opts.excludePrefixes ?? DEFAULT_EXCLUDE_PREFIXES;
   const raw = opts.text ?? (await app.vault.cachedRead(file));
-  const matches = outgoingMentionsIndexed(
+  const matches = outgoingMentions(
     blankFrontmatter(raw),
     index.get(opts.stem ?? false, excludePrefixes),
     file.path,

@@ -58,7 +58,7 @@ import { automationLastRunKey, migrateScheduledRuns, pruneRuns, type AutomationC
 import { AutomationStore, adaptAppToAutomationVault, migrateToAutomationFiles } from "./obsidian/automation-store";
 import { contractFromAutomation, legacyConfigFromAutomation, type Automation } from "./core/automation-model";
 import { drainExoQueue, countPendingQueue } from "./queue";
-import { ArchiveRewriteGuard, readConversationsSource, type FileStamp } from "./core/persistence";
+import { readConversationsSource } from "./core/persistence";
 import { sanitizeTitle, classifyTitleOutcome, buildTitlePrompt, type TitleInput } from "./core/title";
 import { buildEditPrompt, buildContinuePrompt } from "./core/inline-ai";
 import { inlineAiExtension } from "./editor/inline-ai";
@@ -254,7 +254,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *  rapid UI updates may call saveConversations concurrently; sharing the same
    *  .tmp path without a queue can regress or temporarily remove the main file. */
   private readonly conversationWriteQueue = new WriteQueue();
-  private readonly archiveGuard = new ArchiveRewriteGuard(); // first archive save skips an archive unchanged since load
   /** Settings share one JSON file; serialize snapshots so background update
    *  checks and interactive settings changes cannot race saveData(). */
   private readonly settingsWriteQueue = new WriteQueue();
@@ -1891,11 +1890,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    * `<file>.corrupt-<epoch>` for forensics, and the user is told whether history
    * was recovered from backup or lost.
    */
-  async loadConversations(base = "conversations.json", guard?: ArchiveRewriteGuard): Promise<unknown[]> {
+  async loadConversations(base = "conversations.json"): Promise<unknown[]> {
     const adapter = this.app.vault.adapter;
     const p = this.convoFile(base);
     const bak = `${p}.bak`;
-    const stampBeforeRead = guard ? await adapter.stat(p).catch(() => null) : null;
     const readOrNull = async (path: string): Promise<string | null> => {
       try {
         return (await adapter.exists(path)) ? await adapter.read(path) : null;
@@ -1917,7 +1915,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
           : "Exo couldn't read conversation history — the file was corrupted and no usable backup existed (kept for recovery)."
       );
     }
-    return guard ? guard.noteLoad(stampBeforeRead, { data, source }) : data;
+    return data;
   }
 
   /**
@@ -1928,14 +1926,13 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *   2. rotate the current main file to `<file>.bak` (one generation)
    *   3. rename `.tmp` over the main path
    */
-  async saveConversations(data: unknown[], base = "conversations.json", skipIfOnDisk?: (statNow: () => Promise<FileStamp | null>) => Promise<boolean>): Promise<boolean> {
+  async saveConversations(data: unknown[], base = "conversations.json"): Promise<boolean> {
     // Snapshot the payload at call time; the caller's arrays keep mutating while
     // this request waits behind earlier saves.
     const json = JSON.stringify(data);
     return this.conversationWriteQueue.enqueue(async () => {
       const adapter = this.app.vault.adapter;
       const p = this.convoFile(base);
-      if (skipIfOnDisk && (await skipIfOnDisk(() => adapter.stat(p)))) return true; // the file already holds this payload
       const tmp = `${p}.tmp`;
       const bak = `${p}.bak`;
       try {
@@ -1970,10 +1967,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    * atomic/backup/recovery machinery, different file.
    */
   loadArchivedConversations(): Promise<unknown[]> {
-    return this.loadConversations("conversations-archive.json", this.archiveGuard);
+    return this.loadConversations("conversations-archive.json");
   }
   saveArchivedConversations(data: unknown[]): Promise<boolean> {
-    return this.saveConversations(data, "conversations-archive.json", this.archiveGuard.takeSkipCheck(data));
+    return this.saveConversations(data, "conversations-archive.json");
   }
 
   // Mechanics (file path, read/write/corrupt-handling) live in

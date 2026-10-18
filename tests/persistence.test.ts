@@ -3,15 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   planPersistedConvos,
-  parseConversationsSource,
   readConversationsSource,
   partitionConvos,
   archiveSignature,
-  restoredArchiveSignature,
-  ArchiveRewriteGuard,
-  type FileStamp,
 } from "../src/core/persistence";
-import { WriteQueue } from "../src/core/write-queue";
 import { DEFAULT_SETTINGS, persistViewState, type MVASettings } from "../src/settings-schema";
 
 type C = { id: string; messages: unknown[]; updatedAt?: number };
@@ -101,62 +96,64 @@ describe("planPersistedConvos (deprecated planner — historical behaviour only)
   });
 });
 
-describe("parseConversationsSource", () => {
+describe("readConversationsSource", () => {
   const arr = (n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ id: `c${i}` })));
+  const read = (mainRaw: string | null, bakRaw: string | null) =>
+    readConversationsSource(
+      () => Promise.resolve(mainRaw),
+      () => Promise.resolve(bakRaw),
+    );
 
-  it("uses a valid main file and reports it not corrupt", () => {
-    const r = parseConversationsSource(arr(3), null);
+  it("uses a valid main file and reports it not corrupt", async () => {
+    const r = await read(arr(3), null);
     expect(r.source).toBe("main");
     expect(r.mainCorrupt).toBe(false);
     expect(r.data).toHaveLength(3);
   });
 
-  it("falls back to a valid .bak when main is corrupt, flagging mainCorrupt", () => {
-    const r = parseConversationsSource("{ not json", arr(2));
+  it("falls back to a valid .bak when main is corrupt, flagging mainCorrupt", async () => {
+    const r = await read("{ not json", arr(2));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(2);
   });
 
-  it("returns empty + mainCorrupt when BOTH main and bak are corrupt", () => {
-    const r = parseConversationsSource("{ broken", "also [broken");
+  it("returns empty + mainCorrupt when BOTH main and bak are corrupt", async () => {
+    const r = await read("{ broken", "also [broken");
     expect(r.source).toBe("empty");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toEqual([]);
   });
 
-  it("returns empty and NOT corrupt when both files are missing (fresh install)", () => {
-    const r = parseConversationsSource(null, null);
+  it("returns empty and NOT corrupt when both files are missing (fresh install)", async () => {
+    const r = await read(null, null);
     expect(r.source).toBe("empty");
     expect(r.mainCorrupt).toBe(false);
     expect(r.data).toEqual([]);
   });
 
-  it("recovers from bak for a truncated-JSON main (the classic crash-mid-write)", () => {
+  it("recovers from bak for a truncated-JSON main (the classic crash-mid-write)", async () => {
     // A write interrupted partway leaves valid-prefix-but-unterminated JSON.
     const truncated = arr(5).slice(0, arr(5).length - 10);
-    const r = parseConversationsSource(truncated, arr(4));
+    const r = await read(truncated, arr(4));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(4);
   });
 
-  it("treats valid JSON that isn't an array as corrupt and tries bak", () => {
-    const r = parseConversationsSource('{"conversations":[]}', arr(1));
+  it("treats valid JSON that isn't an array as corrupt and tries bak", async () => {
+    const r = await read('{"conversations":[]}', arr(1));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(1);
   });
 
-  it("uses main even when a stale bak is also present (main wins)", () => {
-    const r = parseConversationsSource(arr(2), arr(9));
+  it("uses main even when a stale bak is also present (main wins)", async () => {
+    const r = await read(arr(2), arr(9));
     expect(r.source).toBe("main");
     expect(r.data).toHaveLength(2);
   });
-});
 
-describe("readConversationsSource", () => {
-  const arr = (n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ id: `c${i}` })));
   const reader = (raw: string | null) => {
     const r = {
       calls: 0,
@@ -177,7 +174,30 @@ describe("readConversationsSource", () => {
     expect(r).toEqual({ data: JSON.parse(arr(3)), source: "main", mainCorrupt: false });
   });
 
-  it("returns exactly what parseConversationsSource returns, for every main/bak pair", async () => {
+  /* The eager policy as it shipped in 0.44.3 (both files read up front), copied
+   * verbatim. The lazy reader must return exactly what it returned. */
+  function eagerTryParseArray(raw: string | null): unknown[] | null {
+    if (raw == null) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  function eagerParseConversationsSource(
+    mainRaw: string | null,
+    bakRaw: string | null
+  ): { data: unknown[]; source: "main" | "bak" | "empty"; mainCorrupt: boolean } {
+    const main = eagerTryParseArray(mainRaw);
+    if (main) return { data: main, source: "main", mainCorrupt: false };
+    const mainCorrupt = mainRaw != null;
+    const bak = eagerTryParseArray(bakRaw);
+    if (bak) return { data: bak, source: "bak", mainCorrupt };
+    return { data: [], source: "empty", mainCorrupt };
+  }
+
+  it("returns exactly what the eager 0.44.3 policy returned, for every main/bak pair", async () => {
     const truncated = arr(5).slice(0, arr(5).length - 10);
     const variants: Array<string | null> = [null, "{ broken", '{"conversations":[]}', truncated, arr(0), arr(2), arr(4)];
     let pairs = 0;
@@ -185,7 +205,7 @@ describe("readConversationsSource", () => {
       for (const b of variants) {
         const main = reader(m);
         const bak = reader(b);
-        const expected = parseConversationsSource(m, b);
+        const expected = eagerParseConversationsSource(m, b);
         expect(await readConversationsSource(main.read, bak.read)).toEqual(expected);
         // The backup is read only when main could not be used.
         expect(bak.calls).toBe(expected.source === "main" ? 0 : 1);
@@ -413,175 +433,5 @@ describe("archiveSignature", () => {
 
   it("does not serialize the transcripts", () => {
     expect(archiveSignature([chat()])).not.toContain("hello");
-  });
-});
-
-describe("restoredArchiveSignature", () => {
-  const archive = [
-    { id: "a", title: "Old", archived: true, updatedAt: 1, messages: [{ role: "user", text: "hi" }] },
-    { id: "b", title: "Older", archived: true, pinned: true, messages: [] },
-  ];
-
-  it("signs an archive loaded from the main file exactly as the first persist will", () => {
-    // What the first persist serializes for an untouched archive is the same
-    // top-level shape that was written, so the two signatures must agree.
-    const loaded = JSON.parse(JSON.stringify(archive)) as object[];
-    expect(restoredArchiveSignature({ data: loaded, source: "main" })).toBe(archiveSignature(archive));
-  });
-
-  it("still differs once the archive changes, so a real change is written", () => {
-    const seed = restoredArchiveSignature({ data: archive, source: "main" });
-    expect(archiveSignature([{ ...archive[0], title: "Renamed" }, archive[1]])).not.toBe(seed);
-    expect(archiveSignature([archive[0]])).not.toBe(seed);
-  });
-
-  it("is empty (untrusted) after a backup recovery or an empty load", () => {
-    expect(restoredArchiveSignature({ data: archive, source: "bak" })).toBe("");
-    expect(restoredArchiveSignature({ data: [], source: "empty" })).toBe("");
-  });
-
-  it("is empty (and does not throw) when an entry is not an object", () => {
-    expect(restoredArchiveSignature({ data: [archive[0], null], source: "main" })).toBe("");
-    expect(restoredArchiveSignature({ data: [archive[0], "x"], source: "main" })).toBe("");
-  });
-
-  it("signs an empty main-file archive as the empty signature", () => {
-    expect(restoredArchiveSignature({ data: [], source: "main" })).toBe(archiveSignature([]));
-  });
-});
-
-describe("ArchiveRewriteGuard", () => {
-  const archive = () => [
-    { id: "a", title: "Old", archived: true, updatedAt: 1, messages: [{ role: "user", text: "hi" }] },
-    { id: "b", title: "Older", archived: true, messages: [] },
-  ];
-  const stamp: FileStamp = { ctime: 100, mtime: 200, size: 3000 };
-  const stat = (s: FileStamp | null) => () => Promise.resolve(s);
-  const loadedGuard = (s: FileStamp | null = stamp, source: "main" | "bak" | "empty" = "main") => {
-    const g = new ArchiveRewriteGuard();
-    g.noteLoad(s, { data: archive(), source });
-    return g;
-  };
-
-  it("skips the first save of an archive unchanged since the load", async () => {
-    const check = loadedGuard().takeSkipCheck(archive());
-    expect(check).toBeDefined();
-    expect(await check!(stat({ ...stamp }))).toBe(true);
-  });
-
-  it("writes when the file was rewritten after the read (any stamp field differs)", async () => {
-    for (const changed of [{ ...stamp, mtime: 201 }, { ...stamp, size: 3001 }, { ...stamp, ctime: 101 }]) {
-      expect(await loadedGuard().takeSkipCheck(archive())!(stat(changed))).toBe(false);
-    }
-  });
-
-  it("writes when the file is gone at save time or cannot be stat'ed", async () => {
-    expect(await loadedGuard().takeSkipCheck(archive())!(stat(null))).toBe(false);
-    expect(await loadedGuard().takeSkipCheck(archive())!(() => Promise.reject(new Error("EIO")))).toBe(false);
-  });
-
-  it("writes when the payload differs from what was loaded", () => {
-    const changed = archive();
-    changed[0].title = "Renamed";
-    expect(loadedGuard().takeSkipCheck(changed)).toBeUndefined();
-    expect(loadedGuard().takeSkipCheck([archive()[0]])).toBeUndefined();
-    expect(loadedGuard().takeSkipCheck([...archive(), null])).toBeUndefined();
-  });
-
-  it("is one-shot: only the first save after a load can skip", () => {
-    const g = loadedGuard();
-    expect(g.takeSkipCheck(archive())).toBeDefined();
-    expect(g.takeSkipCheck(archive())).toBeUndefined();
-    // A payload mismatch consumes the record too.
-    const h = loadedGuard();
-    expect(h.takeSkipCheck([])).toBeUndefined();
-    expect(h.takeSkipCheck(archive())).toBeUndefined();
-  });
-
-  it("never skips without a trusted load: none, backup, empty, or no stamp before the read", () => {
-    expect(new ArchiveRewriteGuard().takeSkipCheck(archive())).toBeUndefined();
-    expect(loadedGuard(stamp, "bak").takeSkipCheck(archive())).toBeUndefined();
-    expect(loadedGuard(stamp, "empty").takeSkipCheck([])).toBeUndefined();
-    expect(loadedGuard(null).takeSkipCheck(archive())).toBeUndefined();
-  });
-
-  it("returns the loaded data unchanged, and the latest load replaces the record", async () => {
-    const g = new ArchiveRewriteGuard();
-    const data = archive();
-    expect(g.noteLoad(stamp, { data, source: "main" })).toBe(data);
-    g.noteLoad(stamp, { data: [], source: "bak" });
-    expect(g.takeSkipCheck(archive())).toBeUndefined();
-  });
-
-  // Mirrors main.ts: saves run in a WriteQueue, the check runs first inside the
-  // queued task, and every write replaces the file (new stamp).
-  function disk(initial: unknown[]) {
-    let n = 0;
-    const d = {
-      content: JSON.stringify(initial),
-      stamp: { ctime: 0, mtime: 0, size: 0 } as FileStamp,
-      writes: 0,
-      write(json: string) {
-        n++;
-        d.content = json;
-        d.stamp = { ctime: n, mtime: n, size: json.length };
-        d.writes++;
-      },
-    };
-    return d;
-  }
-  const save = (q: WriteQueue, d: ReturnType<typeof disk>, data: unknown[], check?: ReturnType<ArchiveRewriteGuard["takeSkipCheck"]>) => {
-    const json = JSON.stringify(data);
-    return q.enqueue(async () => {
-      if (check && (await check(() => Promise.resolve({ ...d.stamp })))) return true;
-      d.write(json);
-      return true;
-    });
-  };
-  const load = (g: ArchiveRewriteGuard, d: ReturnType<typeof disk>) => {
-    const before = { ...d.stamp };
-    return g.noteLoad(before, { data: JSON.parse(d.content) as unknown[], source: "main" }) as typeof archiveA;
-  };
-  const archiveA = archive();
-  const archiveB = [archive()[1]]; // chat "a" unarchived by the closing view
-
-  it("same plugin: a closing view's queued write lands before the check, so the first save writes", async () => {
-    const d = disk(archiveA);
-    const q = new WriteQueue();
-    const g = new ArchiveRewriteGuard();
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    void q.enqueue(() => gate); // the live-file write still in flight
-    const v1 = save(q, d, archiveB); // the closing view's archive write, queued
-    const memory = load(g, d); // the new view reads the old archive meanwhile
-    expect(memory).toEqual(archiveA);
-    const v2 = save(q, d, memory, g.takeSkipCheck(memory));
-    release();
-    await Promise.all([v1, v2]);
-    expect(d.writes).toBe(2);
-    expect(JSON.parse(d.content)).toEqual(archiveA); // same final file as the old code
-  });
-
-  it("another plugin instance: a write landing after the read is detected, so the first save writes", async () => {
-    const d = disk(archiveA);
-    const g = new ArchiveRewriteGuard();
-    const memory = load(g, d);
-    d.write(JSON.stringify(archiveB)); // old instance's late write, outside our queue
-    await save(new WriteQueue(), d, memory, g.takeSkipCheck(memory));
-    expect(d.writes).toBe(2);
-    expect(JSON.parse(d.content)).toEqual(archiveA);
-  });
-
-  it("no concurrent writer: the first save is skipped and the file is untouched", async () => {
-    const d = disk(archiveA);
-    const g = new ArchiveRewriteGuard();
-    const memory = load(g, d);
-    const before = { ...d.stamp };
-    expect(await save(new WriteQueue(), d, memory, g.takeSkipCheck(memory))).toBe(true);
-    expect(d.writes).toBe(0);
-    expect(d.stamp).toEqual(before);
-    // A later real change still writes.
-    await save(new WriteQueue(), d, archiveB, g.takeSkipCheck(archiveB));
-    expect(d.writes).toBe(1);
   });
 });

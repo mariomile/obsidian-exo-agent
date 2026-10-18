@@ -69,13 +69,8 @@ function fileForView(plugin: ExoPlugin, view: EditorView): TFile | null {
 }
 
 export function mentionsExtension(plugin: ExoPlugin) {
-  // One target index shared by every editor, invalidated by the events that
-  // change the target set; registered on the plugin so they unload with it.
-  const index = new OutgoingIndexCache(plugin.app);
-  plugin.registerEvent(plugin.app.vault.on("create", (f) => index.onFileEvent(f)));
-  plugin.registerEvent(plugin.app.vault.on("delete", (f) => index.onFileEvent(f)));
-  plugin.registerEvent(plugin.app.vault.on("rename", (f) => index.onFileEvent(f)));
-  plugin.registerEvent(plugin.app.metadataCache.on("changed", (f) => index.onMetadataChanged(f)));
+  // One target index shared by every editor; its invalidation events unload with the plugin.
+  const index = new OutgoingIndexCache(plugin.app, plugin);
   const plug = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
