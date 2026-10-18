@@ -58,7 +58,7 @@ import { automationLastRunKey, migrateScheduledRuns, pruneRuns, type AutomationC
 import { AutomationStore, adaptAppToAutomationVault, migrateToAutomationFiles } from "./obsidian/automation-store";
 import { contractFromAutomation, legacyConfigFromAutomation, type Automation } from "./core/automation-model";
 import { drainExoQueue, countPendingQueue } from "./queue";
-import { parseConversationsSource } from "./core/persistence";
+import { readConversationsSource } from "./core/persistence";
 import { sanitizeTitle, classifyTitleOutcome, buildTitlePrompt, type TitleInput } from "./core/title";
 import { buildEditPrompt, buildContinuePrompt } from "./core/inline-ai";
 import { inlineAiExtension } from "./editor/inline-ai";
@@ -1884,8 +1884,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /**
    * Persisted conversation history (separate from settings/data.json).
    *
-   * Recovery-aware: reads the main file AND its `.bak` rotation, then defers the
-   * trust decision to the pure `parseConversationsSource`. When the main file
+   * Recovery-aware: reads the main file (and its `.bak` only if main is missing
+   * or unusable) via the pure `readConversationsSource`. When the main file
    * exists but is corrupt it is NEVER deleted — it's renamed aside as
    * `<file>.corrupt-<epoch>` for forensics, and the user is told whether history
    * was recovered from backup or lost.
@@ -1901,9 +1901,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         return null;
       }
     };
-    const mainRaw = await readOrNull(p);
-    const bakRaw = await readOrNull(bak);
-    const { data, source, mainCorrupt } = parseConversationsSource(mainRaw, bakRaw);
+    const { data, source, mainCorrupt } = await readConversationsSource(() => readOrNull(p), () => readOrNull(bak));
     if (mainCorrupt) {
       // Preserve the corrupt file — never start silently empty over a bad file.
       try {

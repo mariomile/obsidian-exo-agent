@@ -10,27 +10,29 @@
  * because `restore()` falls back to the LAST element as active.
  */
 /**
- * Decide which on-disk source a load should trust, given the raw text of the
- * main conversations file and its `.bak` rotation (either may be `null` when the
- * file is missing). Pure so the crash-recovery policy can be unit-tested without
- * an Obsidian `DataAdapter`.
+ * Decide which on-disk source a load should trust, reading the main
+ * conversations file and, only when main is missing or unusable, its `.bak`
+ * rotation (either reader resolves `null` when the file is missing). The policy
+ * is unit-testable without an Obsidian `DataAdapter`.
  *
  * Rules:
- *  - Valid array in `main` → use it (`source: "main"`, not corrupt).
+ *  - Valid array in `main` → use it (`source: "main"`, not corrupt); the `.bak`
+ *    is never read, since a valid main wins regardless of what it holds.
  *  - `main` missing → fall through to `.bak` (a missing main is NOT corruption).
  *  - `main` present but unparseable / not an array → `mainCorrupt: true`, fall
  *    through to `.bak`. The caller preserves the corrupt file aside and warns.
  *  - Neither yields an array → empty history (`source: "empty"`).
  */
-export function parseConversationsSource(
-  mainRaw: string | null,
-  bakRaw: string | null
-): { data: unknown[]; source: "main" | "bak" | "empty"; mainCorrupt: boolean } {
+export async function readConversationsSource(
+  readMain: () => Promise<string | null>,
+  readBak: () => Promise<string | null>
+): Promise<{ data: unknown[]; source: "main" | "bak" | "empty"; mainCorrupt: boolean }> {
+  const mainRaw = await readMain();
   const main = tryParseArray(mainRaw);
   if (main) return { data: main, source: "main", mainCorrupt: false };
   // A missing main is not corruption; a present-but-unusable main is.
   const mainCorrupt = mainRaw != null;
-  const bak = tryParseArray(bakRaw);
+  const bak = tryParseArray(await readBak());
   if (bak) return { data: bak, source: "bak", mainCorrupt };
   return { data: [], source: "empty", mainCorrupt };
 }

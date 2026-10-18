@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   planPersistedConvos,
-  parseConversationsSource,
+  readConversationsSource,
   partitionConvos,
   archiveSignature,
 } from "../src/core/persistence";
@@ -96,57 +96,124 @@ describe("planPersistedConvos (deprecated planner — historical behaviour only)
   });
 });
 
-describe("parseConversationsSource", () => {
+describe("readConversationsSource", () => {
   const arr = (n: number) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ id: `c${i}` })));
+  const read = (mainRaw: string | null, bakRaw: string | null) =>
+    readConversationsSource(
+      () => Promise.resolve(mainRaw),
+      () => Promise.resolve(bakRaw),
+    );
 
-  it("uses a valid main file and reports it not corrupt", () => {
-    const r = parseConversationsSource(arr(3), null);
+  it("uses a valid main file and reports it not corrupt", async () => {
+    const r = await read(arr(3), null);
     expect(r.source).toBe("main");
     expect(r.mainCorrupt).toBe(false);
     expect(r.data).toHaveLength(3);
   });
 
-  it("falls back to a valid .bak when main is corrupt, flagging mainCorrupt", () => {
-    const r = parseConversationsSource("{ not json", arr(2));
+  it("falls back to a valid .bak when main is corrupt, flagging mainCorrupt", async () => {
+    const r = await read("{ not json", arr(2));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(2);
   });
 
-  it("returns empty + mainCorrupt when BOTH main and bak are corrupt", () => {
-    const r = parseConversationsSource("{ broken", "also [broken");
+  it("returns empty + mainCorrupt when BOTH main and bak are corrupt", async () => {
+    const r = await read("{ broken", "also [broken");
     expect(r.source).toBe("empty");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toEqual([]);
   });
 
-  it("returns empty and NOT corrupt when both files are missing (fresh install)", () => {
-    const r = parseConversationsSource(null, null);
+  it("returns empty and NOT corrupt when both files are missing (fresh install)", async () => {
+    const r = await read(null, null);
     expect(r.source).toBe("empty");
     expect(r.mainCorrupt).toBe(false);
     expect(r.data).toEqual([]);
   });
 
-  it("recovers from bak for a truncated-JSON main (the classic crash-mid-write)", () => {
+  it("recovers from bak for a truncated-JSON main (the classic crash-mid-write)", async () => {
     // A write interrupted partway leaves valid-prefix-but-unterminated JSON.
     const truncated = arr(5).slice(0, arr(5).length - 10);
-    const r = parseConversationsSource(truncated, arr(4));
+    const r = await read(truncated, arr(4));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(4);
   });
 
-  it("treats valid JSON that isn't an array as corrupt and tries bak", () => {
-    const r = parseConversationsSource('{"conversations":[]}', arr(1));
+  it("treats valid JSON that isn't an array as corrupt and tries bak", async () => {
+    const r = await read('{"conversations":[]}', arr(1));
     expect(r.source).toBe("bak");
     expect(r.mainCorrupt).toBe(true);
     expect(r.data).toHaveLength(1);
   });
 
-  it("uses main even when a stale bak is also present (main wins)", () => {
-    const r = parseConversationsSource(arr(2), arr(9));
+  it("uses main even when a stale bak is also present (main wins)", async () => {
+    const r = await read(arr(2), arr(9));
     expect(r.source).toBe("main");
     expect(r.data).toHaveLength(2);
+  });
+
+  const reader = (raw: string | null) => {
+    const r = {
+      calls: 0,
+      read: async () => {
+        r.calls++;
+        return raw;
+      },
+    };
+    return r;
+  };
+
+  it("never reads the backup when main is a valid array", async () => {
+    const main = reader(arr(3));
+    const bak = reader(arr(9));
+    const r = await readConversationsSource(main.read, bak.read);
+    expect(bak.calls).toBe(0);
+    expect(main.calls).toBe(1);
+    expect(r).toEqual({ data: JSON.parse(arr(3)), source: "main", mainCorrupt: false });
+  });
+
+  /* The eager policy as it shipped in 0.44.3 (both files read up front), copied
+   * verbatim. The lazy reader must return exactly what it returned. */
+  function eagerTryParseArray(raw: string | null): unknown[] | null {
+    if (raw == null) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  function eagerParseConversationsSource(
+    mainRaw: string | null,
+    bakRaw: string | null
+  ): { data: unknown[]; source: "main" | "bak" | "empty"; mainCorrupt: boolean } {
+    const main = eagerTryParseArray(mainRaw);
+    if (main) return { data: main, source: "main", mainCorrupt: false };
+    const mainCorrupt = mainRaw != null;
+    const bak = eagerTryParseArray(bakRaw);
+    if (bak) return { data: bak, source: "bak", mainCorrupt };
+    return { data: [], source: "empty", mainCorrupt };
+  }
+
+  it("returns exactly what the eager 0.44.3 policy returned, for every main/bak pair", async () => {
+    const truncated = arr(5).slice(0, arr(5).length - 10);
+    const variants: Array<string | null> = [null, "{ broken", '{"conversations":[]}', truncated, arr(0), arr(2), arr(4)];
+    let pairs = 0;
+    for (const m of variants) {
+      for (const b of variants) {
+        const main = reader(m);
+        const bak = reader(b);
+        const expected = eagerParseConversationsSource(m, b);
+        expect(await readConversationsSource(main.read, bak.read)).toEqual(expected);
+        // The backup is read only when main could not be used.
+        expect(bak.calls).toBe(expected.source === "main" ? 0 : 1);
+        expect(main.calls).toBe(1);
+        pairs++;
+      }
+    }
+    expect(pairs).toBe(49);
   });
 });
 
