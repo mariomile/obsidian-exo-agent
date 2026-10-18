@@ -764,6 +764,7 @@ export class CodexSession implements AgentSession {
       if (done && item.text && !this.streamedAgentItems.has(id)) {
         this.onEvent?.({ kind: "text-delta", text: item.text });
       }
+      if (done) this.onEvent?.({ kind: "text-end" });
       return;
     }
     if (item.type === "commandExecution") {

@@ -122,6 +122,23 @@ async function startTurn(
 }
 
 describe("CodexSession app-server lifecycle", () => {
+  it.each([true, false])("ends completed assistant text before turn completion (streamed: %s)", async (streamed) => {
+    const { session, child } = await readySession();
+    const events: AgentEvent[] = [];
+    const { turn } = await startTurn(session, child, events);
+    if (streamed) child.push({
+      method: "item/agentMessage/delta",
+      params: { itemId: "text-1", delta: "hello" },
+    });
+    child.push({ method: "item/completed", params: { item: { id: "text-1", type: "agentMessage", text: "hello" } } });
+    expect(events).toEqual([{ kind: "text-delta", text: "hello" }, { kind: "text-end" }]);
+    child.push({ method: "item/agentMessage/delta", params: { itemId: "text-2", delta: "resumed" } });
+    expect(events.at(-1)).toEqual({ kind: "text-delta", text: "resumed" });
+    child.push({ method: "turn/completed", params: { turn: { id: "turn-1", status: "completed" } } });
+    await turn;
+    session.dispose();
+  });
+
   it("keeps one process and thread warm across turns while streaming real deltas", async () => {
     const { session, child } = await readySession();
     const firstEvents: AgentEvent[] = [];

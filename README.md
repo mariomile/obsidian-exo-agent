@@ -36,6 +36,7 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 - **Context that follows the screen.** The note you are looking at rides along with your message as a *Current Document* card. Behind a full-page chat it is only offered (click to attach), so a note you can't see is never sent by surprise. Add more with `@` or the `+` menu (notes, files, folders, images).
 - **Composer.** `/` opens your prompts plus the vault's `.claude/` commands and skills; messages typed while the agent works are queued. Effort and permission mode sit next to the model.
 - **Persistent sessions.** Conversations survive reloads and resume their CLI session; Claude keeps one warm process across turns. Live context-window usage, streamed reasoning, parallel chats, and a history gallery.
+- **Interactive UI previews.** HTML and SVG blocks in replies have **Preview**, **Code**, reload and expand controls. Generated `.html`, `.htm` and `.svg` files preview in the chat and refresh when edited. Use self-contained markup with inline CSS and JavaScript; external assets, API requests and framework imports are unavailable in the sandbox.
 
 **Obsidian-native** (all toggleable in settings)
 - **Vault tools**: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note`, `append_to_note`, `update_frontmatter`, `add_links`, `open_note`. `search_vault` uses the [Sonar](https://github.com/mariomile/obsidian-sonar) index when installed. Codex reaches the same tools through a local MCP bridge.

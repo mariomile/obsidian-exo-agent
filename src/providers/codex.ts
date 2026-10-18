@@ -86,6 +86,7 @@ export function handleCodexLine(
     if (itemType === "agent_message" && done && typeof item.text === "string") {
       onEvent({ kind: "text-delta", text: state.streamed ? `\n\n${item.text}` : item.text });
       state.streamed = true;
+      onEvent({ kind: "text-end" });
     } else if (itemType === "reasoning" && done && typeof item.text === "string") {
       onEvent({ kind: "thinking-delta", text: item.text });
     } else if (itemType === "command_execution") {
@@ -131,6 +132,7 @@ export function handleCodexLine(
     onEvent({ kind: "thinking-delta", text: msg.delta });
   } else if (type === "agent_message" && typeof msg.message === "string") {
     state.finalText = msg.message;
+    onEvent({ kind: "text-end" });
   } else if (type === "exec_command_begin") {
     const id = String(msg.call_id ?? msg.id ?? "cx");
     const command = Array.isArray(msg.command)

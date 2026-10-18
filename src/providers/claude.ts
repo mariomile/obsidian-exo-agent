@@ -131,6 +131,7 @@ class ClaudeSession implements AgentSession {
    *  parking forever (the view drops the session and the next message starts fresh). */
   private ended = false;
   private onEvent: ((e: AgentEvent) => void) | null = null;
+  private textBlocks = new Set<number>();
   /** Latest system/init capability snapshot (skills/commands/agents/MCP). */
   caps: import("./types").SessionCaps | null = null;
   onCaps: ((caps: import("./types").SessionCaps) => void) | null = null;
@@ -483,13 +484,22 @@ class ClaudeSession implements AgentSession {
       return;
     }
     if (msg.type === "stream_event") {
+      // Nested agents own their text lifecycle; it must not alter the parent
+      // transcript or end its streaming feedback. Tools remain routed below.
+      if (msg.parent_tool_use_id) return;
       const ev = msg.event;
       if (ev?.type === "content_block_delta") {
         if (ev.delta?.type === "text_delta" && ev.delta.text) {
+          this.textBlocks.add(ev.index ?? 0);
           emit({ kind: "text-delta", text: ev.delta.text });
         } else if (ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
           emit({ kind: "thinking-delta", text: ev.delta.thinking });
         }
+      } else if (ev?.type === "content_block_stop") {
+        if (this.textBlocks.delete(ev.index ?? 0)) emit({ kind: "text-end" });
+      } else if (ev?.type === "message_stop" && this.textBlocks.size) {
+        this.textBlocks.clear();
+        emit({ kind: "text-end" });
       }
     } else if (msg.type === "assistant") {
       // Subagent (Task) tool activity carries the parent Task's tool_use id so the
@@ -577,6 +587,7 @@ class ClaudeSession implements AgentSession {
     this.stderrTail = []; // per-turn tail — drop any lines from a prior turn
     this.interruptRequested = false; // an old interrupt must not excuse this turn's errors
     this.onEvent = onEvent;
+    this.textBlocks.clear();
     const content: UserContent =
       images && images.length
         ? [
@@ -848,7 +859,7 @@ interface ClaudeMsg {
   agents?: string[];
   tools?: string[];
   mcp_servers?: Array<{ name?: string; status?: string }>;
-  event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
+  event?: { type?: string; index?: number; delta?: { type?: string; text?: string; thinking?: string } };
   message?: {
     content?: Array<{
       type?: string;
