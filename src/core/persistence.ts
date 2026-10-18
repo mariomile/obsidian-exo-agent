@@ -35,6 +35,22 @@ export function parseConversationsSource(
   return { data: [], source: "empty", mainCorrupt };
 }
 
+/**
+ * `parseConversationsSource` with lazy reads: the `.bak` is read only when the
+ * main file is missing or unusable, because a valid main wins regardless of
+ * what the backup holds. Same result as reading both up front, minus a full
+ * read and decode of the backup on every healthy load.
+ */
+export async function readConversationsSource(
+  readMain: () => Promise<string | null>,
+  readBak: () => Promise<string | null>
+): Promise<ReturnType<typeof parseConversationsSource>> {
+  const mainRaw = await readMain();
+  const main = tryParseArray(mainRaw);
+  if (main) return { data: main, source: "main", mainCorrupt: false };
+  return parseConversationsSource(mainRaw, await readBak());
+}
+
 /** Parse `raw` and return it only if it's a JSON array; otherwise `null`
  *  (covers missing input, truncated/invalid JSON, and valid-but-non-array). */
 function tryParseArray(raw: string | null): unknown[] | null {
@@ -107,4 +123,74 @@ export function archiveSignature(convos: readonly object[]): string {
       return { ...c, messages: Array.isArray(msgs) ? msgs.length : 0 };
     }),
   );
+}
+
+/**
+ * `archiveSignature` of a load, or `""` when the load must not be trusted as the
+ * file's content: a `.bak` recovery or an empty load must still be written out
+ * as before, and a non-object entry would throw inside `archiveSignature`. `""`
+ * never matches a real signature.
+ */
+export function restoredArchiveSignature(load: {
+  data: readonly unknown[];
+  source: "main" | "bak" | "empty";
+}): string {
+  if (load.source !== "main") return "";
+  if (!load.data.every((c) => c !== null && typeof c === "object")) return "";
+  return archiveSignature(load.data);
+}
+
+/** The `DataAdapter.stat` fields that change when a file is rewritten. */
+export interface FileStamp {
+  ctime: number;
+  mtime: number;
+  size: number;
+}
+
+/**
+ * Lets the first archive save of a session skip rewriting (and rotating the
+ * `.bak` of) an archive that already holds that payload. A load records the
+ * archive signature plus the file stamp taken BEFORE the read. The next save
+ * skips only if its payload has the same signature AND, checked inside the write
+ * queue right before writing, the file still has that stamp. A write that lands
+ * after the read (a closing view's last flush, another plugin instance) changes
+ * the stamp, so that save writes exactly as before. One-shot: every later save
+ * writes as it always did.
+ */
+export class ArchiveRewriteGuard {
+  private loaded: { sig: string; stamp: string } | null = null;
+
+  /** Record a load; `stampBeforeRead` must be taken before the read. Returns `load.data`. */
+  noteLoad(
+    stampBeforeRead: FileStamp | null,
+    load: { data: unknown[]; source: "main" | "bak" | "empty" },
+  ): unknown[] {
+    const sig = restoredArchiveSignature(load);
+    this.loaded = stampBeforeRead && sig ? { sig, stamp: stampKey(stampBeforeRead) } : null;
+    return load.data;
+  }
+
+  /**
+   * Consume the record for a save of `data`. Returns the check to run inside the
+   * write queue right before writing, given a stat of the file about to be
+   * written (resolves true when the file still holds this payload, so the write
+   * is skipped), or `undefined` when the save writes.
+   */
+  takeSkipCheck(data: unknown[]): ((statNow: () => Promise<FileStamp | null>) => Promise<boolean>) | undefined {
+    const loaded = this.loaded;
+    this.loaded = null;
+    if (!loaded || restoredArchiveSignature({ data, source: "main" }) !== loaded.sig) return undefined;
+    return async (statNow) => {
+      try {
+        const now = await statNow();
+        return now !== null && stampKey(now) === loaded.stamp;
+      } catch {
+        return false; // can't tell: write, as before
+      }
+    };
+  }
+}
+
+function stampKey(s: FileStamp): string {
+  return `${s.ctime}:${s.mtime}:${s.size}`;
 }
