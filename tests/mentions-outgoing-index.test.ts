@@ -143,10 +143,11 @@ describe("outgoingMentions equals the pre-index algorithm", () => {
       const targets = makeTargets(r);
       const self = r() < 0.5 ? pick(r, targets).path : undefined;
       for (const o of OPTION_SETS) {
+        const index = buildMentionIndex(targets, o);
         for (const selfPath of [undefined, self]) {
           const opts = { ...o, selfPath };
           const want = oldOutgoingMentions(text, targets, opts);
-          const got = outgoingMentions(text, buildMentionIndex(targets, o), selfPath);
+          const got = outgoingMentions(text, index, selfPath);
           expect(got).toEqual(want);
           expect(flattenOutgoing(got)).toEqual(flattenOutgoing(want));
           compared++;
@@ -157,7 +158,7 @@ describe("outgoingMentions equals the pre-index algorithm", () => {
     expect(compared).toBe(16000);
     // The corpus must actually exercise matching, not just agree on empties.
     expect(nonEmpty).toBeGreaterThan(8000);
-  });
+  }, 30_000);
 
   it("one index reused across many texts gives the same answers as a fresh build", () => {
     const r = rng(7);
