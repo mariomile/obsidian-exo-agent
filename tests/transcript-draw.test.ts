@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatView } from "../src/view";
 import type { Convo } from "../src/ui/convo-types";
@@ -153,6 +153,18 @@ describe("a message reaching a chat that was never drawn keeps its history", () 
     expect(turns(c)).toEqual(["0"]);
   });
 
+  it("a streaming reply in a background chat lands after the history and survives the tab being opened", () => {
+    const c = convo("bg", [user("one"), reply("two"), user("three")]);
+    const view = viewWith([c]);
+    const ctx = (view as unknown as { addAssistantTurn(c: Convo, t: string): { el: El; bodyEl: El } }).addAssistantTurn(c, "three");
+    ctx.bodyEl.createDiv({ cls: "streamed-text" });
+    view.transcript(c); // the user opens the tab mid-stream
+    expect(turns(c)).toEqual(["0", "1", "2", "live"]);
+    expect(lastChild(c)).toBe(ctx.el);
+    expect(ctx.el.parent).toBe(c.listEl);
+    expect(ctx.el.querySelector(".streamed-text")).not.toBeNull();
+  });
+
   it("queued messages go below the history, not into an empty list", () => {
     const c = convo("bg", [user("one"), reply("two")], { queue: [{ text: "later" }] } as Partial<Convo>);
     viewWith([c]).renderQueue(c);
@@ -183,9 +195,16 @@ describe("source contract: what view.ts itself guarantees", () => {
   });
 
   it("only renderConvoDom writes straight into a chat's list; every other append goes through transcript()", () => {
-    const writes = [...view.matchAll(/\.listEl\.(createDiv|createEl|createSpan|appendChild|insertBefore)\(/g)];
+    const writes = /\.listEl\.(createDiv|createEl|createSpan|appendChild|insertBefore)\(/g;
     const start = view.indexOf("  private renderConvoDom(c: Convo): void {");
     const end = view.indexOf("\n  }\n", start);
-    for (const w of writes) expect(w.index! > start && w.index! < end, `direct list write at offset ${w.index}`).toBe(true);
+    for (const w of view.matchAll(writes)) expect(w.index! > start && w.index! < end, `direct list write in view.ts at offset ${w.index}`).toBe(true);
+    // Elsewhere in src/, only these write into a list directly, and both only
+    // ever touch the active chat, which is drawn before it becomes active.
+    const activeOnly = new Set(["ui/empty-state.ts", "ui/reentry.ts"]);
+    const src = join(__dirname, "..", "src");
+    const files = (readdirSync(src, { recursive: true }) as string[]).filter((f) => f.endsWith(".ts") && f !== "view.ts");
+    const offenders = files.filter((f) => !activeOnly.has(f) && new RegExp(writes.source).test(readFileSync(join(src, f), "utf8")));
+    expect(offenders).toEqual([]);
   });
 });
