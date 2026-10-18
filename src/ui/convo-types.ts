@@ -133,6 +133,10 @@ export type LiveTaskRecord = LiveTask & { cardEl: HTMLElement };
 export interface Convo {
   id: string;
   listEl: HTMLElement;
+  /** `listEl` holds the drawn history. Opening the panel draws only the active
+   *  chat; any other chat draws on first use (`ChatView.transcript`). An append
+   *  to an undrawn list would read as drawn and hide the history. Runtime only. */
+  drawn: boolean;
   title: string;
   sessionId?: string;
   /** True when the user archived this chat: hidden from the board's active

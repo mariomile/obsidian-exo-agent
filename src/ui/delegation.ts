@@ -111,7 +111,7 @@ export function surfaceChildBlock(view: ChatView, e: ConvoStateEvent): void {
   const child = byId(view, e.convoId);
   const parent = child?.parentConvoId ? byId(view, child.parentConvoId) : undefined;
   if (!child || !parent) return;
-  const card = parent.listEl.createDiv({ cls: "mva-perm" });
+  const card = view.transcript(parent).createDiv({ cls: "mva-perm" });
   const head = card.createDiv({ cls: "mva-perm-head" });
   setIcon(head.createDiv({ cls: "mva-perm-icon" }), e.reason === "perm" ? "shield-alert" : "message-circle-question");
   head.createSpan({
