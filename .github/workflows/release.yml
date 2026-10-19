@@ -50,23 +50,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The build deploys into this staging folder (OBSIDIAN_PLUGIN_DIR, the same
+      # hook a local build uses): main.js and manifest.json as built, styles.css
+      # packed (scripts/package-css.mjs). What is attested and uploaded below
+      # comes from there, so the release ships what a vault install receives.
       - name: Release check
+        env:
+          OBSIDIAN_PLUGIN_DIR: ${{ runner.temp }}/exo-release
         run: pnpm release:check
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            main.js
-            manifest.json
-            styles.css
+            ${{ runner.temp }}/exo-release/main.js
+            ${{ runner.temp }}/exo-release/manifest.json
+            ${{ runner.temp }}/exo-release/styles.css
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ runner.temp }}/exo-release
         run: |
-          ASSETS="main.js manifest.json"
-          [ -f styles.css ] && ASSETS="$ASSETS styles.css"
+          # Asset names are the file names, as before; all three are required.
+          ASSETS="$OUT/main.js $OUT/manifest.json $OUT/styles.css"
           # Idempotent: releases are usually cut manually (curated notes) before
           # the tag lands here. If one exists, refresh its assets with this
           # CI-built bundle instead of failing.

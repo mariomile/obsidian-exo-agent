@@ -37,12 +37,10 @@ import {
 } from "../core/rate-limit";
 import { buildOptionRows, type SelectOption } from "../core/option-filter";
 import { queryWords, matchesWords } from "../core/ac-token";
-import { selectionPreview } from "../core/selection-preview";
 import { clampEffort, effortOptionsFor } from "../core/model-tuning";
 import { activeNoteState, contextModel, type ContextModel } from "../core/active-note";
 import { isNoteVisible } from "../obsidian/note-visibility";
-import { fillThumb } from "./context-thumb";
-import { statSync } from "node:fs";
+import { ContextCards, isExternalPath, type ContextCardSpec } from "./context-cards";
 
 /** Semantic risk modifier class for a toolbar selector option/chip ("" = neutral). */
 type RiskLevel = "" | "is-caution" | "is-danger";
@@ -157,6 +155,7 @@ export class Composer {
    *  by `takePendingAgent()`; a `/as` binding lives on the Convo instead. */
   private pendingAgent: string | null = null;
   private contextEl!: HTMLElement;
+  private contextCards: ContextCards | null = null;
   private dismissedActive: string | null = null;
   private manualAttached: string[] = [];
   /** The active editor's current selection, mirrored ambiently into the composer. */
@@ -319,6 +318,7 @@ export class Composer {
     // the bottom — everything shares one rounded border instead of floating rows.
     const box = bar.createDiv({ cls: "mva-inputbox" });
     this.contextEl = box.createDiv({ cls: "mva-context" });
+    this.contextCards = new ContextCards(this.app, this.contextEl);
     this.imagesEl = box.createDiv({ cls: "mva-images is-hidden" });
     // Goal pill host: shown only while a /goal is active. Mounted above the input.
     this.goalPillEl = box.createDiv({ cls: "mva-goal-pill-host" });
@@ -1388,7 +1388,6 @@ export class Composer {
 
   refreshContext(): void {
     if (!this.contextEl) return;
-    this.contextEl.empty();
     // Every context note is a uniform card in a horizontal row (Craft-style):
     // the active note first ("Current Document"), then manual attachments.
     // The ADD affordances live inside the composer toolbar now (the "+" menu);
@@ -1399,20 +1398,19 @@ export class Composer {
     // already attached as its own text (once attached it becomes redundant with
     // the seeded excerpt in the input — see attachSelection).
     const sel = this.selectionChipModel();
-    const hasAny = active.kind !== "none" || manual.length > 0 || !!sel;
-    this.contextEl.toggleClass("is-empty", !hasAny);
-    if (!hasAny) return;
-    const cards = this.contextEl.createDiv({ cls: "mva-doc-cards" });
     const then = (change: () => void) => () => {
       change();
       this.refreshContext();
     };
+    const specs: ContextCardSpec[] = [];
     if (active.kind !== "none") {
       const dismiss = then(() => (this.dismissedActive = active.path));
       if (active.kind === "attached") {
-        this.renderContextCard(cards, active.path, { label: "Current Document", onClick: () => this.host.openNote(active.path), onRemove: dismiss });
+        specs.push({ kind: "doc", path: active.path, label: "Current Document", onClick: () => this.host.openNote(active.path), onRemove: dismiss });
       } else {
-        this.renderContextCard(cards, active.path, {
+        specs.push({
+          kind: "doc",
+          path: active.path,
           label: "Open note · click to attach",
           suggested: true,
           onClick: then(() => this.manualAttached.push(active.path)),
@@ -1421,14 +1419,32 @@ export class Composer {
       }
     }
     for (const p of manual) {
-      const external = Composer.isExternalPath(p);
-      this.renderContextCard(cards, p, {
+      const external = isExternalPath(p);
+      specs.push({
+        kind: "doc",
+        path: p,
         label: external ? "External" : "Document",
         onClick: () => (external ? this.host.openArtifact(p) : this.host.openNote(p)),
         onRemove: then(() => (this.manualAttached = this.manualAttached.filter((x) => x !== p))),
       });
     }
-    if (sel) this.renderSelectionCard(cards, sel.text, sel.path, active.kind === "attached" ? active.path : null);
+    if (sel) {
+      specs.push({
+        kind: "selection",
+        text: sel.text,
+        path: sel.path,
+        activePath: active.kind === "attached" ? active.path : null,
+        // Click-to-attach: seed the quoted excerpt into the composer, then clear the
+        // chip (the excerpt now lives in the input, so the chip would be redundant).
+        onClick: then(() => {
+          this.attachSelection(sel.text, sel.path);
+          this.currentSelection = null;
+        }),
+        onRemove: then(() => (this.currentSelection = null)),
+      });
+    }
+    this.contextEl.toggleClass("is-empty", !specs.length);
+    this.contextCards?.render(specs);
   }
 
   /** The selection chip's model, or null when it shouldn't show: gated on the
@@ -1439,40 +1455,6 @@ export class Composer {
     const sel = this.currentSelection;
     if (!sel || !sel.text.trim()) return null;
     return sel;
-  }
-
-  /** A transient, click-to-attach card for the active editor's selection. Same
-   *  card grammar as the document cards (thumb + body + ×) but visually a hair
-   *  distinct (`.mva-sel-card`): a text-cursor thumb, a "Selection" kind line, a
-   *  one-line preview + count, and a source-note suffix when the selection comes
-   *  from a note other than the active-context doc. Clicking seeds the quoted
-   *  excerpt into the composer via the existing `attachSelection` path; the ×
-   *  dismisses the chip. Keyboard-operable via `clickable()`. */
-  private renderSelectionCard(parent: HTMLElement, text: string, path: string, activePath: string | null): void {
-    const { label, count } = selectionPreview(text);
-    const card = parent.createDiv({ cls: "mva-doc-card mva-sel-card" });
-    const thumb = card.createDiv({ cls: "mva-doc-thumb is-icon" });
-    setIcon(thumb, "text-cursor-input");
-    const body = card.createDiv({ cls: "mva-doc-body" });
-    body.createDiv({ cls: "mva-doc-title", text: label || "Selection", attr: { title: label } });
-    // Show the source note only when it isn't the active-context doc (which the
-    // "Current Document" card already names), so the kind line stays terse.
-    const fromOther = path && path !== activePath ? ` · ${noteBasename(path)}` : "";
-    body.createDiv({ cls: "mva-doc-kind", text: `Selection · ${count}${fromOther}` });
-    const x = card.createSpan({ cls: "mva-doc-x", attr: { "aria-label": "Dismiss selection" } });
-    setIcon(x, "x");
-    clickable(x, (e) => {
-      e.stopPropagation();
-      this.currentSelection = null;
-      this.refreshContext();
-    });
-    // Click-to-attach: seed the quoted excerpt into the composer, then clear the
-    // chip (the excerpt now lives in the input, so the chip would be redundant).
-    clickable(card, () => {
-      this.attachSelection(text, path);
-      this.currentSelection = null;
-      this.refreshContext();
-    });
   }
 
   /** The composer "+" attach control: a themed popover (matching the select chips,
@@ -1554,49 +1536,6 @@ export class Composer {
   private addExternalPath(p: string): void {
     if (!this.manualAttached.includes(p)) this.manualAttached.push(p);
     this.refreshContext();
-  }
-
-  /** Absolute (out-of-vault) context path? Vault attachments are vault-relative. */
-  private static isExternalPath(p: string): boolean {
-    return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
-  }
-
-  /** A uniform context card: text thumbnail + title + kind ("Current Document" /
-   *  "Document" / "External"). External (absolute) paths open via the OS. A
-   *  "suggested" card is the active note hidden behind the chat: not sent until
-   *  clicked, which attaches it. */
-  /** One context card: each kind (current, suggested, manual) declares its own
-   *  label and click/remove behaviour at the call site. */
-  private renderContextCard(
-    parent: HTMLElement,
-    path: string,
-    spec: { label: string; suggested?: boolean; onClick: () => void; onRemove: () => void }
-  ): void {
-    const external = Composer.isExternalPath(path);
-    const card = parent.createDiv({ cls: spec.suggested ? "mva-doc-card is-suggested" : "mva-doc-card" });
-    const thumb = card.createDiv({ cls: "mva-doc-thumb" });
-    if (external) {
-      thumb.addClass("is-icon");
-      let isDir = false;
-      try {
-        isDir = statSync(path).isDirectory();
-      } catch {
-        /* unreadable — treat as file */
-      }
-      setIcon(thumb, isDir ? "folder" : "file");
-    } else {
-      void fillThumb(this.app, thumb, path);
-    }
-    const body = card.createDiv({ cls: "mva-doc-body" });
-    body.createDiv({ cls: "mva-doc-title", text: noteBasename(path), attr: { title: path } });
-    body.createDiv({ cls: "mva-doc-kind", text: spec.label });
-    const x = card.createSpan({ cls: "mva-doc-x", attr: { "aria-label": "Remove from context" } });
-    setIcon(x, "x");
-    clickable(x, (e) => {
-      e.stopPropagation();
-      spec.onRemove();
-    });
-    clickable(card, () => spec.onClick());
   }
 
   private pickNote(): void {
