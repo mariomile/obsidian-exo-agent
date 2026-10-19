@@ -1,8 +1,9 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "node:module";
-import { existsSync, readFileSync, copyFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { deployToPluginDir } from "./scripts/deploy.mjs";
 
 const prod = process.argv[2] === "production";
 
@@ -20,21 +21,24 @@ const deployDir =
   process.env.OBSIDIAN_PLUGIN_DIR ||
   (existsSync(".obsidian-plugin-dir") ? readFileSync(".obsidian-plugin-dir", "utf8").trim() : null);
 
+// A production build packs the deployed styles.css (whitespace and comments out,
+// `@settings` kept; see scripts/package-css.mjs). The release workflow builds
+// into a staging folder through this same variable and ships what lands there.
 const deployPlugin = {
   name: "deploy",
   setup(build) {
-    build.onEnd((result) => {
+    build.onEnd(async (result) => {
       if (!deployDir) return;
       // Never ship a stale main.js into the live vault on a failed build.
       if (result.errors.length > 0) return;
       try {
-        mkdirSync(deployDir, { recursive: true });
-        for (const f of ["main.js", "manifest.json", "styles.css"]) {
-          if (existsSync(f)) copyFileSync(f, join(deployDir, f));
-        }
+        await deployToPluginDir(deployDir, { production: prod });
         console.log(`[deploy] copied to ${deployDir}`);
       } catch (e) {
         console.warn(`[deploy] failed: ${e?.message ?? e}`);
+        // A production build is what the release ships from the deploy folder:
+        // fail it, so a release never goes out with missing or stale files.
+        if (prod) process.exitCode = 1;
       }
     });
   },
@@ -140,7 +144,7 @@ const ctx = await esbuild.context({
 
 if (prod) {
   await ctx.rebuild();
-  process.exit(0);
+  process.exit(); // 0, or 1 if the deploy failed (process.exitCode)
 } else {
   await ctx.watch();
 }

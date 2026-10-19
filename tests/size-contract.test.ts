@@ -101,7 +101,12 @@ const CEILINGS: Record<string, number> = {
   // regola "nota attiva allegata solo se visibile" in `core/active-note.ts` +
   // `obsidian/note-visibility.ts`. 1735 -> 1690 righe reali. Tetto a 1700:
   // 10 righe di margine, come sugli altri file.
-  "src/ui/composer.ts": 1700,
+  //
+  // Abbassato il 2026-10-19: le card del contesto (montaggio, chiavi,
+  // riconciliazione) vivono ora in `ui/context-cards.ts`; qui resta solo la
+  // lista delle spec. 1694 -> 1633 righe reali. Tetto a 1643: 10 righe di
+  // margine, come sopra.
+  "src/ui/composer.ts": 1643,
   // Abbassato il 2026-08-11: `BACKGROUND_MODEL_OPTIONS` è tornato a casa in
   // `core/model-options.ts`, il modulo che possiede già il catalogo dei modelli
   // per i picker — qui era un catalogo di prodotto parcheggiato in un file di
