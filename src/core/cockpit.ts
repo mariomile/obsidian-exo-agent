@@ -1,10 +1,10 @@
 /**
  * Cockpit view-models (pure). The cockpit shell (`ui/cockpit-view.ts`) gathers
- * raw inputs (parsed loops, conversation index, queue scans, file stats)
+ * raw inputs (parsed loops, queue counts, file stats)
  * and these builders turn them into render-ready rows. Action-first contract:
  * every row carries a `CockpitAction` the shell maps to a handler — seed a
- * chat (`ask`), open a conversation (`convo`), open a note (`open`), or run a
- * command (`command`). No `obsidian` import.
+ * chat (`ask`), open a note (`open`), or run a command (`command`). No
+ * `obsidian` import.
  */
 
 import { activeLoops, dueLoops, type LoopEntry } from "./open-loops";
@@ -12,7 +12,7 @@ import { formatAge } from "./actions-hub";
 import { normalizeUtilization } from "./rate-limit";
 
 export interface CockpitAction {
-  kind: "ask" | "convo" | "open" | "command";
+  kind: "ask" | "open" | "command";
   arg: string;
 }
 
@@ -21,54 +21,6 @@ export interface CockpitRow {
   sub?: string;
   badge?: string;
   action: CockpitAction;
-}
-
-export type AttentionItem =
-  | { kind: "blocked" | "streaming" | "answer"; label: string; target: string }
-  | { kind: "runs" | "pulse"; label: string };
-
-const DAY = 86_400_000;
-
-/** The "waits for YOU" strip: blocked turns first (they gate work), then
- *  running turns, then queue answers fresh within 24h. Capped — it's a strip,
- *  not a list. */
-export function buildAttention(
-  input: {
-    convos: { id: string; title: string; blocked: boolean; streaming: boolean }[];
-    answers: { path: string; name: string; answeredAt: number }[];
-    /** Automation write runs awaiting review (unreviewedWriteRuns count). */
-    unreviewedRuns?: number;
-    /** Daily Pulse items generated since the review note was last opened. */
-    dailyPulseItems?: number;
-    now: number;
-  },
-  cap = 6
-): AttentionItem[] {
-  const out: AttentionItem[] = [];
-  for (const c of input.convos) {
-    if (c.blocked) out.push({ kind: "blocked", label: `"${c.title}" is waiting for your OK`, target: c.id });
-  }
-  if (input.dailyPulseItems) {
-    const n = input.dailyPulseItems;
-    out.push({
-      kind: "pulse",
-      label: `Daily Pulse · ${n} item${n === 1 ? "" : "s"}`,
-    });
-  }
-  if (input.unreviewedRuns) {
-    const n = input.unreviewedRuns;
-    out.push({
-      kind: "runs",
-      label: n === 1 ? "1 automation run to review" : `${n} automation runs to review`,
-    });
-  }
-  for (const c of input.convos) {
-    if (!c.blocked && c.streaming) out.push({ kind: "streaming", label: `"${c.title}" is working`, target: c.id });
-  }
-  for (const a of input.answers) {
-    if (input.now - a.answeredAt < DAY) out.push({ kind: "answer", label: `Answer ready: ${a.name}`, target: a.path });
-  }
-  return out.slice(0, cap);
 }
 
 /** Active loops, due first (then oldest first). Clicking seeds a closing chat. */
@@ -84,47 +36,6 @@ export function loopRows(loops: LoopEntry[], now: number, cap = 6): CockpitRow[]
     ...(due.has(l.id) ? { badge: "due" } : {}),
     action: { kind: "ask", arg: `Let's close this loop: ${l.title}` },
   }));
-}
-
-export interface ResumeConvo {
-  id: string;
-  title: string;
-  updatedAt?: number;
-  preview?: string;
-}
-
-export function resumeRows(convos: ResumeConvo[], now: number, cap = 5): CockpitRow[] {
-  return [...convos]
-    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, cap)
-    .map((c) => ({
-      label: c.title || "Untitled",
-      ...(c.preview ? { sub: c.preview } : {}),
-      badge: formatAge(c.updatedAt ?? null, now, ""),
-      action: { kind: "convo", arg: c.id },
-    }));
-}
-
-/** One-line preview from a persisted transcript: the last non-empty text
- *  (user text or assistant text segments), whitespace-collapsed, capped. */
-export function previewFromMessages(
-  messages: Array<{ role: string; text?: string; auto?: true; segments?: Array<{ t: string; md?: string }> }>,
-  max = 70
-): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.auto) continue; // Exo's own wake-up line, not what the chat is about
-    const raw =
-      m.role === "user"
-        ? (m.text ?? "")
-        : (m.segments ?? [])
-            .filter((s) => s.t === "text")
-            .map((s) => s.md ?? "")
-            .join(" ");
-    const t = raw.replace(/\s+/g, " ").trim();
-    if (t) return t.length >= max ? t.slice(0, max - 1) + "…" : t;
-  }
-  return "";
 }
 
 /** The note that carries current state (NOW.md, else vault-context) and its
@@ -143,7 +54,7 @@ export interface HealthInput {
 }
 
 /** Maintenance debt made visible. Only real signals — a healthy vault renders
- *  no rows (the shell shows the tile's empty copy). Staleness threshold is the
+ *  no rows (the shell then draws no tile). Staleness threshold is the
  *  vault's own 7-day rule. */
 export function healthRows(h: HealthInput): CockpitRow[] {
   const rows: CockpitRow[] = [];

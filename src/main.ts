@@ -2144,14 +2144,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     return countPendingQueue(this.app, this.settings);
   }
 
-  /** Open the chat view on a specific conversation (Cockpit "Resume" rows). */
-  async openConvo(id: string): Promise<void> {
-    await this.activateView();
-    // Two-step, not `?? false`: with no view there is nothing to report missing.
-    const view = convoBridge.chatView(this.app);
-    if (view && !view.openConvoById(id)) new Notice("Conversation not found — it may have been deleted.");
-  }
-
   /** Deterministic production pipeline. Background-AI settings never gate it. */
   async generateDailyPulse(now: number = Date.now()): Promise<{
     warnings: DailyPulseCollectionWarning[];

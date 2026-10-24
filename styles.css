@@ -5398,15 +5398,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-ck-refresh:hover { color: var(--text-normal); }
 .mva-ck-refresh svg { width: 14px; height: 14px; }
 
-.mva-ck-attention { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-.mva-ck-att { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-s);
-  border: 1px solid var(--background-modifier-border); cursor: pointer; font-size: var(--font-ui-small); }
-.mva-ck-att:hover { border-color: var(--background-modifier-border-hover); }
-.mva-ck-att-icon svg { width: 14px; height: 14px; }
-.mva-ck-att.is-blocked .mva-ck-att-icon { color: var(--mva-caution); }
-.mva-ck-att.is-pulse .mva-ck-att-icon { color: var(--text-accent); }
-.mva-ck-att.is-streaming .mva-ck-att-icon { color: var(--interactive-accent); }
-.mva-ck-att.is-answer .mva-ck-att-icon { color: var(--mva-ok); }
+.mva-ck-inbox { margin-bottom: 12px; }
 
 .mva-ck-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .mva-ck-input { flex: 1; background: transparent; border: 1px solid var(--background-modifier-border);
@@ -5660,7 +5652,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* The empty half of that pair whispers; the loading half keeps body weight. */
 .mva-proposals-empty { color: var(--text-faint); font-size: var(--font-ui-smaller, 12px); }
 .mva-proposals-empty-icon svg { width: 16px; height: 16px; }
-.mva-ck-att.is-proposal .mva-ck-att-icon { color: var(--text-accent); }
 
 @media (max-width: 600px) {
   .mva-proposals-layout { grid-template-columns: 1fr; max-height: 76vh; }

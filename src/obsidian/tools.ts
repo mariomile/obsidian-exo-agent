@@ -18,7 +18,7 @@ import {
 import { WriteQueue } from "../core/write-queue";
 import { EXO_CALLER, type AgentCaller } from "../core/agent-runs";
 import { patchFrontmatter } from "../core/frontmatter-patch";
-import { unreviewedWriteRuns } from "../core/automations";
+import { groupUnreviewedRuns } from "../core/inbox";
 import { parseDuration, formatDuration } from "../core/agents";
 import {
   automationRunKeysIn,
@@ -1104,7 +1104,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       const exo = getExo(app);
       if (!exo) return ok("Exo plugin not reachable.");
       const runs = await exo.loadAutomationRuns();
-      const target = args.id ? runs.find((r) => r.id === args.id) : unreviewedWriteRuns(runs)[0];
+      const target = args.id ? runs.find((r) => r.id === args.id) : groupUnreviewedRuns(runs)[0]?.runs[0];
       if (!target) return ok(args.id ? `No run with id "${args.id}".` : "No unreviewed write runs.");
       if (args.action === "reviewed") {
         await exo.markAutomationRunsReviewed([target.id]);

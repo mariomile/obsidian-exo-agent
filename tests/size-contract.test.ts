@@ -102,7 +102,9 @@ const CEILINGS: Record<string, number> = {
   // righe reali, tetto 2828.
   // Abbassato il 2026-10-24 (Release 2, seen watermark): `liveAttention`
   // cancellato. 2823 -> 2819 righe reali, tetto 2824.
-  "src/main.ts": 2824,
+  // Abbassato il 2026-10-24 (Release 2, Cockpit): `openConvo` cancellato con
+  // il riquadro Resume che lo usava. 2823 -> 2815 righe reali, tetto 2820.
+  "src/main.ts": 2820,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza
@@ -202,7 +204,9 @@ const CEILINGS: Record<string, number> = {
   // vecchia coda. 6507 -> 6502 righe reali, tetto 6507.
   // Abbassato il 2026-10-24 (Release 2, Inbox): la striscia needs-you lascia il
   // posto alle regole compatte `.mva-inbox-*`. 6502 -> 6487 righe reali, tetto 6492.
-  "styles.css": 6492,
+  // Abbassato il 2026-10-24 (Release 2, Cockpit): la striscia attention del
+  // Cockpit lascia il posto al pannello Inbox. 6487 -> 6478 righe reali, tetto 6483.
+  "styles.css": 6483,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel
