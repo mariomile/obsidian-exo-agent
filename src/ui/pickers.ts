@@ -3,7 +3,7 @@
  * rather than in main.ts because they are self-contained modals with no plugin
  * state: main.ts is at its size ceiling and every new command needs the budget.
  */
-import { App, FuzzySuggestModal } from "obsidian";
+import { App, FuzzySuggestModal, type TFile } from "obsidian";
 import type { AgentDef } from "../core/agents";
 import { writeModeFor } from "../core/agent-runs";
 
@@ -46,5 +46,25 @@ export class PlaybookPicker extends FuzzySuggestModal<{ name: string; prompt: st
   }
   onChooseItem(p: { name: string; prompt: string }): void {
     this.onPick(p);
+  }
+}
+
+/** "Choose note..." in the save panel: any markdown note in the vault. */
+export class NotePicker extends FuzzySuggestModal<TFile> {
+  constructor(
+    app: App,
+    private onPick: (path: string) => void
+  ) {
+    super(app);
+    this.setPlaceholder("Choose a note to save into...");
+  }
+  getItems(): TFile[] {
+    return this.app.vault.getMarkdownFiles();
+  }
+  getItemText(f: TFile): string {
+    return f.path;
+  }
+  onChooseItem(f: TFile): void {
+    this.onPick(f.path);
   }
 }

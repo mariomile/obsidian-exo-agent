@@ -69,7 +69,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 3, save_to_note): `flashIcon` vive in
   // `ui/dom.ts`, la ricevuta del salvataggio in `ui/save-receipt.ts`.
   // 5946 -> 5939 righe reali, tetto 5939.
-  "src/view.ts": 5939,
+  // Abbassato il 2026-10-24 (Release 3, Save to note): `insertIntoNote` e il
+  // suo bottone cancellati, il pannello vive in `ui/save-panel.ts`.
+  // 5939 -> 5929 righe reali, tetto 5929.
+  "src/view.ts": 5929,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460

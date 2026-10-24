@@ -61,6 +61,7 @@ import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
 import { clickable, flashIcon } from "./ui/dom";
 import { mountSaveReceipt } from "./ui/save-receipt";
+import { bindSaveToNote } from "./ui/save-panel";
 import { swapTailChild } from "./ui/tail-child";
 import { mountFileUiPreview, renderChatMarkdown, UI_PREVIEW_PROMPT } from "./obsidian/ui-previews";
 import { disposeTranscriptPreviews } from "./obsidian/preview-lifecycle";
@@ -3145,9 +3146,9 @@ export class ChatView extends ItemView {
       flashIcon(copy, "check", "copy");
     };
 
-    const insert = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Insert into note" } });
-    setIcon(insert, "file-down");
-    insert.onclick = () => void this.insertIntoNote(text, insert);
+    const save = bar.createSpan({ cls: "mva-act", attr: { "aria-label": "Save to note" } });
+    setIcon(save, "file-down");
+    bindSaveToNote(save, this.app, this.plugin.noteSaves, turnEl, text, convo ?? this.active, (p) => this.relPath(p));
 
     if (retryText) {
       const retry = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Retry" } });
@@ -3454,17 +3455,6 @@ export class ChatView extends ItemView {
     } catch {
       new Notice(`Couldn't revert ${noteBasename(path)}.`);
     }
-  }
-
-  private async insertIntoNote(text: string, btn: HTMLElement): Promise<void> {
-    const f = this.app.workspace.getActiveFile();
-    if (!f) {
-      new Notice("Open a note first to insert into it.");
-      return;
-    }
-    await this.app.vault.append(f, `\n\n${text}\n`);
-    new Notice(`Inserted into ${f.basename}`);
-    flashIcon(btn, "check", "file-down");
   }
 
   private openNote(path: string): void {
