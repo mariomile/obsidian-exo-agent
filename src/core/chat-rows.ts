@@ -5,7 +5,7 @@
  * `session-cards.ts`.
  *
  * The default view is T3 Code's thread inbox (core/thread-lifecycle): what
- * you pinned, the inbox of everything not put away, then the Snoozed and
+ * you pinned, Active (everything not put away), then the Snoozed and
  * Settled shelves. What needs you also gets the needs-you strip. A date
  * bucket answers "when did I touch this", which is a question you ask
  * occasionally; the sidebar's standing question is "what is my situation", and
@@ -130,7 +130,7 @@ export interface ChatRow {
   shelf: Shelf;
   /** Wake time, present only on the Snoozed shelf. */
   snoozedUntil?: number;
-  /** When the row last came back to the user: the inbox sort key. */
+  /** When the row last came back to the user: the Active sort key. */
   returnedAt?: number;
   /** When it went onto the Settled shelf by hand: that shelf's sort key. */
   settledAt?: number;
@@ -141,7 +141,7 @@ export interface ChatRow {
 /**
  * How the list is carved up.
  *
- *  - `activity` — T3's inbox: pinned, inbox, snoozed, settled. Answers "what
+ *  - `activity` — T3's inbox: pinned, active, snoozed, settled. Answers "what
  *    is my situation".
  *  - `days` — pure chronology by last message, with no promotion at all.
  *    Answers "what did I do on Tuesday", which the activity view cannot: there,
@@ -164,7 +164,7 @@ export type ChatListMode = "activity" | "days";
  */
 export type ChatSectionKey =
   | "pinned"
-  | "inbox"
+  | "active"
   | "snoozed"
   | "settled"
   | "related"
@@ -183,7 +183,7 @@ export interface ChatListVM {
    * rather than named fields: the renderer's job is to iterate and paint, and
    * a fixed set of fields would make each new section a change in three files.
    *
-   * In `activity` mode: `pinned`, `inbox`, `snoozed`, `settled`.
+   * In `activity` mode: `pinned`, `active`, `snoozed`, `settled`.
    * In `days` mode: one `day:` section per non-empty bucket, in time order.
    * Either way `related` comes last when a semantic pass supplied hits — rows
    * that do NOT contain what you typed, which is why they are a section of
@@ -216,7 +216,7 @@ export interface ChatListVM {
  *  (core/thread-lifecycle). Which shelf a row lands on is `shelfOf`'s call. */
 const ACTIVITY_SECTIONS = [
   ["pinned", "Pinned"],
-  ["inbox", "Inbox"],
+  ["active", "Active"],
   ["snoozed", "Snoozed"],
   ["settled", "Settled"],
 ] as const satisfies readonly (readonly [ChatSectionKey, string])[];
@@ -322,7 +322,7 @@ const byRecency = (a: ChatRow, b: ChatRow): number => (b.updatedAt ?? 0) - (a.up
 const bySoonestWake = (a: ChatRow, b: ChatRow): number =>
   (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0);
 
-/** Inbox order: newest RETURN first, the last time the chat came back to the
+/** Active order: newest RETURN first, the last time the chat came back to the
  *  user. A row that wakes from a snooze keeps its place; the woke marker
  *  carries the signal, as in T3. */
 const byReturn = (a: ChatRow, b: ChatRow): number => (b.returnedAt ?? 0) - (a.returnedAt ?? 0);
@@ -334,7 +334,7 @@ const bySettled = (a: ChatRow, b: ChatRow): number =>
 
 /** Per-section ordering; anything unlisted is plain recency. */
 const SECTION_SORT: Partial<Record<ActivityKey, (a: ChatRow, b: ChatRow) => number>> = {
-  inbox: byReturn,
+  active: byReturn,
   snoozed: bySoonestWake,
   settled: bySettled,
 };
@@ -350,7 +350,7 @@ function toRow(s: ChatRowSource): ChatRow {
     pinned: s.pinned,
     unseen: s.unseen,
     messageCount: s.messageCount,
-    shelf: "inbox",
+    shelf: "active",
   };
   if (s.updatedAt !== undefined) row.updatedAt = s.updatedAt;
   return row;

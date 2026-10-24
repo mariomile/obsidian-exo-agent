@@ -164,9 +164,9 @@ export class GalleryView {
       const n = this.view.retentionCandidateIds.length;
       banner.createSpan({
         cls: "mva-gallery-retention-text",
-        text: `La cronologia ha superato il budget. ${n} conversazion${n === 1 ? "e" : "i"} tra le più vecchie possono essere eliminate.`,
+        text: `History is over budget. ${n} of the oldest chat${n === 1 ? "" : "s"} can be deleted.`,
       });
-      const act = banner.createSpan({ cls: "mva-gallery-retention-act", text: "Seleziona" });
+      const act = banner.createSpan({ cls: "mva-gallery-retention-act", text: "Select" });
       clickable(act, () => this.selectCandidates());
     }
 

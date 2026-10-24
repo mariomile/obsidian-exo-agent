@@ -115,11 +115,11 @@ describe("chats sidebar: the Snoozed shelf", () => {
   const snoozed = (id: string, until: number, over: Partial<ChatRowSource> = {}) =>
     src({ id, snoozedUntil: until, snoozedAt: NOON - HOUR / 2, ...over });
 
-  it("files a snoozed chat on its own shelf below the inbox, soonest wake first", () => {
+  it("files a snoozed chat on its own shelf below Active, soonest wake first", () => {
     expect(
       keysOf([src({ id: "rest" }), snoozed("late", NOON + 5 * HOUR), snoozed("soon", NOON + HOUR)]),
     ).toEqual([
-      ["inbox", ["rest"]],
+      ["active", ["rest"]],
       ["snoozed", ["soon", "late"]],
     ]);
   });
@@ -140,7 +140,7 @@ describe("chats sidebar: the Snoozed shelf", () => {
   });
 
   it("never hides the chat in front of you", () => {
-    expect(keysOf([snoozed("x", NOON + HOUR, { focused: true })])).toEqual([["inbox", ["x"]]]);
+    expect(keysOf([snoozed("x", NOON + HOUR, { focused: true })])).toEqual([["active", ["x"]]]);
   });
 
   it("marks a chat that woke since you last looked, and clears on a visit", () => {
@@ -150,8 +150,8 @@ describe("chats sidebar: the Snoozed shelf", () => {
     expect(buildChatList([seen], { query: "", now: NOON }).sections[0].items[0].unseen).toBe(false);
   });
 
-  it("puts it back in the inbox once the wake time passes", () => {
-    expect(keysOf([snoozed("x", NOON + HOUR)], NOON + 2 * HOUR)).toEqual([["inbox", ["x"]]]);
+  it("puts it back in Active once the wake time passes", () => {
+    expect(keysOf([snoozed("x", NOON + HOUR)], NOON + 2 * HOUR)).toEqual([["active", ["x"]]]);
   });
 
   it("never hides a chat blocked on the user", () => {
@@ -159,7 +159,7 @@ describe("chats sidebar: the Snoozed shelf", () => {
       [snoozed("x", NOON + HOUR, { streaming: true, pendingPerm: true })],
       { query: "", now: NOON },
     );
-    expect(vm.sections.map((s) => s.key)).toEqual(["inbox"]);
+    expect(vm.sections.map((s) => s.key)).toEqual(["active"]);
     expect(vm.blocked.map((r) => r.id)).toEqual(["x"]);
   });
 
@@ -222,11 +222,11 @@ describe("settle", () => {
     expect(canSettleThread({ streaming: false, pendingPerm: false, pendingAsk: false })).toBe(true);
   });
 
-  it("pins over everything, then snooze, then settle, then the inbox", () => {
+  it("pins over everything, then snooze, then settle, then Active", () => {
     expect(shelfOf(thread({ pinned: true, updatedAt: quiet }), NOON)).toBe("pinned");
     expect(shelfOf(thread({ snoozedUntil: NOON + HOUR, snoozedAt: NOON, updatedAt: quiet }), NOON)).toBe("snoozed");
     expect(shelfOf(thread({ updatedAt: quiet }), NOON)).toBe("settled");
-    expect(shelfOf(thread(), NOON)).toBe("inbox");
+    expect(shelfOf(thread(), NOON)).toBe("active");
   });
 
   it("writes a snooze that replaces a settle, and a settle that clears a snooze", () => {
@@ -235,9 +235,9 @@ describe("settle", () => {
     expect(lifecycleWrites.unsettle(NOON)).toMatchObject({ settledOverride: "active", unsettledAt: NOON });
   });
 
-  it("comes back to the inbox after a snooze wakes, instead of falling straight onto the shelf", () => {
+  it("comes back to Active after a snooze wakes, instead of falling straight onto the shelf", () => {
     const woke = thread({ updatedAt: quiet, snoozedUntil: NOON - HOUR, snoozedAt: quiet });
-    expect(shelfOf(woke, NOON)).toBe("inbox");
+    expect(shelfOf(woke, NOON)).toBe("active");
   });
 });
 
@@ -276,11 +276,11 @@ describe("planProgress", () => {
 });
 
 describe("chats sidebar: an errored chat is never folded away", () => {
-  it("keeps an errored chat in the inbox beside a settled one", () => {
+  it("keeps an errored chat in Active beside a settled one", () => {
     const quiet = src({ id: "p", updatedAt: NOON - 4 * DAY });
     const errored = src({ id: "c", poisoned: true });
     expect(keysOf([quiet, errored])).toEqual([
-      ["inbox", ["c"]],
+      ["active", ["c"]],
       ["settled", ["p"]],
     ]);
   });
@@ -294,13 +294,13 @@ describe("auto-settle setting", () => {
     expect(autoSettleMs(NaN)).toBeNull();
   });
 
-  it("is honoured by the sidebar: off keeps old chats in the inbox, 7 days waits longer", () => {
+  it("is honoured by the sidebar: off keeps old chats in Active, 7 days waits longer", () => {
     const old = src({ id: "old", updatedAt: NOON - 4 * DAY });
     const at = (autoSettleDays?: number) =>
       buildChatList([old], { query: "", now: NOON, autoSettleDays }).sections.map((x) => x.key);
     expect(at()).toEqual(["settled"]);
-    expect(at(0)).toEqual(["inbox"]);
-    expect(at(7)).toEqual(["inbox"]);
+    expect(at(0)).toEqual(["active"]);
+    expect(at(7)).toEqual(["active"]);
     expect(at(1)).toEqual(["settled"]);
   });
 

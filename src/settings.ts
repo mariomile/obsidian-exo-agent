@@ -224,8 +224,8 @@ export class MVASettingTab extends PluginSettingTab {
 
     this.toggleSetting(
       el,
-      "Generate chat titles with AI (Haiku)",
-      "After the first reply, rename the tab to a concise 3-6 word summary using Claude Haiku; off keeps the truncated first message.",
+      "Generate chat titles with AI",
+      "After the first reply, rename the tab to a concise 3-6 word summary using a fast model; off keeps the truncated first message.",
       "aiTitles"
     );
     this.toggleSetting(
@@ -253,7 +253,7 @@ export class MVASettingTab extends PluginSettingTab {
       "debugContext"
     );
     new Setting(el)
-      .setName("Connections")
+      .setName("Unlinked mentions")
       .setDesc(
         "Surfaces the other notes you mention in a note's text but haven't linked yet — the graph work Obsidian's native pane leaves to you — and lets you wire them with one click, right where you're reading."
       )
@@ -371,8 +371,8 @@ export class MVASettingTab extends PluginSettingTab {
     );
     this.toggleSetting(
       el,
-      "Remember 'Always allow' across sessions",
-      "When you pick 'Always allow' on a permission card, also save it as an allow rule below so it survives a reload.",
+      "Make 'Always allow' apply to every chat",
+      "When on, 'Always allow' saves an allow rule below, so it covers every chat and survives a reload.",
       "rememberAlwaysAllow"
     );
 
@@ -511,7 +511,7 @@ export class MVASettingTab extends PluginSettingTab {
 
     this.toggleSetting(
       el,
-      "Suggestion inbox",
+      "Suggestions",
       "Open loops and decisions are recorded directly and can be reviewed afterwards; tasks and playbooks wait in the inbox until you accept or dismiss them. Turning this off hides the inbox and stops all proposal routing without deleting retained suggestions.",
       "proposalKernelEnabled"
     );
@@ -551,7 +551,7 @@ export class MVASettingTab extends PluginSettingTab {
     new Setting(el)
       .setName("Background AI model")
       .setDesc(
-        "Model used by background LLM passes (automatic memory and the other background passes). Floor is Sonnet: Haiku is never offered here."
+        "Model used by background LLM passes (automatic memory and the other background passes). Floor is Sonnet."
       )
       .addDropdown((d) => {
         for (const o of BACKGROUND_MODEL_OPTIONS) d.addOption(o.id, o.label);
@@ -629,9 +629,9 @@ export class MVASettingTab extends PluginSettingTab {
       );
 
     new Setting(el)
-      .setName("Exo Queue — Exo in tasca")
+      .setName("Exo Queue")
       .setDesc(
-        "Il desktop evade le note-richiesta scritte (dal telefono, via Obsidian Sync) nella cartella coda: esegue il corpo della nota headless e READ-ONLY e appende la risposta nella stessa nota, che sincronizza indietro. Poll ogni 60s."
+        "Answers request notes synced from your phone into the queue folder. Runs each note read-only and appends the reply to the same note. Checks every 60s."
       )
       .addToggle((t) =>
         t.setValue(s.exoQueueEnabled).onChange(async (v) => {
@@ -806,15 +806,15 @@ export class MVASettingTab extends PluginSettingTab {
     const path = ".mcp.json";
     const s = this.plugin.settings;
 
-    // Primary path: manage MCP in the Connections pane.
+    // Primary path: manage MCP in the Capabilities hub.
     new Setting(root)
-      .setName("Manage MCP servers in Connections")
+      .setName("MCP servers live in Capabilities")
       .setDesc("Add, edit, enable/disable, remove, reconnect, and re-authenticate servers live — plus one-tap import of what other tools already have.")
       .addButton((b) =>
         b
-          .setButtonText("Open Connections")
+          .setButtonText("Open Capabilities")
           .setCta()
-          .onClick(() => void this.plugin.activateConnections())
+          .onClick(() => void this.plugin.activateHub())
       );
 
     // Fast-startup gate: external MCP is skipped entirely while it's on. Say it

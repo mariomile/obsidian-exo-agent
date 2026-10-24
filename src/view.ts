@@ -2297,7 +2297,7 @@ export class ChatView extends ItemView {
     // so the bulk bar never announces more conversations than it can actually
     // delete.
     if (this.gallery.gallerySelection.delete(c.id)) this.gallery.renderBulkBar();
-    // ...and out of the retention proposal, which the banner's "Seleziona" reads
+    // ...and out of the retention proposal, which the banner's "Select" reads
     // straight into a selection. Left in, a dangling id would make the bar
     // over-report and the delete under-deliver.
     this.retentionCandidateIds = this.retentionCandidateIds.filter((x) => x !== c.id);
@@ -3904,8 +3904,9 @@ export class ChatView extends ItemView {
         : WRITE_TOOLS.test(tool) && toolFilePath(tool, input)
           ? `edits to this file`
           : `this tool`;
-    alwaysBtn.setAttr("aria-label", `Always allow ${scope} in this conversation`);
-    alwaysBtn.setAttr("title", `Always allow ${scope} in this conversation`);
+    const where = this.plugin.settings.rememberAlwaysAllow ? "in every chat (saved to settings)" : "in this conversation";
+    alwaysBtn.setAttr("aria-label", `Always allow ${scope} ${where}`);
+    alwaysBtn.setAttr("title", `Always allow ${scope} ${where}`);
     alwaysBtn.onclick = () => {
       c.allow.add(allowKey(tool, input));
       // Durable across sessions when enabled: append the equivalent rule line.

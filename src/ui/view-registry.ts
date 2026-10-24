@@ -54,10 +54,6 @@ export async function activateHub(plugin: ExoPlugin, tab?: HubTab): Promise<void
   if (tab && leaf?.view instanceof HubView) leaf.view.showTab(tab);
 }
 
-export async function activateConnections(plugin: ExoPlugin): Promise<void> {
-  await activateHub(plugin);
-}
-
 export async function activateAgents(plugin: ExoPlugin): Promise<void> {
   await activateInMain(plugin, AGENTS_VIEW_TYPE);
 }

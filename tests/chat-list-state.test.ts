@@ -48,31 +48,31 @@ describe("section collapse", () => {
   it("treats absent state as expanded", () => {
     // The no-migration guarantee: an install that never toggled anything opens
     // exactly as it did before the feature landed.
-    expect(isSectionCollapsed(undefined, "inbox")).toBe(false);
-    expect(isSectionCollapsed([], "inbox")).toBe(false);
+    expect(isSectionCollapsed(undefined, "active")).toBe(false);
+    expect(isSectionCollapsed([], "active")).toBe(false);
     expect(isSectionCollapsed([], "pinned")).toBe(false);
   });
 
   it("opens every section while searching, shelves included", () => {
     expect(isSectionCollapsed(undefined, "settled")).toBe(true);
     expect(isSectionCollapsed(undefined, "settled", true)).toBe(false);
-    expect(isSectionCollapsed(["inbox"], "inbox", true)).toBe(false);
+    expect(isSectionCollapsed(["active"], "active", true)).toBe(false);
   });
 
   it("reads a collapsed key back", () => {
-    expect(isSectionCollapsed(["inbox"], "inbox")).toBe(true);
-    expect(isSectionCollapsed(["inbox"], "pinned")).toBe(false);
+    expect(isSectionCollapsed(["active"], "active")).toBe(true);
+    expect(isSectionCollapsed(["active"], "pinned")).toBe(false);
   });
 
   it("collapses by appending and expands by removing", () => {
-    expect(toggleSectionCollapsed([], "inbox")).toEqual(["inbox"]);
-    expect(toggleSectionCollapsed(["inbox"], "inbox")).toEqual([]);
+    expect(toggleSectionCollapsed([], "active")).toEqual(["active"]);
+    expect(toggleSectionCollapsed(["active"], "active")).toEqual([]);
     expect(toggleSectionCollapsed(undefined, "pinned")).toEqual(["pinned"]);
   });
 
   it("leaves the other sections alone", () => {
-    expect(toggleSectionCollapsed(["pinned", "inbox"], "pinned")).toEqual(["inbox"]);
-    expect(toggleSectionCollapsed(["pinned"], "inbox")).toEqual(["pinned", "inbox"]);
+    expect(toggleSectionCollapsed(["pinned", "active"], "pinned")).toEqual(["active"]);
+    expect(toggleSectionCollapsed(["pinned"], "active")).toEqual(["pinned", "active"]);
   });
 
   it("round-trips a day-mode key", () => {
@@ -86,10 +86,10 @@ describe("section collapse", () => {
   it("never mutates the list it was given", () => {
     // The caller persists the RESULT; mutating in place would leave memory
     // ahead of disk the moment a save fails.
-    const before: string[] = ["inbox"];
+    const before: string[] = ["active"];
     toggleSectionCollapsed(before, "pinned");
-    toggleSectionCollapsed(before, "inbox");
-    expect(before).toEqual(["inbox"]);
+    toggleSectionCollapsed(before, "active");
+    expect(before).toEqual(["active"]);
   });
 
   /**
@@ -110,11 +110,11 @@ describe("section collapse", () => {
     });
 
     it("keep their state independent of each other and of the other sections", () => {
-      const opened = toggleSectionCollapsed(["inbox"], "snoozed");
-      expect(opened).toEqual(["inbox", "expanded:snoozed"]);
+      const opened = toggleSectionCollapsed(["active"], "snoozed");
+      expect(opened).toEqual(["active", "expanded:snoozed"]);
       expect(isSectionCollapsed(opened, "snoozed")).toBe(false);
       expect(isSectionCollapsed(opened, "settled")).toBe(true);
-      expect(isSectionCollapsed(opened, "inbox")).toBe(true);
+      expect(isSectionCollapsed(opened, "active")).toBe(true);
     });
 
     it("are not folded by a bare key: only the expanded token counts", () => {

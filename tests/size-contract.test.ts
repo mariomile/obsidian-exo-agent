@@ -94,7 +94,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): wiring del
   // ledger, del driver e della board cancellato. 3036 -> 2828 righe reali,
   // tetto 2833.
-  "src/main.ts": 2833,
+  // Abbassato il 2026-10-24 (Release 2, rinomine): l'alias
+  // `activateConnections` e' cancellato, si usa `activateHub()`. 2828 -> 2823
+  // righe reali, tetto 2828.
+  "src/main.ts": 2828,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza

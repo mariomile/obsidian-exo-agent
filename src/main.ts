@@ -14,7 +14,6 @@ import {
   registerExoViews,
   activateView as activateChatView,
   activateHub as activateHubView,
-  activateConnections as activateConnectionsView,
   activateAgents as activateAgentsView,
   activateChats as activateChatsView,
 } from "./ui/view-registry";
@@ -407,12 +406,12 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     ]);
 
     this.addRibbonIcon(EXO_ICON, "Open Exo", () => this.activateView());
-    // Cockpit + Connections are reached from the Exo header's Apps menu, not a
+    // Cockpit + Capabilities are reached from the Exo header's Apps menu, not a
     // global ribbon icon (Mario: "solo in Exo"). Commands stay for the palette.
 
     this.addCommand({
       id: "review-connections",
-      name: "Review connections of the active note",
+      name: "Review unlinked mentions in the active note",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file) return false;
@@ -435,8 +434,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
     this.addCommand({
       id: "open-connections",
-      name: "Open Connections",
-      callback: () => void this.activateConnections(),
+      name: "Open Capabilities",
+      callback: () => void this.activateHub(),
     });
 
     // Paste-ready turn-lifecycle diagnostics (names/kinds/counts only — never
@@ -725,10 +724,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   async activateHub(tab?: HubTab): Promise<void> {
     await activateHubView(this, tab);
-  }
-
-  async activateConnections(): Promise<void> {
-    await activateConnectionsView(this);
   }
 
   async activateAgents(): Promise<void> {
@@ -1968,21 +1963,21 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   async acceptProposal(id: string): Promise<ProposalAcceptResult> {
-    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestion inbox is disabled.");
+    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestions are off.");
     const result = await this.proposalStore.accept(id);
     void this.refreshCockpit();
     return result;
   }
 
   async dismissProposal(id: string) {
-    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestion inbox is disabled.");
+    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestions are off.");
     const record = await this.proposalStore.dismiss(id);
     void this.refreshCockpit();
     return record;
   }
 
   async updateProposalPlaybook(id: string, patch: { name: string; prompt: string }) {
-    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestion inbox is disabled.");
+    if (!this.settings.proposalKernelEnabled) throw new Error("Suggestions are off.");
     return this.proposalStore.updatePendingPlaybook(id, patch);
   }
 

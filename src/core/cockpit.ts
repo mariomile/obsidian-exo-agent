@@ -82,7 +82,7 @@ export function loopRows(loops: LoopEntry[], now: number, cap = 6): CockpitRow[]
     label: l.title,
     sub: formatAge(l.openedAt, now, ""),
     ...(due.has(l.id) ? { badge: "due" } : {}),
-    action: { kind: "ask", arg: `Chiudiamo questo loop: ${l.title}` },
+    action: { kind: "ask", arg: `Let's close this loop: ${l.title}` },
   }));
 }
 
@@ -149,7 +149,7 @@ export function healthRows(h: HealthInput): CockpitRow[] {
   const rows: CockpitRow[] = [];
   if (h.inboxCount > 0) {
     rows.push({
-      label: "Inbox to triage",
+      label: "Notes to triage",
       badge: String(h.inboxCount),
       action: { kind: "ask", arg: "/inbox-triage" },
     });
@@ -161,7 +161,7 @@ export function healthRows(h: HealthInput): CockpitRow[] {
       badge: `${Math.floor(ageDays)}d`,
       action: {
         kind: "ask",
-        arg: `Rinfreschiamo ${path}: è stale. Rileggi lo stato attuale e proponi gli aggiornamenti.`,
+        arg: `Let's refresh ${path}: it is stale. Reread its current state and propose updates.`,
       },
     });
   }

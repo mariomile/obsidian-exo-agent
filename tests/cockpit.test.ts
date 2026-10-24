@@ -58,7 +58,7 @@ describe("loopRows", () => {
     expect(rows.map((r) => r.label)).toEqual(["now", "later"]);
     expect(rows[0].badge).toBe("due");
     expect(rows[1].badge).toBeUndefined();
-    expect(rows[0].action).toEqual({ kind: "ask", arg: "Chiudiamo questo loop: now" });
+    expect(rows[0].action).toEqual({ kind: "ask", arg: "Let's close this loop: now" });
   });
 
   it("caps the list", () => {
