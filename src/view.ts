@@ -4640,7 +4640,7 @@ export class ChatView extends ItemView {
     // You always want to watch your own message land.
     this.pinnedToBottom = true;
     this.updateJumpPill();
-    if (c.streaming) {
+    if (c.streaming || c.turnClaimed) { // claimed = the turn is still waiting on recall
       // Mid-turn behavior. Default (steerMode "queue") always enqueues so the
       // message starts as the next turn. Opt-in "steer" injects into the live
       // turn when nothing the message carries would be lost (core/queue

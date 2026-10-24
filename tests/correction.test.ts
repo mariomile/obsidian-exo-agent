@@ -87,6 +87,12 @@ describe("planCorrection: frontmatter", () => {
     expect(planCorrection(note.replace("status: active\n", ""), { type: "frontmatter", set, before }, META)).toEqual({ error: "stale" });
   });
 
+  it("accepts a key whose raw lines end in a blank line, as the validator trims `before`", () => {
+    const spaced = "---\nstatus: active\nsuperseded_by: \"[[A]]\"\n\ntags:\n  - vault\n---\nBody.\n";
+    const r = planCorrection(spaced, { type: "frontmatter", set, before: { status: "status: active", superseded_by: "superseded_by: \"[[A]]\"" } }, META);
+    expect("error" in r ? r.error : "ok").toBe("ok");
+  });
+
   it("keeps CRLF line endings", () => {
     const crlf = note.replace(/\n/g, "\r\n");
     const { next, receipt } = done(planCorrection(crlf, { type: "frontmatter", set, before }, META));
