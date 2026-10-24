@@ -31,6 +31,12 @@ export function listChatRows(app: App): ChatRowSource[] | null {
   return chatView(app)?.listChatRows() ?? null;
 }
 
+/** Open a chat at a message (an `exo-chat` link). False when Exo is not
+ *  mounted or the chat is gone. */
+export function openChatAt(app: App, convoId: string, msgIndex: number | null): boolean {
+  return chatView(app)?.openConvoById(convoId, msgIndex) ?? false;
+}
+
 export function renameConversation(app: App, convoId: string, title: string): boolean {
   return chatView(app)?.renameConversation(convoId, title) ?? false;
 }

@@ -11,6 +11,7 @@
  */
 import { chatLines, type ChatLine, type ChatMessage } from "./recent-chats";
 import type { ExoPaths } from "./paths";
+import { headingsOf, inFence, protectedLines } from "./save-target";
 
 /* ------------------------------ scheduling ------------------------------ */
 
@@ -228,10 +229,7 @@ export function explicitRulePaths(rules: string): string[] {
 
 /** Heading texts of a note, in order. */
 export function noteHeadings(content: string): string[] {
-  return content
-    .split("\n")
-    .filter((l) => /^#{1,6}\s/.test(l))
-    .map((l) => l.trim());
+  return headingsOf(content.split("\n")).map((h) => `${"#".repeat(h.level)} ${h.text}`);
 }
 
 /** Content words of a statement, for picking the note lines worth showing. */
@@ -241,42 +239,6 @@ export function keywordsOf(text: string): string[] {
     if (w.length >= 4) seen.add(w);
   }
   return [...seen];
-}
-
-/**
- * Lines memory must never touch, per line index: the YAML frontmatter block,
- * fenced code, headings, table rows, horizontal rules and blank lines. `open`
- * is true when the frontmatter never closes (then nothing may be appended).
- */
-export function protectedLines(lines: readonly string[]): { locked: boolean[]; frontmatterEnd: number; open: boolean } {
-  const locked = lines.map(() => false);
-  let frontmatterEnd = -1;
-  let open = false;
-  let start = 0;
-  if (lines[0]?.trim() === "---") {
-    const close = lines.findIndex((l, i) => i > 0 && l.trim() === "---");
-    frontmatterEnd = close < 0 ? lines.length - 1 : close;
-    open = close < 0;
-    for (let i = 0; i <= frontmatterEnd; i++) locked[i] = true;
-    start = frontmatterEnd + 1;
-  }
-  let fence: string | null = null;
-  for (let i = start; i < lines.length; i++) {
-    const t = lines[i].trim();
-    const f = /^(```|~~~)/.exec(t);
-    if (fence) {
-      locked[i] = true;
-      if (f && t.startsWith(fence)) fence = null;
-      continue;
-    }
-    if (f) {
-      fence = f[1];
-      locked[i] = true;
-      continue;
-    }
-    if (!t || /^#{1,6}\s/.test(t) || t.startsWith("|") || /^(-{3,}|\*{3,}|_{3,})$/.test(t)) locked[i] = true;
-  }
-  return { locked, frontmatterEnd, open };
 }
 
 /** Text that would turn one line into structure (a heading, a table row, a
@@ -461,10 +423,10 @@ export function applyAdd(content: string, section: string | undefined, text: str
   const line = `- ${oneLine(text)}`;
   if (structural(oneLine(text))) return null;
   const lines = content.replace(/\s+$/, "").split("\n");
-  const { locked, open, frontmatterEnd } = protectedLines(lines);
+  const prot = protectedLines(lines);
+  const { open, frontmatterEnd, fenced } = prot;
   if (open) return null;
-  const heading = (i: number): boolean =>
-    i > frontmatterEnd && /^#{1,6}\s/.test(lines[i]) && !inFence(lines, locked, i, frontmatterEnd);
+  const heading = (i: number): boolean => i > frontmatterEnd && /^#{1,6}\s/.test(lines[i]) && !fenced[i];
   const want = section?.replace(/^#+\s*/, "").trim().toLowerCase();
   if (want) {
     const start = lines.findIndex((l, i) => heading(i) && l.replace(/^#+\s*/, "").trim().toLowerCase() === want);
@@ -480,7 +442,7 @@ export function applyAdd(content: string, section: string | undefined, text: str
       }
       let at = end;
       while (at > start + 1 && !lines[at - 1].trim()) at--;
-      if (!inFence(lines, locked, at, frontmatterEnd)) {
+      if (!inFence(prot, at)) {
         lines.splice(at, 0, line);
         return { content: `${lines.join("\n")}\n`, line };
       }
@@ -488,15 +450,6 @@ export function applyAdd(content: string, section: string | undefined, text: str
   }
   const body = lines.join("\n");
   return { content: `${body}${body ? "\n" : ""}${line}\n`, line };
-}
-
-/** True when index `i` sits between an opening and a closing fence. */
-function inFence(lines: readonly string[], locked: readonly boolean[], i: number, frontmatterEnd: number): boolean {
-  let fence = false;
-  for (let k = frontmatterEnd + 1; k < i && k < lines.length; k++) {
-    if (/^(```|~~~)/.test(lines[k].trim()) && locked[k]) fence = !fence;
-  }
-  return fence;
 }
 
 /** Replace the ONE plain content line equal (whitespace-trimmed) to `oldLine`

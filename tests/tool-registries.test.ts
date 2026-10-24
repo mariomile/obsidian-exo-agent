@@ -123,6 +123,10 @@ describe("obsidian tool classifier registries stay in sync with registered tools
     }
   });
 
+  it("propose_correction is never auto-allowed, so the read-only sandbox keeps it out", () => {
+    expect(OBSIDIAN_READ_TOOLS.has(`${PREFIX}propose_correction`)).toBe(false);
+  });
+
   it("every list_*/get_* tool on the server is classified read-only", () => {
     const readShaped = [...registered].filter((n) => /^(list|get)_/.test(n));
     expect(readShaped.length, "the name heuristic matched nothing — it has stopped testing anything").toBeGreaterThan(5);

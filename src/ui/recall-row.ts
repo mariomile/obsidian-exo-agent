@@ -5,10 +5,14 @@ import type { TurnRecall } from "../obsidian/turn-recall";
 /**
  * Quiet, expandable "Recalled N" row under a user turn: the trust surface for
  * per-turn recall, so an injection is never invisible. Collapsed by default;
- * a click lists what rode along (note paths open on click, past chats show
- * title and date). No fill at rest (design laws 2 & 4).
+ * a click lists what rode along; every item opens at its source (a note at its
+ * path, a past chat at the matching message). No fill at rest (design laws 2 & 4).
  */
-export function renderRecallRow(turnEl: HTMLElement, recall: TurnRecall, openPath: (path: string) => void): void {
+export function renderRecallRow(
+  turnEl: HTMLElement,
+  recall: TurnRecall,
+  open: { openPath: (path: string) => void; openChat: (id: string, msgIndex: number | null) => void },
+): void {
   const n = recall.notes.length + recall.chats.length;
   const wrap = turnEl.createDiv({ cls: "mva-recall" });
   const header = wrap.createDiv({ cls: "mva-recall-header", attr: { role: "button", tabindex: "0" } });
@@ -17,19 +21,31 @@ export function renderRecallRow(turnEl: HTMLElement, recall: TurnRecall, openPat
   setIcon(header.createSpan({ cls: "mva-recall-caret" }), "chevron-right");
 
   const list = wrap.createDiv({ cls: "mva-recall-list" });
-  for (const note of recall.notes) {
-    const item = list.createDiv({ cls: "mva-recall-item" });
-    item.createSpan({ cls: "mva-recall-meta", text: "note" });
-    const link = item.createEl("a", { cls: "mva-recall-text", text: note.path, href: "#" });
+  const noteLink = (item: HTMLElement, text: string, path: string): void => {
+    const link = item.createEl("a", { cls: "mva-recall-text", text, href: "#" });
     clickable(link, (e) => {
       e.preventDefault();
-      openPath(note.path);
+      open.openPath(path);
     });
+  };
+  for (const note of recall.notes) {
+    const item = list.createDiv({ cls: "mva-recall-item" });
+    item.createSpan({ cls: "mva-recall-meta", text: note.supersededBy ? "superseded" : "note" });
+    noteLink(item, note.path, note.path);
+    // Demoted, never hidden: the old note stays, pointing at the current one.
+    if (note.supersededBy) {
+      item.createSpan({ cls: "mva-recall-meta", text: "by" });
+      noteLink(item, note.supersededBy.replace(/^.*\//, "").replace(/\.md$/, ""), note.supersededBy);
+    }
   }
   for (const chat of recall.chats) {
     const item = list.createDiv({ cls: "mva-recall-item" });
     item.createSpan({ cls: "mva-recall-meta", text: `chat · ${chat.date}` });
-    item.createSpan({ cls: "mva-recall-text", text: chat.title });
+    const link = item.createEl("a", { cls: "mva-recall-text", text: chat.title, href: "#", attr: { "aria-label": "Open chat" } });
+    clickable(link, (e) => {
+      e.preventDefault();
+      open.openChat(chat.id, chat.msgIndex);
+    });
   }
 
   const toggle = (): void => {
@@ -39,4 +55,23 @@ export function renderRecallRow(turnEl: HTMLElement, recall: TurnRecall, openPat
   };
   header.setAttr("aria-expanded", "false");
   clickable(header, toggle);
+}
+
+/**
+ * Send order for one turn: render the user bubble, then start recall, then hang
+ * the "Recalled N" row under the bubble when recall resolves. The bubble never
+ * waits on recall (Sonar plus the semantic lane can take a second or more); the
+ * prompt still does, so the caller gets the recall back for its block.
+ * `bubble` returns null when the turn reuses an existing bubble; `recall`
+ * returns null when the turn skips recall.
+ */
+export async function bubbleThenRecall(
+  bubble: () => HTMLElement | null,
+  recall: () => Promise<TurnRecall | null> | null,
+  open: { openPath: (path: string) => void; openChat: (id: string, msgIndex: number | null) => void },
+): Promise<TurnRecall | null> {
+  const turnEl = bubble();
+  const recalled = await recall();
+  if (recalled && turnEl) renderRecallRow(turnEl, recalled, open);
+  return recalled;
 }

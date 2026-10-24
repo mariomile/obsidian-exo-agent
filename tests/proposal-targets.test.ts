@@ -234,6 +234,7 @@ describe("createProposalAcceptanceDeps", () => {
         saveSettings: async () => undefined,
       },
       noteWrite: vi.fn(),
+      corrections: { apply: vi.fn(async ({ path }) => ({ path })) },
     });
     const record = {
       id: "proposal-loop",

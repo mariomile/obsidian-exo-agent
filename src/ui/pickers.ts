@@ -3,9 +3,12 @@
  * rather than in main.ts because they are self-contained modals with no plugin
  * state: main.ts is at its size ceiling and every new command needs the budget.
  */
-import { App, FuzzySuggestModal } from "obsidian";
+import { App, FuzzySuggestModal, type TFile } from "obsidian";
 import type { AgentDef } from "../core/agents";
 import { writeModeFor } from "../core/agent-runs";
+import { relativeTime } from "../core/chat-rows";
+import { sectionLabel } from "../core/save-target";
+import type { SaveReceipt } from "../core/save-undo";
 
 export class AgentPicker extends FuzzySuggestModal<AgentDef> {
   constructor(
@@ -46,5 +49,55 @@ export class PlaybookPicker extends FuzzySuggestModal<{ name: string; prompt: st
   }
   onChooseItem(p: { name: string; prompt: string }): void {
     this.onPick(p);
+  }
+}
+
+/** "Choose note..." in the save panel: any markdown note in the vault. */
+export class NotePicker extends FuzzySuggestModal<TFile> {
+  constructor(
+    app: App,
+    private onPick: (path: string) => void
+  ) {
+    super(app);
+    this.setPlaceholder("Choose a note to save into...");
+  }
+  getItems(): TFile[] {
+    return this.app.vault.getMarkdownFiles();
+  }
+  getItemText(f: TFile): string {
+    return f.path;
+  }
+  onChooseItem(f: TFile): void {
+    this.onPick(f.path);
+  }
+}
+
+/** One save in the undo picker: `<Note> > <Section> · <age>`; an accepted
+ *  correction reads "Correction" where a save names its section. */
+export function saveLabel(r: SaveReceipt, now: number): string {
+  const note = r.path.replace(/^.*\//, "").replace(/\.md$/, "");
+  const where = r.op === "insert" ? sectionLabel(r.section) : "Correction";
+  return `${note} > ${where} · ${relativeTime(r.savedAt, now)}`;
+}
+
+/** "Undo a save to note...": the saves not undone yet, newest first. */
+export class SavePicker extends FuzzySuggestModal<SaveReceipt> {
+  private readonly now = Date.now();
+  constructor(
+    app: App,
+    private saves: SaveReceipt[],
+    private onPick: (r: SaveReceipt) => void
+  ) {
+    super(app);
+    this.setPlaceholder("Undo a save to note...");
+  }
+  getItems(): SaveReceipt[] {
+    return this.saves;
+  }
+  getItemText(r: SaveReceipt): string {
+    return saveLabel(r, this.now);
+  }
+  onChooseItem(r: SaveReceipt): void {
+    this.onPick(r);
   }
 }

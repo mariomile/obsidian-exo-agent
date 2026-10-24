@@ -9,8 +9,17 @@ import type { ChatRowSource } from "../src/core/chat-rows";
  *  what is under test is what the command does with the answer. */
 const bridge = vi.hoisted(() => ({
   settle: (): Promise<string | null> => Promise.resolve(null),
+  known: new Set<string>(),
+  opened: [] as [string, number | null][],
 }));
-vi.mock("../src/ui/convo-bridge", () => ({ settleToNote: () => bridge.settle() }));
+vi.mock("../src/ui/convo-bridge", () => ({
+  settleToNote: () => bridge.settle(),
+  openChatAt: (_app: unknown, id: string, msg: number | null) => {
+    if (!bridge.known.has(id)) return false;
+    bridge.opened.push([id, msg]);
+    return true;
+  },
+}));
 
 /** A conversation as `listChatRows` reports it; every test overrides only what
  *  it is about. */
@@ -44,14 +53,18 @@ interface Harness {
   run: (id: string) => void;
   ids: string[];
   revealed: string[];
+  protocols: Map<string, (params: Record<string, string>) => void>;
 }
 
 /** Register the commands against a stub plugin and hand back a way to fire one. */
 function harness(rows: ChatRowSource[] | null, activeId: string | null): Harness {
   const commands = new Map<string, () => void>();
+  const protocols = new Map<string, (params: Record<string, string>) => void>();
   const revealed: string[] = [];
   const plugin = {
     addCommand: (c: { id: string; callback: () => void }) => commands.set(c.id, c.callback),
+    registerObsidianProtocolHandler: (action: string, h: (params: Record<string, string>) => void) =>
+      protocols.set(action, h),
     listChatRows: () => rows,
     activeConvoId: () => activeId,
     revealConversation: (id: string) => {
@@ -67,6 +80,7 @@ function harness(rows: ChatRowSource[] | null, activeId: string | null): Harness
     run: (id) => commands.get(id)?.(),
     ids: [...commands.keys()],
     revealed,
+    protocols,
   };
 }
 
@@ -162,5 +176,40 @@ describe("the next-chat-needing-you key", () => {
     h.run("next-needs-you");
     expect(h.revealed).toEqual([]);
     expect(Notice.last).toBe("");
+  });
+});
+
+describe("the exo-chat link", () => {
+  beforeEach(() => {
+    Notice.last = "";
+    bridge.known = new Set(["c7"]);
+    bridge.opened = [];
+  });
+  const open = (params: Record<string, string>): void => {
+    const handler = harness([], null).protocols.get("exo-chat");
+    expect(handler).toBeDefined();
+    handler!({ action: "exo-chat", ...params });
+  };
+
+  it("opens the chat at the linked message", async () => {
+    open({ id: "c7", msg: "4" });
+    await vi.waitFor(() => expect(bridge.opened).toEqual([["c7", 4]]));
+    expect(Notice.last).toBe("");
+  });
+
+  it("opens the chat without a message index when the link has none", async () => {
+    open({ id: "c7" });
+    await vi.waitFor(() => expect(bridge.opened).toEqual([["c7", null]]));
+  });
+
+  it("says so when the chat no longer exists", async () => {
+    open({ id: "gone", msg: "1" });
+    await vi.waitFor(() => expect(Notice.last).toBe("Chat not found. It may have been deleted."));
+    expect(bridge.opened).toEqual([]);
+  });
+
+  it("says so for a link without an id", async () => {
+    open({ msg: "1" });
+    await vi.waitFor(() => expect(Notice.last).toBe("Chat not found. It may have been deleted."));
   });
 });

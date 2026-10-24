@@ -207,6 +207,8 @@ export interface ProposalAcceptanceTargetOptions {
   decisionsDir?: string;
   /** Called with each memory file a proposal wrote, so git autocommit covers it. */
   noteWrite: (paths: readonly string[]) => void;
+  /** Accepted corrections: obsidian/note-save `noteCorrections`. */
+  corrections: ProposalAcceptanceDeps["corrections"];
 }
 
 /** Build the exact dependency object consumed by `routeAcceptedProposal`. */
@@ -228,5 +230,6 @@ export function createProposalAcceptanceDeps(
       options.decisionsDir ?? DECISIONS_DIR
     ),
     playbooks: new PlaybookProposalTarget(options.playbooksWriteQueue, options.playbooks),
+    corrections: options.corrections,
   };
 }

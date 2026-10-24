@@ -5060,8 +5060,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-accent);
   font-weight: 600;
 }
-/* Brief highlight when a turn is jumped to from the outline. */
-.mva-user.is-flash {
+/* Brief highlight when a turn is jumped to (outline, recalled chat, exo-chat link). */
+.mva-turn.is-flash {
   animation: mva-outline-flash 1s ease-out;
 }
 @keyframes mva-outline-flash {
@@ -5082,7 +5082,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   .mva-outline-panel {
     transition: none;
   }
-  .mva-user.is-flash {
+  .mva-turn.is-flash {
     animation: none;
   }
   .mva-flash {

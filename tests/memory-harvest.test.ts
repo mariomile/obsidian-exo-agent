@@ -277,6 +277,10 @@ describe("applyAdd", () => {
     const code = "# Note\n```md\n## Work\n```\ntext\n";
     expect(applyAdd(code, "Work", "fact")?.content).toBe(`${code}- fact\n`);
   });
+  it("a ~~~ line inside a ``` block is not a fence: the section after it still counts", () => {
+    const code = "# Note\n```\n~~~\n```\n## Work\n- Designer\n\n## Other\n- x\n";
+    expect(applyAdd(code, "Work", "fact")?.content).toBe("# Note\n```\n~~~\n```\n## Work\n- Designer\n- fact\n\n## Other\n- x\n");
+  });
   it("refuses a note whose frontmatter never closes, and text that is structure", () => {
     expect(applyAdd("---\ntitle: x\n", undefined, "fact")).toBeNull();
     for (const t of ["# Heading", "| a | b |", "```js", "---"]) expect(applyAdd(note, "Work", t), t).toBeNull();

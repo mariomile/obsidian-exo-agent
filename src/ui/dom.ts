@@ -1,4 +1,5 @@
 /** Shared DOM helpers for the chat UI. */
+import { setIcon } from "obsidian";
 
 /**
  * Make a non-button element keyboard- and screen-reader-operable: role=button,
@@ -35,4 +36,14 @@ export function isolateActivation(el: HTMLElement): void {
   el.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") e.stopPropagation();
   });
+}
+
+/** Swap an icon control to `on` for a moment (a copy check), then back to `off`. */
+export function flashIcon(btn: HTMLElement, on: string, off: string): void {
+  btn.empty();
+  setIcon(btn, on);
+  window.setTimeout(() => {
+    btn.empty();
+    setIcon(btn, off);
+  }, 1200);
 }

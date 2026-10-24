@@ -49,7 +49,7 @@ import {
 } from "../core/chat-list-state";
 import { reconcileList, type CardModel } from "./keyed-reconcile";
 import { clickable, isolateActivation } from "./dom";
-import { recallChats, reindexChats, recallHost, isRecallUnavailable } from "./chat-recall";
+import { recallChats, reindexChats, recallHost, isRecallUnavailable } from "../obsidian/chat-recall";
 import { addScheduledButton } from "./scheduled-ui";
 import { mountInbox } from "./inbox-panel";
 

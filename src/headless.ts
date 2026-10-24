@@ -46,6 +46,8 @@ export interface HeadlessOpts {
   /** External MCP servers this run may load; absent = `playbookExternalTools`
    *  decides, empty = none (core/mcp-scope.ts). */
   mcp?: string[];
+  /** The automation or playbook name a headless save's provenance carries. */
+  runName?: string;
 }
 
 function vaultPath(app: App): string {
@@ -115,6 +117,7 @@ export async function runHeadlessPlaybook(
     memory: memoryCaps(settings, { surface: "headless" }),
     paths: exoPaths(settings.memoryRoot || LEGACY_MEMORY_ROOT),
     agentCaller: opts.agentCaller,
+    runName: opts.runName,
   };
 
   let session: import("./providers/types").AgentSession | null = null;

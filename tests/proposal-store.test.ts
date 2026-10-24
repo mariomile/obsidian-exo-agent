@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WriteQueue } from "../src/core/write-queue";
-import type { ProposalCandidate, ProposalRecord } from "../src/core/proposals";
+import { correctionCandidate, type ProposalCandidate, type ProposalRecord } from "../src/core/proposals";
 import {
   PROPOSALS_FILE,
   ProposalStore,
@@ -80,7 +80,7 @@ describe("ProposalStore", () => {
   it("loads a safe empty versioned store when proposals.json is absent", async () => {
     const { adapter } = fakeFiles();
     const snapshot = await new ProposalStore(adapter, new WriteQueue(), idleRoute).load();
-    expect(snapshot.data).toEqual({ version: 1, records: [], metrics: zeroMetrics });
+    expect(snapshot.data).toEqual({ version: 1, records: [], metrics: zeroMetrics, closedCorrections: [] });
     expect(snapshot.warnings).toEqual([]);
   });
 
@@ -427,6 +427,38 @@ describe("ProposalStore", () => {
 
       expect(again.status).toBe("duplicate");
       expect(route).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("closed corrections never come back", () => {
+    const fix = (path = "D/old.md"): ProposalCandidate => correctionCandidate(path, { type: "frontmatter", set: { status: "superseded" }, before: { status: "status: active" } }, "A newer note supersedes it.");
+    /** What pruning does after 30 days: the resolved record is gone from the file. */
+    const prune = (files: Map<string, string>) => {
+      const raw = JSON.parse(files.get(PROPOSALS_FILE)!) as { records: ProposalRecord[] };
+      raw.records = raw.records.filter((r) => r.status === "pending");
+      files.set(PROPOSALS_FILE, JSON.stringify(raw));
+    };
+
+    it("a dismissed correction is not re-proposed after pruning drops its record", async () => {
+      const { adapter, files } = fakeFiles();
+      const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
+      const first = await store.append(fix(), source());
+      if (first.status !== "appended") throw new Error("expected append");
+      await store.dismiss(first.record.id);
+      prune(files);
+      expect((await store.load()).data.records).toEqual([]);
+      expect((await store.append(fix(), { ...source(), turnId: "later" })).status).toBe("duplicate");
+      expect((await store.append(fix("D/other.md"), { ...source(), turnId: "later" })).status).toBe("appended");
+    });
+
+    it("an accepted correction is not re-proposed either, after pruning", async () => {
+      const { adapter, files } = fakeFiles();
+      const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
+      const first = await store.append(fix(), source());
+      if (first.status !== "appended") throw new Error("expected append");
+      expect((await store.accept(first.record.id)).ok).toBe(true);
+      prune(files);
+      expect((await store.append(fix(), { ...source(), turnId: "later" })).status).toBe("duplicate");
     });
   });
 });

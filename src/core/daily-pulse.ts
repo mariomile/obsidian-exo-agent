@@ -1,5 +1,5 @@
 /**
- * Daily Pulse — deterministic, side-effect-free view model.
+ * Daily Pulse: deterministic, side-effect-free view model.
  *
  * Collection and rendering live in the Obsidian layer. This module only turns
  * already-collected facts into a bounded set of review/open actions.
@@ -238,6 +238,7 @@ const PROPOSAL_KIND_ORDER: Record<ProposalKind, number> = {
   loop: 0,
   decision: 1,
   playbook: 2,
+  correction: 3,
 };
 
 function compareText(a: string, b: string): number {

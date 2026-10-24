@@ -1,4 +1,6 @@
 import {
+  CLOSED_CORRECTIONS_MAX,
+  closeCorrection,
   evaluateProposal,
   fingerprintProposal,
   isMemoryProposalKind,
@@ -27,6 +29,9 @@ export interface ProposalStoreData {
   version: 1;
   records: ProposalRecord[];
   metrics: ProposalMetrics;
+  /** Fingerprints of accepted or dismissed corrections, newest first: they
+   *  outlive record pruning, so recall never re-proposes a closed fix. */
+  closedCorrections: string[];
 }
 
 export interface ProposalStoreSnapshot {
@@ -55,7 +60,7 @@ export type AppendProposalResult =
   | { status: "appended"; record: ProposalRecord }
   /** A memory kind (loop, decision) already written to its target. */
   | { status: "applied"; record: ProposalRecord; target: string; path: string }
-  | { status: "duplicate"; duplicateOf: ProposalRecord }
+  | { status: "duplicate"; duplicateOf?: ProposalRecord }
   | { status: "invalid"; errors: ProposalValidationError[] };
 
 export type ProposalRouteResult =
@@ -96,7 +101,7 @@ function emptyMetrics(): ProposalMetrics {
 }
 
 function emptyData(): ProposalStoreData {
-  return { version: 1, records: [], metrics: emptyMetrics() };
+  return { version: 1, records: [], metrics: emptyMetrics(), closedCorrections: [] };
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -210,7 +215,14 @@ function parseStore(raw: string): ParsedStore {
     }
   });
   return {
-    data: { version: 1, records: pruneProposalRecords(records, Date.now()), metrics: parseMetrics(object.metrics, warnings) },
+    data: {
+      version: 1,
+      records: pruneProposalRecords(records, Date.now()),
+      metrics: parseMetrics(object.metrics, warnings),
+      closedCorrections: Array.isArray(object.closedCorrections)
+        ? object.closedCorrections.filter((f): f is string => typeof f === "string").slice(0, CLOSED_CORRECTIONS_MAX)
+        : [],
+    },
     warnings,
     quarantined,
     corrupt: false,
@@ -275,7 +287,7 @@ export class ProposalStore {
     const clean = validated.value[0];
     return this.mutate<AppendProposalResult>(async ({ data }) => {
       data.metrics.generated += 1;
-      const duplicate = evaluateProposal(clean, data.records, source.createdAt);
+      const duplicate = evaluateProposal(clean, data.records, source.createdAt, data.closedCorrections);
       if (duplicate.status === "duplicate") {
         data.metrics.duplicates += 1;
         return { status: "duplicate", duplicateOf: duplicate.duplicateOf };
@@ -342,6 +354,7 @@ export class ProposalStore {
     record.resolvedAt = Date.now();
     delete record.lastError;
     data.metrics.accepted += 1;
+    if (record.kind === "correction") data.closedCorrections = closeCorrection(data.closedCorrections, record.fingerprint);
     return routed;
   }
 
@@ -355,6 +368,7 @@ export class ProposalStore {
       record.resolvedAt = now;
       delete record.lastError;
       data.metrics.dismissed += 1;
+      if (record.kind === "correction") data.closedCorrections = closeCorrection(data.closedCorrections, record.fingerprint);
       return record;
     }, now);
   }
@@ -449,6 +463,7 @@ export class ProposalStore {
         version: 1,
         records: [...parsed.data.records, ...parsed.quarantined],
         metrics: parsed.data.metrics,
+        closedCorrections: parsed.data.closedCorrections,
       }, null, 2));
       return result;
     });

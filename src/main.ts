@@ -28,6 +28,7 @@ import * as convoBridge from "./ui/convo-bridge";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
 import { defaultModel, stripObsoleteSettings } from "./settings-schema";
 import { pluginMemoryCaps, registerMemory, undoMemoryWrite } from "./obsidian/memory-wiring";
+import { noteCorrections, registerNoteSaves } from "./obsidian/note-save";
 import type { MemoryHarvester } from "./obsidian/memory-harvest";
 import type { HarvestLog } from "./obsidian/harvest-log";
 import type { MemoryCaps } from "./core/memory-caps";
@@ -52,7 +53,7 @@ import { runHeadlessPlaybook, writeReport, restoreRun, type HeadlessOpts, type H
 import { automationLastRunKey, migrateScheduledRuns, pruneRuns, type AutomationConfig, type AutomationRunRecord } from "./core/automations";
 import { AutomationStore, adaptAppToAutomationVault, migrateToAutomationFiles } from "./obsidian/automation-store";
 import { contractFromAutomation, legacyConfigFromAutomation, type Automation } from "./core/automation-model";
-import { drainExoQueue, countPendingQueue } from "./queue";
+import { drainExoQueue, countPendingQueue, createQueueRequest } from "./queue";
 import { readConversationsSource } from "./core/persistence";
 import { sanitizeTitle, classifyTitleOutcome, buildTitlePrompt, type TitleInput } from "./core/title";
 import { buildEditPrompt, buildContinuePrompt } from "./core/inline-ai";
@@ -232,6 +233,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *  (built in onload by `registerMemory`, obsidian/memory-wiring). */
   memoryHarvest!: MemoryHarvester;
   harvestLog!: HarvestLog;
+  noteSaves!: ReturnType<typeof registerNoteSaves>;
   /** One shared write path for the open-loops ledger (`paths.openLoops`) across every
    *  Claude/Codex conversation. Each session gets a fresh tool registry, so a
    *  queue created inside that registry cannot prevent lost updates. */
@@ -338,8 +340,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;
-    // The route is lazy: the acceptance deps are built right after, and it writes
-    // loops and decisions on append, playbooks on accept.
+    // Lazy route: deps are built below; memory kinds route on append, the rest on accept.
     this.proposalStore = new ProposalStore({
       read: async (relativePath) => {
         const path = `${proposalRoot}/${relativePath}`;
@@ -391,9 +392,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       openLoopsPath: this.paths.openLoops,
       decisionsDir: this.paths.decisions,
       noteWrite: (paths) => this.noteVaultWrite(paths),
+      corrections: noteCorrections(this.app, () => this.noteSaves, (paths) => this.noteVaultWrite(paths)),
     });
 
     registerMemory(this);
+    this.noteSaves = registerNoteSaves(this);
     registerExoIcons();
     registerExoViews(this);
 
@@ -639,7 +642,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     this.addCommand({
       id: "queue-new-request",
       name: "New Queue request",
-      callback: () => void this.createQueueRequest(),
+      callback: () => void createQueueRequest(this.app, this.settings.exoQueueFolder),
     });
     registerCollaboCommands(this);
 
@@ -1840,7 +1843,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const startedAt = Date.now();
     new Notice(`Running playbook "${name}"…`);
-    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge() };
+    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge(), runName: name };
     const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
     if (result.writes.length) this.noteVaultWrite(result.writes);
     const path = await writeReport(this.app, name, result, this.paths.reports);
@@ -1891,24 +1894,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       console.warn("[Exo] queue drain failed:", err);
     } finally {
       this.exoQueueBusy = false;
-    }
-  }
-
-  /** "New Queue request": create an empty request note in the queue folder
-   *  and open it — the same note a phone capture would write; the next drain
-   *  (60s poll or "Drain now") answers it in place. */
-  async createQueueRequest(): Promise<void> {
-    const folder = this.settings.exoQueueFolder;
-    try {
-      if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
-      const stamp = new Date();
-      const p = (x: number) => String(x).padStart(2, "0");
-      const name = `Richiesta ${stamp.getFullYear()}-${p(stamp.getMonth() + 1)}-${p(stamp.getDate())} ${p(stamp.getHours())}${p(stamp.getMinutes())}${p(stamp.getSeconds())}`;
-      const file = await this.app.vault.create(`${folder}/${name}.md`, "");
-      await this.app.workspace.getLeaf("tab").openFile(file);
-      new Notice("Write the request in the note body — Exo answers on the next drain.");
-    } catch (err) {
-      new Notice(`Couldn't create the queue request: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -2521,7 +2506,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       const memory = await this.agentStore.loadMemory(agent, today);
       // This run's tools delegate as this agent, one level deeper than its caller.
       const headlessOpts: HeadlessOpts = {
-        write,
+        write, runName: agent.brain.name,
         agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
         codexBridge: await this.headlessBridge(),
         mcp: agent.contract.mcp,

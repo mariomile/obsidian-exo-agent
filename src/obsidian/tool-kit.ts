@@ -4,6 +4,8 @@ import type { AutomationConfig, AutomationRunRecord } from "../core/automations"
 import type { AgentDef } from "../core/agents";
 import type { AgentCaller } from "../core/agent-runs";
 import type { ChatRecord } from "../core/recent-chats";
+import type { ProposalCandidate, ProposalRecord } from "../core/proposals";
+import type { SaveLog } from "./save-log";
 
 /** The shape every in-process tool returns. Free-form human-readable text —
  *  the agent reads it, not a parser. */
@@ -27,6 +29,8 @@ export interface ExoToolHost {
     collaboUrl: string;
     collaboApiKey: string;
     collaboShares: Record<string, { slug: string; ownerSecret: string; accessToken: string; role: string }>;
+    /** Suggestions (the Proposal Kernel) on: corrections are proposals, so off means none. */
+    proposalKernelEnabled: boolean;
   };
   saveSettings(): Promise<void>;
   /** The chat's own title (obsidian/chat-tools.ts `update_chat`). */
@@ -77,6 +81,11 @@ export interface ExoToolHost {
   readConversationStore(): Promise<ChatRecord[]>;
   /** Revert a memory harvest (latest when `sha` is absent). */
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }>;
+  /** Receipts of "Save to note" (obsidian/note-save). */
+  noteSaves: SaveLog;
+  /** The proposal inbox: corrections wait here for Mario's accept. */
+  proposalStore: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string }> };
+  inbox: { refresh(): Promise<void> };
 }
 
 /** Another plugin's live instance by id, or undefined when it is absent or
@@ -96,4 +105,24 @@ export function getExo(app: App): ExoToolHost | null {
 /** Vault base path on disk, or "" on adapters without one (mobile). */
 export function vaultBasePath(app: App): string {
   return (app.vault.adapter as unknown as { getBasePath?(): string }).getBasePath?.() ?? "";
+}
+
+/** Create any missing parent folders for a vault path (vault.create won't). */
+export async function ensureParentFolder(app: App, path: string): Promise<void> {
+  const slash = path.lastIndexOf("/");
+  if (slash <= 0) return;
+  const dir = path.slice(0, slash);
+  if (app.vault.getAbstractFileByPath(dir)) return;
+  try {
+    await app.vault.createFolder(dir);
+  } catch {
+    /* already exists (race): fine */
+  }
+}
+
+/** Today as YYYY-MM-DD in local time (not UTC: toISOString() would roll to
+ *  tomorrow late at night east of Greenwich). */
+export function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

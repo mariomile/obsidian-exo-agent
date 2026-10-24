@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { patchFrontmatter } from "../src/core/frontmatter-patch";
+import { patchFrontmatter, setFrontmatterKeyLines } from "../src/core/frontmatter-patch";
 
 describe("patchFrontmatter", () => {
   it("preserves unrelated unquoted wikilinks byte-for-byte", () => {
@@ -41,5 +41,12 @@ describe("patchFrontmatter", () => {
     expect(patchFrontmatter(input, { summary: "short" })).toBe(
       `---\nsummary: "short"\ncompany: [[Acme]]\n---\nBody`
     );
+  });
+
+  it("a new frontmatter block on a CRLF note keeps the note's newlines", () => {
+    expect(patchFrontmatter("# Note\r\nBody\r\n", { status: "superseded", superseded_by: "[[B]]" })).toBe(
+      `---\r\nstatus: "superseded"\r\nsuperseded_by: "[[B]]"\r\n---\r\n# Note\r\nBody\r\n`
+    );
+    expect(setFrontmatterKeyLines("# Note\r\n", "status", ["status: active"])).toBe("---\r\nstatus: active\r\n---\r\n# Note\r\n");
   });
 });

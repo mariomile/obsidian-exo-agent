@@ -44,7 +44,7 @@ import { sessionSignature } from "./core/session-signature";
 import { isUntouchedChat } from "./core/untouched-chat";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
-import { renderRecallRow } from "./ui/recall-row";
+import { bubbleThenRecall } from "./ui/recall-row";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
@@ -59,7 +59,9 @@ import { buildRecap as buildConvoRecap } from "./core/recap";
 import { assembleContext, formatContextDebug, selectUnchangedPaths } from "./core/context-assembly";
 import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
-import { clickable } from "./ui/dom";
+import { clickable, flashIcon } from "./ui/dom";
+import { mountSaveReceipt } from "./ui/save-receipt";
+import { bindSaveToNote } from "./ui/save-panel";
 import { swapTailChild } from "./ui/tail-child";
 import { mountFileUiPreview, renderChatMarkdown, UI_PREVIEW_PROMPT } from "./obsidian/ui-previews";
 import { disposeTranscriptPreviews } from "./obsidian/preview-lifecycle";
@@ -80,6 +82,7 @@ import {
 import { LiveTaskRegistry } from "./ui/live-task-registry";
 import { Composer } from "./ui/composer";
 import { cutTranscriptAfter, cutTranscriptFrom, noteTranscriptReset, noteTurnEnd, reenterActive, renderResumeVerbs, turnMessageIndex, type ReentryHost } from "./ui/reentry";
+import { jumpToTurn, revealMessage } from "./ui/turn-jump";
 import type {
   AssistantCtx,
   Convo,
@@ -739,6 +742,7 @@ export class ChatView extends ItemView {
       paths: this.plugin.paths,
       convoId: c.id, // gates the chat tools
       browserBridge: browserBridgeFor(this.plugin, c.id), // undefined when off/mobile
+      onSaved: (r) => c.currentCtx && mountSaveReceipt(this.app, this.plugin.noteSaves, c.currentCtx.el, r),
     };
     const obsidianServer = useObsidian ? createObsidianToolServer(this.app, toolOpts) : undefined;
 
@@ -2689,7 +2693,7 @@ export class ChatView extends ItemView {
     }));
     // Exo's own reports and anything the user excluded never ride as recall.
     const exclude = vaultExclusion(this.app, [`${this.plugin.paths.reports}/`]);
-    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude });
+    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude, pluginDir: this.plugin.manifest.dir });
     if (recall) this.diag.push("recall", `injected ${recall.notes.length} notes, ${recall.chats.length} chats`);
     return recall;
   }
@@ -3140,12 +3144,12 @@ export class ChatView extends ItemView {
     setIcon(copy, "copy");
     copy.onclick = () => {
       void navigator.clipboard.writeText(text);
-      this.flashIcon(copy, "check", "copy");
+      flashIcon(copy, "check", "copy");
     };
 
-    const insert = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Insert into note" } });
-    setIcon(insert, "file-down");
-    insert.onclick = () => void this.insertIntoNote(text, insert);
+    const save = bar.createSpan({ cls: "mva-act", attr: { "aria-label": "Save to note" } });
+    setIcon(save, "file-down");
+    bindSaveToNote(save, this.app, this.plugin.noteSaves, turnEl, text, convo ?? this.active, (p) => this.relPath(p));
 
     if (retryText) {
       const retry = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Retry" } });
@@ -3452,26 +3456,6 @@ export class ChatView extends ItemView {
     } catch {
       new Notice(`Couldn't revert ${noteBasename(path)}.`);
     }
-  }
-
-  private flashIcon(btn: HTMLElement, on: string, off: string): void {
-    btn.empty();
-    setIcon(btn, on);
-    window.setTimeout(() => {
-      btn.empty();
-      setIcon(btn, off);
-    }, 1200);
-  }
-
-  private async insertIntoNote(text: string, btn: HTMLElement): Promise<void> {
-    const f = this.app.workspace.getActiveFile();
-    if (!f) {
-      new Notice("Open a note first to insert into it.");
-      return;
-    }
-    await this.app.vault.append(f, `\n\n${text}\n`);
-    new Notice(`Inserted into ${f.basename}`);
-    this.flashIcon(btn, "check", "file-down");
   }
 
   private openNote(path: string): void {
@@ -4336,10 +4320,10 @@ export class ChatView extends ItemView {
       const label = raw.length > 60 ? raw.slice(0, 59).trimEnd() + "…" : raw || "(empty message)";
       const tick = strip.createDiv({ cls: "mva-outline-tick" });
       tick.setAttribute("aria-hidden", "true");
-      tick.addEventListener("click", () => this.jumpToTurn(turn, reduce));
+      tick.addEventListener("click", () => jumpToTurn(turn, reduce));
       const row = panel.createDiv({ cls: "mva-outline-row", text: label });
       row.setAttribute("aria-label", `Jump to message: ${label}`);
-      this.clickable(row, () => this.jumpToTurn(turn, reduce));
+      this.clickable(row, () => jumpToTurn(turn, reduce));
     }
     // Expand/collapse with a collapse delay so crossing the strip→panel gap (during
     // the opacity swap) doesn't flicker the panel shut mid-interaction.
@@ -4377,16 +4361,6 @@ export class ChatView extends ItemView {
     }
     ticks.forEach((t, i) => t.toggleClass("is-active", i === activeIdx));
     rows.forEach((r, i) => r.toggleClass("is-active", i === activeIdx));
-  }
-
-  /** Smooth-scroll a user turn to near the top and flash it briefly. Instant
-   *  scroll + no motion when reduced-motion is requested. */
-  private jumpToTurn(turn: HTMLElement, reduce: boolean): void {
-    turn.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-    turn.removeClass("is-flash");
-    void turn.offsetWidth; // restart the fade if the same turn is clicked twice
-    turn.addClass("is-flash");
-    window.setTimeout(() => turn.removeClass("is-flash"), 1000);
   }
 
   /** Show/hide the floating jump-to-bottom pill based on pin state. */
@@ -4666,7 +4640,7 @@ export class ChatView extends ItemView {
     // You always want to watch your own message land.
     this.pinnedToBottom = true;
     this.updateJumpPill();
-    if (c.streaming) {
+    if (c.streaming || c.turnClaimed) { // claimed = the turn is still waiting on recall
       // Mid-turn behavior. Default (steerMode "queue") always enqueues so the
       // message starts as the next turn. Opt-in "steer" injects into the live
       // turn when nothing the message carries would be lost (core/queue
@@ -4945,26 +4919,26 @@ export class ChatView extends ItemView {
     const embedded = await this.composer.embeddedImages(text);
     if (embedded.length) imgs = [...(imgs ?? []), ...embedded];
 
-    // Per-turn recall: related notes and past chats for THIS message, in a
-    // `[vault-recall]` block on the outbound payload only. Null when memory
-    // recall is off or nothing matched: the payload is then built exactly as
-    // before. Recovery retries skip it: they already carry a recap prefix.
-    const recalled = opts?.isRecoveryRetry ? null : await this.turnRecall(c, text);
-
-    // A recovery retry reuses the user bubble the poisoned turn already rendered —
-    // don't render (or re-persist) a duplicate. The original message is still the
-    // only "user" entry in c.messages for this turn.
     const turnFrom = c.messages.length; // where THIS turn starts; the stretch before it is not its to mark read
-    if (!opts?.isRecoveryRetry && !opts?.reuseUserTurn) {
-      const userEl = this.addUserTurn(c, text, imgs);
-      // Quiet "Recalled N" row under the bubble: the trust surface, so the
-      // injection is never invisible. Only when there was any.
-      if (recalled) renderRecallRow(userEl, recalled, (p) => void this.app.workspace.openLinkText(p, "", "tab"));
-      // Flush the user's message to disk immediately: it lives only in RAM until
-      // the turn's finally otherwise, so an Obsidian crash mid-turn would lose the
-      // exchange from the UI. The atomic write keeps this cheap and safe.
-      this.persist();
-    }
+    // The bubble first, then per-turn recall: related notes and past chats for
+    // THIS message, in a `[vault-recall]` block on the outbound payload only,
+    // with a quiet "Recalled N" row hung under the bubble when it resolves (the
+    // trust surface: the injection is never invisible). Null when memory recall
+    // is off or nothing matched: the payload is then built exactly as before.
+    // Recovery retries skip recall (they carry a recap prefix) and reuse the
+    // bubble the poisoned turn already rendered: no duplicate, no re-persist.
+    const recalled = await bubbleThenRecall(
+      () => {
+        if (opts?.isRecoveryRetry || opts?.reuseUserTurn) return null;
+        const userEl = this.addUserTurn(c, text, imgs);
+        // Flush the message now: it lives only in RAM until the turn's finally
+        // otherwise, and a crash mid-turn would lose the exchange from the UI.
+        this.persist();
+        return userEl;
+      },
+      () => (opts?.isRecoveryRetry ? null : this.turnRecall(c, text)),
+      { openPath: (p) => void this.app.workspace.openLinkText(p, "", "tab"), openChat: (id, i) => this.openConvoById(id, i) },
+    );
     // A previous turn's working row can outlive the `ctx` that owned it: its
     // finally (the only place that removes it) never ran if that turn's
     // promise chain never settled (stop-escalation dispose, or a concurrent
@@ -5929,12 +5903,13 @@ export class ChatView extends ItemView {
     });
   }
 
-  /** Open a conversation by id (fork link, plan handoff). False when unknown. */
-  openConvoById(id: string): boolean {
+  /** Open a conversation by id (fork link, plan handoff, recall, exo-chat link), at `msgIndex` when given. False when unknown. */
+  openConvoById(id: string, msgIndex: number | null = null): boolean {
     const c = this.convos.find((x) => x.id === id);
     if (!c) return false;
     if (this.gallery.galleryEl) this.gallery.hideGallery();
     this.switchTo(c);
+    if (msgIndex !== null) revealMessage(c.listEl, msgIndex);
     return true;
   }
 
