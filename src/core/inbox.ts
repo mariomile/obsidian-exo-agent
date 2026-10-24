@@ -18,7 +18,7 @@
  * a versioned id: a new answer gets a new id, so an old "read" cannot hide it.
  */
 import { awaitsReview, runOwner, type AutomationRef, type AutomationRunRecord } from "./automations";
-import { dailyPulseNeedsReview, type DailyPulseReviewState } from "./daily-pulse";
+import { dailyPulseErrorOpen, dailyPulseNeedsReview, type DailyPulseReviewState } from "./daily-pulse";
 import { plural } from "./reentry";
 import { deriveLane, type SessionSnapshot } from "./session-cards";
 import { effectiveSnoozed, wokeAt } from "./thread-lifecycle";
@@ -237,7 +237,7 @@ function chatItem(c: InboxChat, now: number): InboxItem | null {
 }
 
 function pulseItem(p: DailyPulseReviewState): InboxItem | null {
-  if (p.status === "error" && p.lastAttemptAt > p.lastReviewedAt) {
+  if (dailyPulseErrorOpen(p)) {
     return {
       id: `pulse-error:${p.lastAttemptAt}`,
       kind: "error",

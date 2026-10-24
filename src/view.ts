@@ -5925,7 +5925,7 @@ export class ChatView extends ItemView {
     });
   }
 
-  /** Open a conversation by id (Cockpit "Resume" rows). False when unknown. */
+  /** Open a conversation by id (fork link, plan handoff). False when unknown. */
   openConvoById(id: string): boolean {
     const c = this.convos.find((x) => x.id === id);
     if (!c) return false;

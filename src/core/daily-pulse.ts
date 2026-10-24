@@ -94,10 +94,18 @@ export function dailyPulseNeedsReview(state: DailyPulseReviewState): boolean {
   return state.itemCount > 0 && state.lastSuccessAt > state.lastReviewedAt;
 }
 
+/** The last run failed and the user has not dismissed it yet (dismissing
+ *  stamps `lastReviewedAt`). */
+export function dailyPulseErrorOpen(state: DailyPulseReviewState): boolean {
+  return state.status === "error" && state.lastAttemptAt > state.lastReviewedAt;
+}
+
 /** Meta-line suffix for the Daily Pulse automation row. No item count: the
- *  Inbox counts the pulse once, so a second number here would disagree. */
+ *  Inbox counts the pulse once, so a second number here would disagree. A
+ *  dismissed failure stops asking for a retry but still says it failed. */
 export function dailyPulseMetaLabel(state: DailyPulseReviewState): string {
-  if (state.status === "error") return "retry available";
+  if (dailyPulseErrorOpen(state)) return "retry available";
+  if (state.status === "error") return "last run failed";
   if (dailyPulseNeedsReview(state)) return "ready to review";
   return state.lastSuccessAt > 0 ? "reviewed" : "not generated";
 }

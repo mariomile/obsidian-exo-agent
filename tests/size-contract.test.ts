@@ -102,8 +102,12 @@ const CEILINGS: Record<string, number> = {
   // righe reali, tetto 2828.
   // Abbassato il 2026-10-24 (Release 2, seen watermark): `liveAttention`
   // cancellato. 2823 -> 2819 righe reali, tetto 2824.
+  // Il pannello Inbox (Release 2) ha poi aggiunto il wiring di `inbox`:
+  // 2819 -> 2823 righe reali, dentro il tetto 2824.
   // Abbassato il 2026-10-24 (Release 2, Cockpit): `openConvo` cancellato con
   // il riquadro Resume che lo usava. 2823 -> 2815 righe reali, tetto 2820.
+  // La review di Release 2 aggiunge `listAutomations` alle fonti del Daily
+  // Pulse: 2815 -> 2816 righe reali, tetto invariato a 2820.
   "src/main.ts": 2820,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la

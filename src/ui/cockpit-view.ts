@@ -214,6 +214,7 @@ export class CockpitView extends ItemView {
       this.tile(grid, "Loops", "target", loops, {
         label: "open-loops.md",
         onClick: () => void this.app.workspace.openLinkText(this.plugin.paths.openLoops, "", "tab"),
+        empty: "No open loops.",
       });
 
       this.renderAutonomy(grid, queuePending, now);
@@ -254,19 +255,21 @@ export class CockpitView extends ItemView {
   }
 
   /** A tile of action rows, or nothing at all when there are no rows: an
-   *  empty tile is a column that says nothing. */
+   *  empty tile is a column that says nothing. A tile with a footer link stays,
+   *  saying `footer.empty`: the link is the way in when nothing is listed. */
   private tile(
     grid: HTMLElement,
     title: string,
     icon: string,
     rows: CockpitRow[],
-    footer?: { label: string; onClick: () => void }
+    footer?: { label: string; onClick: () => void; empty: string }
   ): HTMLElement | null {
-    if (!rows.length) return null;
+    if (!rows.length && !footer) return null;
     const card = grid.createDiv({ cls: "mva-ck-card" });
     const head = card.createDiv({ cls: "mva-ck-card-head" });
     setIcon(head.createSpan({ cls: "mva-ck-card-icon" }), icon);
     head.createSpan({ cls: "mva-ck-card-title", text: title });
+    if (!rows.length && footer) card.createDiv({ cls: "mva-ck-empty", text: footer.empty });
     for (const r of rows) {
       const row = card.createDiv({ cls: "mva-ck-row" });
       row.createSpan({ cls: "mva-ck-row-label", text: r.label });

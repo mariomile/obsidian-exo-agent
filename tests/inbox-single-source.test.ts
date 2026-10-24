@@ -34,8 +34,9 @@ function matching(re: RegExp): string[] {
 }
 
 describe("Inbox single source", () => {
-  it("the Daily Pulse review rule is read only by core/inbox", () => {
+  it("the Daily Pulse review and error rules are read only by core/inbox", () => {
     expect(usersOf("dailyPulseNeedsReview")).toEqual(["core/daily-pulse.ts", "core/inbox.ts"]);
+    expect(usersOf("dailyPulseErrorOpen")).toEqual(["core/daily-pulse.ts", "core/inbox.ts"]);
   });
 
   it("the read rule and the visibility rule live in core/inbox and are read only by the chat surfaces", () => {
@@ -53,6 +54,8 @@ describe("Inbox single source", () => {
     expect(matching(/writes\.length\s*>\s*0\s*&&/)).toEqual(["core/automations.ts"]);
     // Unseen: a turn newer than the visit or read watermark.
     expect(matching(/>\s*Math\.max\([^)]*(lastActiveAt|seenAt)/)).toEqual(["core/inbox.ts"]);
+    // Daily Pulse error not yet dismissed.
+    expect(matching(/lastAttemptAt\s*>\s*[\w.]*lastReviewedAt/)).toEqual(["core/daily-pulse.ts"]);
     // Visibility: not archived and not an empty husk.
     expect(matching(/archived\s*&&\s*deriveLane/)).toEqual(["core/inbox.ts"]);
   });
