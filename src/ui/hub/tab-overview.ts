@@ -84,7 +84,7 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
     if (a.enabled) clickable(btn, handler[a.id]);
     else {
       btn.addClass("is-disabled");
-      btn.setAttr("aria-disabled", "true");
+      btn.setAttrs({ role: "button", "aria-disabled": "true" });
     }
     host.appendChild(row);
   }

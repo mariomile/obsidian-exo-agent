@@ -102,7 +102,6 @@ import {
   type ProposalTargetVaultAdapter,
 } from "./obsidian/proposal-targets";
 import { parseLoopsFile } from "./core/open-loops";
-import { memoTtl } from "./core/ttl-memo";
 import {
   DailyPulseSlotRunner,
   dailyPulseReviewAfterRun,
@@ -938,7 +937,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         debounceMs,
         cadenceMs,
       });
-      if (commit) await runGitCommit(git, paths, formatCommitMessage(pendingFileCount));
+      if (commit) { await runGitCommit(git, paths, formatCommitMessage(pendingFileCount)); this.autoCommitAt = Promise.resolve(Date.now()); }
       completed = true;
     } catch (err) {
       // Never let a failed commit break anything — log it and surface at most
@@ -1828,8 +1827,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  /** The last auto-commit time, cached 60s: the Overview tab repaints on every chat switch. */
-  readonly lastAutoCommitEpoch = memoTtl(() => this.readAutoCommitEpoch(), 60_000);
+  /** The last auto-commit time: read from git once, then set by our own commits (the Overview repaints on every chat switch). */
+  private autoCommitAt: Promise<number | null> | null = null;
+  lastAutoCommitEpoch(): Promise<number | null> { return (this.autoCommitAt ??= this.readAutoCommitEpoch()); }
 
   /** Run one playbook headlessly and write its report. Write-enabled runs also
    *  persist a restorable run record (files touched + pre-write snapshots). */

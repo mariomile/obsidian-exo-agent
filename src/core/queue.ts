@@ -51,13 +51,12 @@ export type PersistedQueuedMessage = Omit<QueuedMessage, "images" | "held" | "ed
 export function serializeQueue(queue: readonly QueuedMessage[]): PersistedQueuedMessage[] {
   const out: PersistedQueuedMessage[] = [];
   for (const q of queue) {
-    if (!q.text.trim()) continue;
+    if (!q.text.trim() || q.isRecoveryRetry) continue; // a recovery retry drains in the same tick, never a pill
     const p: PersistedQueuedMessage = { text: q.text };
     if (q.context) p.context = { paths: [...q.context.paths], selection: q.context.selection ? { ...q.context.selection } : null };
     if (q.agent) p.agent = q.agent;
     if (q.researchMode) p.researchMode = { ...q.researchMode };
     if (q.sendPrefix) p.sendPrefix = q.sendPrefix;
-    if (q.isRecoveryRetry) p.isRecoveryRetry = true;
     out.push(p);
   }
   return out;
@@ -85,7 +84,6 @@ export function restoreQueue(raw: unknown): QueuedMessage[] {
     if (typeof r.agent === "string" && r.agent) q.agent = r.agent;
     if (r.researchMode) q.researchMode = normalizeResearchModeState(r.researchMode);
     if (typeof r.sendPrefix === "string" && r.sendPrefix) q.sendPrefix = r.sendPrefix;
-    if (r.isRecoveryRetry === true) q.isRecoveryRetry = true;
     out.push(q);
   }
   return out;

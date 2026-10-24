@@ -1102,7 +1102,7 @@ export class ChatView extends ItemView {
     if (this.active.messages.length === 0) this.renderEmptyState();
     this.refreshProviderUI();
     this.refreshTabs(); // the strip AND the resume verbs: boot IS a re-entry moment
-    this.renderQueue(this.active); // held messages from before the reload
+    renderQueueRows(this.queueEl, this.active.queue, queueHandlers(this, this.active)); // held from before the reload; renderQueue would persist, and restore() never does
     this.scrollToBottom();
     reenterActive(this.active, this.reentryHost); // worked overnight; gated, because `loadIfDeferred` boots this view into a collapsed sidebar
     this.renderTailSurfacing(this.active);

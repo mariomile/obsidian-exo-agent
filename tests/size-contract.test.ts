@@ -64,7 +64,9 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 2, seen watermark): `Convo.unread` e
   // `convoAttention` cancellati, il non letto e' `isUnseen` (core/inbox).
   // 5959 -> 5942 righe reali, tetto 5947.
-  "src/view.ts": 5947,
+  // Abbassato il 2026-10-24 (pulizia post Release 2): la coda persiste.
+  // 5946 righe reali, tetto 5946.
+  "src/view.ts": 5946,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -213,7 +215,9 @@ const CEILINGS: Record<string, number> = {
   // posto alle regole compatte `.mva-inbox-*`. 6502 -> 6487 righe reali, tetto 6492.
   // Abbassato il 2026-10-24 (Release 2, Cockpit): la striscia attention del
   // Cockpit lascia il posto al pannello Inbox. 6487 -> 6478 righe reali, tetto 6483.
-  "styles.css": 6483,
+  // Abbassato il 2026-10-24 (pulizia post Release 2): `.mva-btn.is-disabled`
+  // generale. 6479 righe reali, tetto 6479.
+  "styles.css": 6479,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

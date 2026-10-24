@@ -4,7 +4,7 @@ import { restoreQueue, serializeQueue, type QueuedMessage } from "../src/core/qu
 const img = { mediaType: "image/png", dataB64: "eA==" };
 
 describe("serializeQueue", () => {
-  it("keeps text, context, agent, research mode, prefix and the recovery flag", () => {
+  it("keeps text, context, agent, research mode and prefix", () => {
     const q: QueuedMessage[] = [
       {
         text: "one",
@@ -12,10 +12,13 @@ describe("serializeQueue", () => {
         agent: "writer",
         researchMode: { enabled: true, startedAt: 5 },
         sendPrefix: "recap",
-        isRecoveryRetry: true,
       },
     ];
     expect(serializeQueue(q)).toEqual(q);
+  });
+
+  it("never persists a recovery retry: it drains in the same tick and must not come back as a pill", () => {
+    expect(serializeQueue([{ text: "recap retry", sendPrefix: "recap", isRecoveryRetry: true }, { text: "kept" }])).toEqual([{ text: "kept" }]);
   });
 
   it("drops images (history does not persist them), held and editing", () => {
@@ -47,7 +50,7 @@ describe("restoreQueue", () => {
 
   it("round-trips a serialized queue", () => {
     const q: QueuedMessage[] = [
-      { text: "one", context: { paths: ["A.md"], selection: null }, sendPrefix: "p", isRecoveryRetry: true, researchMode: { enabled: true, startedAt: 1 } },
+      { text: "one", context: { paths: ["A.md"], selection: null }, sendPrefix: "p", researchMode: { enabled: true, startedAt: 1 } },
     ];
     expect(restoreQueue(serializeQueue(q))).toEqual([{ ...q[0], held: true }]);
   });

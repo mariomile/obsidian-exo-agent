@@ -116,8 +116,8 @@ describe("buildInbox: chats", () => {
     expect(inbox.count).toBe(0);
   });
 
-  it("labels a chat that woke from a snooze with no new turn as Snooze ended, dated at the wake", () => {
-    const woke = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
+  it("labels a chat that woke from a snooze with nothing unread as Snooze ended, dated at the wake", () => {
+    const woke = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 3 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
     const [it] = buildInbox(input({ chats: [woke] })).items;
     expect(it).toMatchObject({ kind: "result", detail: "Snooze ended", at: NOW - HOUR, verbs: ["read"] });
   });
@@ -126,6 +126,12 @@ describe("buildInbox: chats", () => {
     const c = chat("a", { updatedAt: NOW - 90 * 60_000, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR / 2 });
     const [it] = buildInbox(input({ chats: [c] })).items;
     expect(it).toMatchObject({ detail: "New reply", at: NOW - 90 * 60_000 });
+  });
+
+  it("keeps New reply when an unread reply was snoozed without being opened", () => {
+    const c = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
+    const [it] = buildInbox(input({ chats: [c] })).items;
+    expect(it).toMatchObject({ detail: "New reply", at: NOW - 3 * HOUR });
   });
 
   it("lists an unseen finished chat as a new result", () => {
