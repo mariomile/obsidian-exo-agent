@@ -3,7 +3,6 @@ import type ExoPlugin from "./main";
 import type { PermissionMode, ProviderId } from "./providers/types";
 import { ADAPTERS } from "./providers/registry";
 import { providerModels, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
-import { parseMcpJson } from "./core/mcp-config";
 import { DEFAULT_MEMORY_ROOT, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { renderCliDiagnostics } from "./ui/settings-cli";
 import { renderComposerModels } from "./ui/settings-composer-models";
@@ -785,98 +784,23 @@ export class MVASettingTab extends PluginSettingTab {
           this.plugin.settings.collaboApiKey = v.trim();
           await this.plugin.saveSettings();
         }));
-    void this.renderMcpSection(el);
+    this.renderMcpSection(el);
   }
 
-  /** MCP now has a dedicated control surface — the Connections pane — where you
-   *  add / edit / enable / disable / remove servers, reconnect failed ones, and
-   *  re-authenticate OAuth ones live. Settings keeps only the fast-startup gate
-   *  (which silences external MCP entirely), a link to the pane, and the raw
-   *  `.mcp.json` escape hatch for exotic configs or fixing an unparseable file. */
-  private async renderMcpSection(containerEl: HTMLElement): Promise<void> {
+  /** MCP lives in one place, the Capabilities hub's MCP tab: add, edit,
+   *  enable, reconnect, authenticate, and the fast-startup warning. Settings
+   *  keeps only the pointer. */
+  private renderMcpSection(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("MCP servers").setHeading();
-    const root = containerEl.createDiv();
-    await this.drawMcpManager(root);
-  }
-
-  private async drawMcpManager(root: HTMLElement): Promise<void> {
-    root.empty();
-    const redraw = () => void this.drawMcpManager(root);
-    const adapter = this.plugin.app.vault.adapter;
-    const path = ".mcp.json";
-    const s = this.plugin.settings;
-
-    // Primary path: manage MCP in the Capabilities hub.
-    new Setting(root)
+    new Setting(containerEl)
       .setName("MCP servers live in Capabilities")
-      .setDesc("Add, edit, enable/disable, remove, reconnect, and re-authenticate servers live — plus one-tap import of what other tools already have.")
+      .setDesc("Add, edit, enable/disable, remove, reconnect, and re-authenticate servers live, plus one-tap import of what other tools already have.")
       .addButton((b) =>
         b
           .setButtonText("Open Capabilities")
           .setCta()
-          .onClick(() => void this.plugin.activateHub())
+          .onClick(() => void this.plugin.activateHub("mcp"))
       );
-
-    // Fast-startup gate: external MCP is skipped entirely while it's on. Say it
-    // loudly, with the fix one click away — the #1 "where are my MCPs?" confusion.
-    if (s.fastStartup) {
-      new Setting(root)
-        .setName("External MCP is OFF — Fast startup is on")
-        .setDesc("Fast startup spawns sessions with strict MCP (Obsidian-native tools only). Turn it off to load your servers.")
-        .addButton((b) =>
-          b.setButtonText("Turn off Fast startup").onClick(async () => {
-            s.fastStartup = false;
-            await this.plugin.saveSettings();
-            redraw();
-          })
-        );
-    }
-
-    let raw = '{\n  "mcpServers": {}\n}';
-    try {
-      if (await adapter.exists(path)) raw = await adapter.read(path);
-    } catch {
-      /* missing — use template */
-    }
-    const parsed = parseMcpJson(raw);
-    if (parsed.error) {
-      new Setting(root)
-        .setName("Couldn't parse .mcp.json")
-        .setDesc(`${parsed.error} — fix it in the raw editor below.`);
-    }
-
-    // Raw escape hatch, collapsed: the Connections pane covers the common cases;
-    // exotic configs (or a broken file) still have a direct path.
-    const details = root.createEl("details");
-    details.createEl("summary", { text: "Advanced: edit raw .mcp.json", cls: "setting-item-description" });
-    const status = details.createDiv({ cls: "setting-item-description" });
-    const area = new Setting(details).setName(".mcp.json").setDesc("Must be valid JSON with an mcpServers key.");
-    area.addTextArea((t) => {
-      t.setValue(raw);
-      t.inputEl.rows = 10;
-      t.inputEl.addClass("mva-mono-input", "mva-full-width");
-      area.addButton((b) =>
-        b
-          .setButtonText("Save")
-          .setCta()
-          .onClick(async () => {
-            const next = t.getValue();
-            const check = parseMcpJson(next);
-            if (check.error) {
-              status.setText(check.error);
-              status.addClass("mod-error");
-              return;
-            }
-            await adapter.write(path, next);
-            redraw();
-          })
-      );
-    });
-
-    root.createEl("p", {
-      cls: "setting-item-description",
-      text: "Changes made here apply to NEW sessions — use Connections to reconnect the current one.",
-    });
   }
 
 }

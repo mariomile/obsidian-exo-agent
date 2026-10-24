@@ -1,12 +1,14 @@
 import { defaultModel } from "../../settings-schema";
 import { autonomyStatuses, autonomyActions, systemStatuses } from "../../core/actions-hub";
+import { defaultRows, thisChatRows, type SummaryRow } from "../../core/session-summary";
+import * as convoBridge from "../convo-bridge";
 import { buildGroupHeader, buildStatusRow, buildRowScaffold, openExoSettings, runCommand, type HubTabContext } from "./shared";
 
 /**
- * Overview tab — the session and system at a glance. Read-only status rows
- * (values change in settings, never here) plus the queue's action rows, which
- * have no other home. Renders sensibly with no live session (settings-derived
- * values + a quiet "no session yet" note).
+ * Overview tab: the open chat and the system at a glance. Read-only status
+ * rows (values change in settings, never here) plus the queue's action rows,
+ * which have no other home. "This chat" is what the open chat runs with;
+ * "Defaults" is what a new chat starts from (core/session-summary).
  */
 export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): Promise<void> {
   host.empty();
@@ -19,28 +21,28 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
     ctx.plugin.lastAutoCommitEpoch().catch(() => null),
   ]);
 
-  // Session
-  host.appendChild(buildGroupHeader("Session"));
-  if (!caps) {
-    host.createDiv({ cls: "mva-conn-empty", text: "No session yet — values below come from settings; open a chat to connect." });
-  }
-  const model = defaultModel(s, s.provider);
-  host.appendChild(buildStatusRow("Provider", s.provider));
-  host.appendChild(buildStatusRow("Model", model || "default"));
-  host.appendChild(buildStatusRow("Effort", s.effort));
-  host.appendChild(buildStatusRow("Permissions", s.permissionMode));
-  host.appendChild(buildStatusRow("Agentic tools", s.toolsEnabled ? "on" : "off", s.toolsEnabled));
-  host.appendChild(buildStatusRow("Fast startup", s.fastStartup ? "on" : "off", s.fastStartup));
-  if (caps) {
-    const mcp = caps.mcpServers ?? [];
-    const connected = mcp.filter((m) => m.status === "connected").length;
-    const trouble = mcp.length - connected;
-    host.appendChild(buildStatusRow(
-      "MCP servers",
-      trouble > 0 ? `${connected} connected · ${trouble} need attention` : `${connected} connected`,
-      trouble === 0 && mcp.length > 0
-    ));
-  }
+  const rows = (list: SummaryRow[]) => {
+    for (const r of list) host.appendChild(buildStatusRow(r.label, r.value, r.ok));
+  };
+
+  // This chat: the open chat's own session. MCP status is the live caps the
+  // chat view writes on every session init.
+  host.appendChild(buildGroupHeader("This chat"));
+  const chat = convoBridge.sessionSnapshot(ctx.app);
+  if (chat) rows(thisChatRows(chat, caps?.mcpServers ?? null));
+  else host.createDiv({ cls: "mva-conn-empty", text: "Open a chat to see its session." });
+
+  // Defaults: what a new chat starts from.
+  host.appendChild(buildGroupHeader("Defaults"));
+  rows(defaultRows({
+    provider: s.provider,
+    model: defaultModel(s, s.provider),
+    effort: s.effort,
+    permissionMode: s.permissionMode,
+    toolsEnabled: s.toolsEnabled,
+    fastStartup: s.fastStartup,
+    permAllowRules: s.permAllowRules,
+  }));
 
   // System — read-only status + deep-link to settings (never a toggle).
   host.appendChild(buildGroupHeader("System"));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decidePermission, markSeen } from "../src/ui/chat-actions";
+import { decidePermission, markSeen, sessionSnapshot } from "../src/ui/chat-actions";
 import type { ChatView } from "../src/view";
 import type { Convo, PermDecision } from "../src/ui/convo-types";
 
@@ -96,5 +96,13 @@ describe("markSeen", () => {
     const view = { allConvos: () => [], persist: () => calls.push("persist") } as unknown as ChatView;
     markSeen(view, ["x"]);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("sessionSnapshot", () => {
+  it("reports the effort the chat's model actually runs with, and its own allow count", () => {
+    const active = { provider: "claude", model: "claude-haiku-4-5", allow: new Set(["Read", "Bash(git)"]) } as unknown as Convo;
+    const view = { active, plugin: { settings: { effort: "high" } } } as unknown as ChatView;
+    expect(sessionSnapshot(view)).toEqual({ provider: "claude", model: "claude-haiku-4-5", effort: "default", allowed: 2 });
   });
 });

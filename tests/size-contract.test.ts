@@ -165,7 +165,10 @@ const CEILINGS: Record<string, number> = {
   // pass e del defrag sono cancellati. 945 -> 898 righe reali. Tetto 905.
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): 904 -> 882 righe
   // reali, tetto 887.
-  "src/settings.ts": 887,
+  // Abbassato il 2026-10-24 (Release 2, MCP in un posto solo): l'editor raw di
+  // `.mcp.json` e l'avviso Fast startup escono dai settings (l'avviso va nel
+  // tab MCP). 882 -> 806 righe reali, tetto 811.
+  "src/settings.ts": 811,
   // Aggiunto il 2026-08-12. Questo file era l'UNICO pannello del repo senza
   // tetto, e nell'ondata chat+cosmos e' passato da 859 a 1020 righe senza che
   // niente lo fermasse — mentre lo stesso commit ABBASSAVA quello di main.ts.

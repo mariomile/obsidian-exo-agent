@@ -20,6 +20,7 @@ import { resolveCli, mcpLogin, mcpLogout } from "../../cli";
 import { McpServerModal } from "../mcp-server-modal";
 import { reconcileList, type CardModel } from "../keyed-reconcile";
 import { buildAccordionRow, buildGroupHeader, buildRowScaffold, buildSearchBox, type HubTabContext } from "./shared";
+import { clickable } from "../dom";
 
 /**
  * The MCP tab — control surface AND marketplace over what other tools already
@@ -161,6 +162,11 @@ export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promi
   models.push({ key: "search", sig: "static", build: () => buildSearchBox(ctx, "Search servers…") });
   // Always-present "Add MCP server" action — the control-surface entry point.
   models.push({ key: "add-mcp", sig: "add", build: () => buildAddMcp(ctx) });
+  // Fast startup skips external MCP entirely: say so where the servers are,
+  // with the fix one click away. The #1 "where are my MCPs?" confusion.
+  if (ctx.plugin.settings.fastStartup) {
+    models.push({ key: "fast-startup", sig: "on", build: () => buildFastStartupWarning(ctx) });
+  }
   if (!allItems.length) {
     models.push({ key: "mcp-empty", sig: "empty", build: () => createDiv({ cls: "mva-conn-empty", text: "No MCP servers yet — add one above." }) });
   } else if (!items.length) {
@@ -186,6 +192,20 @@ export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promi
   await section("Inherited", sections.inherited);
   await section("Skipped in Exo", sections.skipped);
   reconcileList(host, models);
+}
+
+function buildFastStartupWarning(ctx: HubTabContext): HTMLElement {
+  const { row, right } = buildRowScaffold(
+    "External MCP is off: Fast startup is on",
+    undefined,
+    "Fast startup spawns sessions with Obsidian-native tools only. Turn it off to load your servers in new sessions."
+  );
+  const off = right.createSpan({ cls: "mva-btn", text: "Turn off Fast startup" });
+  clickable(off, () => {
+    ctx.plugin.settings.fastStartup = false;
+    void ctx.plugin.saveSettings().then(() => ctx.rerender());
+  });
+  return row;
 }
 
 function buildAddMcp(ctx: HubTabContext): HTMLElement {
