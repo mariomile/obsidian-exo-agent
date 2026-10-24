@@ -25,13 +25,13 @@
 import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-cards";
 import { groupByTime, type TimeGroupLabel } from "./history";
 import { findInChat, fold, snippetAround } from "./chat-search";
+import { isListedChat, isUnseen } from "./inbox";
 import type { ChatMessage } from "./recent-chats";
 import {
   autoSettleMs,
   returnedAt,
   shelfOf,
   snoozeWakeLabel,
-  wokeAt,
   type PlanProgress,
   type Shelf,
 } from "./thread-lifecycle";
@@ -53,8 +53,6 @@ export interface ChatRowSource {
   /** Kept to hand across sessions. Independent of `open` — a pin survives
    *  closing the tab, which is the entire point of pinning. */
   pinned: boolean;
-  /** Last turn finished while the user was elsewhere — see `unseen` on ChatRow. */
-  unseen: boolean;
   /** User turns, not total messages: it answers "how much of this is mine",
    *  which is what makes a conversation feel long or throwaway. */
   messageCount: number;
@@ -85,9 +83,9 @@ export interface ChatRowSource {
   unsettledAt?: number;
   /** The chat in front of you: never put away on a shelf. */
   focused?: boolean;
-  /** Last time the user had this chat in view. Clears the "woke" marker. */
+  /** Last time the user had this chat in view, and the read watermark: both
+   *  feed core/inbox `isUnseen`, which decides `unseen` on the row. */
   lastActiveAt?: number;
-  /** Read watermark (core/inbox `isUnseen`): a read mark clears "woke" too. */
   seenAt?: number;
   /** The agent's checklist, shown on a running row. */
   planProgress?: PlanProgress;
@@ -106,9 +104,10 @@ export interface ChatRow {
   open: boolean;
   pinned: boolean;
   messageCount: number;
-  /** A turn completed here since the user last had this conversation in view.
-   *  The live tier answers "what is happening"; this answers the question that
-   *  actually matters more often — "what happened while I was not looking". */
+  /** A turn completed, or the chat woke from a snooze, since the user last had
+   *  it in view (core/inbox `isUnseen`, the Inbox's own rule). The live tier
+   *  answers "what is happening"; this answers the question that actually
+   *  matters more often: "what happened while I was not looking". */
   unseen: boolean;
   /** A search matched inside the chat and `preview` holds the matching line,
    *  so the row needs its second line even where it would be compact. */
@@ -225,14 +224,15 @@ const ACTIVITY_SECTIONS = [
 type ActivityKey = (typeof ACTIVITY_SECTIONS)[number][0];
 
 /**
- * The one definition of "this row wants a human": blocked on a permission or a
- * question right now (`lane`), or ended in an error (`badge`). A STOPPED turn is
- * not on the list: you stopped it, so it is not news (core/inbox counts it out
- * the same way). Exported because the list is not the only reader: the rows
- * paint an attention state from it too, and when the view restated the rule it
- * restated it twice and got one of them wrong.
+ * The one definition of "this row wants a human", the same as a chat's Inbox
+ * request or error: blocked on a permission or a question right now (`lane`),
+ * or ended in an error you have not seen yet (`badge` plus `unseen`). An error
+ * dismissed in the Inbox is marked read, so it stops asking here too. A STOPPED
+ * turn is not on the list: you stopped it, so it is not news. Exported because
+ * the list is not the only reader: the rows paint an attention state from it.
  */
-export const needsYou = (r: ChatRow): boolean => r.lane === "needs-input" || r.badge === "error";
+export const needsYou = (r: ChatRow): boolean =>
+  r.lane === "needs-input" || (r.badge === "error" && r.unseen);
 
 const activityKey = (r: ChatRow): ActivityKey => r.shelf;
 
@@ -339,7 +339,7 @@ const SECTION_SORT: Partial<Record<ActivityKey, (a: ChatRow, b: ChatRow) => numb
   settled: bySettled,
 };
 
-function toRow(s: ChatRowSource): ChatRow {
+function toRow(s: ChatRowSource, now: number): ChatRow {
   const row: ChatRow = {
     id: s.id,
     title: s.title,
@@ -348,7 +348,7 @@ function toRow(s: ChatRowSource): ChatRow {
     model: s.model,
     open: s.open,
     pinned: s.pinned,
-    unseen: s.unseen,
+    unseen: isUnseen({ ...s, focused: s.focused === true }, now),
     messageCount: s.messageCount,
     shelf: "active",
   };
@@ -376,11 +376,8 @@ function stampLive(row: ChatRow, s: ChatRowSource, d: ReturnType<typeof deriveLa
   return row;
 }
 
-/**
- * Stamp the lifecycle on a row: its shelf, the keys its shelf sorts by, and
- * the woke marker, which rides on `unseen` (a chat that came back from a snooze
- * since you last looked is news, exactly like a reply you have not read).
- */
+/** Stamp the lifecycle on a row: its shelf and the keys its shelf sorts by.
+ *  The woke marker rides on `unseen`, decided in `toRow` by core/inbox. */
 function stampShelf(row: ChatRow, s: ChatRowSource, now: number, quietMs: number | null): ChatRow {
   row.shelf = shelfOf({ ...s, focused: s.focused === true }, now, quietMs);
   row.returnedAt = returnedAt(s, now);
@@ -388,8 +385,6 @@ function stampShelf(row: ChatRow, s: ChatRowSource, now: number, quietMs: number
   if (row.shelf === "settled" && s.settledOverride === "settled" && s.settledAt !== undefined) {
     row.settledAt = s.settledAt;
   }
-  const woke = wokeAt(s, now);
-  if (!s.focused && woke !== null && woke > Math.max(s.lastActiveAt ?? 0, s.seenAt ?? 0)) row.unseen = true;
   if (row.lane === "running" && s.planProgress) row.progress = s.planProgress;
   return row;
 }
@@ -432,7 +427,7 @@ export function buildChatList(
   },
 ): ChatListVM {
   const mode = opts.mode ?? "activity";
-  const visible = sources.filter((s) => !s.archived && deriveLane(s).lane !== "idle");
+  const visible = sources.filter(isListedChat); // core/inbox: the Inbox counts the same chats
   const searching = opts.query.trim().length > 0;
   // A title match stands on its own. Otherwise the matching line of the chat
   // (core/chat-search), or of the preview, replaces the preview so the row
@@ -462,14 +457,14 @@ export function buildChatList(
     for (const id of opts.semanticIds) {
       if (literal.has(id)) continue;
       const s = byId.get(id);
-      if (s) related.push(toRow(s));
+      if (s) related.push(toRow(s, opts.now));
     }
   }
 
   const rows: ChatRow[] = [];
   const quietMs = autoSettleMs(opts.autoSettleDays ?? 3);
   for (const s of matched) {
-    const row = stampShelf(stampLive(toRow(s), s, deriveLane(s)), s, opts.now, quietMs);
+    const row = stampShelf(stampLive(toRow(s, opts.now), s, deriveLane(s)), s, opts.now, quietMs);
     const snippet = snippets.get(s.id);
     if (snippet) Object.assign(row, { preview: snippet, snippet: true });
     rows.push(row);
@@ -481,7 +476,7 @@ export function buildChatList(
   const blocked: ChatRow[] = [];
   for (const s of visible) {
     const d = deriveLane(s);
-    if (d.lane === "needs-input") blocked.push(stampLive(toRow(s), s, d));
+    if (d.lane === "needs-input") blocked.push(stampLive(toRow(s, opts.now), s, d));
   }
   blocked.sort(byRecency);
 

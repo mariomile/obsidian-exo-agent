@@ -97,7 +97,6 @@ const src = (over: Partial<ChatRowSource> = {}): ChatRowSource => ({
   archived: false,
   open: false,
   pinned: false,
-  unseen: false,
   messageCount: 3,
   streaming: false,
   pendingPerm: false,

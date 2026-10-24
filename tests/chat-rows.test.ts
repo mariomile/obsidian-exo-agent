@@ -63,7 +63,8 @@ const src = (over: Partial<ChatRowSource> = {}): ChatRowSource => ({
   archived: false,
   open: false,
   pinned: false,
-  unseen: false,
+  // Read up to its last turn: a fixture is not news unless a test says so.
+  lastActiveAt: NOON,
   messageCount: 3,
   streaming: false,
   pendingPerm: false,
@@ -339,7 +340,7 @@ describe("buildChatList — ordering inside a section", () => {
   it("does not let an unseen reply jump the Active order", () => {
     const vm = build([
       src({ id: "idle", open: true, updatedAt: NOON }),
-      src({ id: "unseen", open: true, unseen: true, updatedAt: NOON - 5 * HOUR }),
+      src({ id: "unseen", open: true, updatedAt: NOON - 5 * HOUR, lastActiveAt: NOON - 6 * HOUR }),
     ]);
     expect(ids(vm, "active")).toEqual(["idle", "unseen"]);
   });
@@ -445,7 +446,7 @@ describe("buildChatList — days mode", () => {
   });
 
   it("keeps every marker on the row — only the grouping changes", () => {
-    const vm = byDays([src({ id: "a", streaming: true, pendingPerm: true, pinned: true, unseen: true })]);
+    const vm = byDays([src({ id: "a", streaming: true, pendingPerm: true, pinned: true, lastActiveAt: NOON - HOUR })]);
     const row = daySections(vm)[0].items[0];
     expect(row.lane).toBe("needs-input");
     expect(row.reason).toBe("perm");
@@ -549,14 +550,14 @@ describe("buildChatList — badges", () => {
 
 describe("buildChatList — unseen", () => {
   it("carries the unseen flag onto the row", () => {
-    const vm = build([src({ id: "a", open: true, unseen: true })]);
+    const vm = build([src({ id: "a", open: true, lastActiveAt: NOON - HOUR })]);
     expect(rows(vm, "active")[0].unseen).toBe(true);
   });
 
   it("does not by itself promote a closed conversation out of Settled", () => {
     // Unseen is a marker, not a state: promoting on it would quietly rebuild
     // the working set out of chats the user already filed away.
-    const vm = build([src({ id: "a", unseen: true, updatedAt: NOON - 4 * DAY })]);
+    const vm = build([src({ id: "a", updatedAt: NOON - 4 * DAY, lastActiveAt: NOON - 5 * DAY })]);
     expect(ids(vm, "settled")).toEqual(["a"]);
     expect(rows(vm, "settled")[0].unseen).toBe(true);
   });
@@ -578,10 +579,22 @@ describe("buildChatList — unseen", () => {
       snoozedUntil: NOON - HOUR,
       updatedAt: NOON - 3 * HOUR,
     };
+    const before = NOON - 2 * HOUR;
     expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON })]), "active")[0].unseen).toBe(false);
-    expect(rows(build([src({ id: "a", ...woke, seenAt: NOON })]), "active")[0].unseen).toBe(false);
-    expect(rows(build([src({ id: "a", ...woke, focused: true })]), "active")[0].unseen).toBe(false);
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: before, seenAt: NOON })]), "active")[0].unseen).toBe(false);
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: before, focused: true })]), "active")[0].unseen).toBe(false);
   });
+
+  it("does not mark a chat that is still snoozed, even with a reply it never showed", () => {
+    const vm = build([src({ id: "a", snoozedAt: NOON - HOUR, snoozedUntil: NOON + HOUR, updatedAt: NOON - 2 * HOUR, lastActiveAt: NOON - 3 * HOUR })]);
+    expect(rows(vm, "snoozed")[0].unseen).toBe(false);
+  });
+
+  it("leaves archived chats and empty husks out, the same chats the Inbox leaves out", () => {
+    const vm = build([src({ id: "kept" }), src({ id: "archived", archived: true }), src({ id: "husk", hasMessages: false })]);
+    expect(vm.sections.flatMap((s) => s.items.map((r) => r.id))).toEqual(["kept"]);
+  });
+
 });
 
 describe("buildChatList — search", () => {
@@ -847,9 +860,13 @@ describe("needsYou", () => {
   const row = (over: Partial<ChatRow> = {}): ChatRow =>
     ({ id: "a", lane: null, badge: null, ...over }) as ChatRow;
 
-  it("is true on both arms: blocked right now, or ended in an error", () => {
+  it("is true on both arms: blocked right now, or ended in an error not yet seen", () => {
     expect(needsYou(row({ lane: "needs-input" }))).toBe(true);
-    expect(needsYou(row({ badge: "error" }))).toBe(true);
+    expect(needsYou(row({ badge: "error", unseen: true }))).toBe(true);
+  });
+
+  it("is false for an error already seen or dismissed in the Inbox", () => {
+    expect(needsYou(row({ badge: "error", unseen: false }))).toBe(false);
   });
 
   it("is false for a turn the user stopped", () => {
@@ -865,6 +882,6 @@ describe("needsYou", () => {
     // `badge` is a string; the rich row read it as truthy and the compact row
     // read it too, but only one of them also read `lane`. One predicate, one
     // shape, no second copy to drift.
-    expect(needsYou(row({ badge: "error" }))).toBe(true);
+    expect(needsYou(row({ badge: "error", unseen: true }))).toBe(true);
   });
 });

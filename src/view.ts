@@ -1529,11 +1529,10 @@ export class ChatView extends ItemView {
     for (const id of shown) {
       const c = this.convos.find((x) => x.id === id);
       if (!c) continue;
+      const live = { streaming: c.streaming, pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null };
       const vm = deriveTabState({
-        streaming: c.streaming,
-        pendingPerm: c.pendingPerm != null,
-        pendingAsk: c.pendingAsk != null,
-        unread: isUnseen({ ...c, focused: c === this.active }),
+        ...live,
+        unread: isUnseen({ ...c, ...live, focused: c === this.active }, Date.now()), // core/inbox: the one read rule
         stopped: c.stopped,
         poisoned: !!c.resumeRisky,
       });
@@ -2031,7 +2030,6 @@ export class ChatView extends ItemView {
       open: open.has(c.id),
       pinned: c.pinned === true,
       messageCount: c.messages.filter((m) => m.role === "user" && !m.auto).length,
-      unseen: isUnseen({ ...c, focused: c === this.active }), // core/inbox: the one read rule
       streaming: c.streaming,
       pendingPerm: c.pendingPerm != null,
       pendingAsk: c.pendingAsk != null,

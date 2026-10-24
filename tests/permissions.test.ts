@@ -240,7 +240,6 @@ describe("the inline decision path (chats sidebar)", () => {
     archived: false,
     open: false,
     pinned: false,
-    unseen: false,
     messageCount: 1,
     streaming: true,
     pendingPerm: true,

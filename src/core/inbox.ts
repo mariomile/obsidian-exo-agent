@@ -5,6 +5,8 @@
  * disagree about how many things need you.
  *
  * Counting rules, each enforced here and nowhere else:
+ *  - only a chat the sidebar lists can count (`isListedChat`): archived chats
+ *    and empty husks never do;
  *  - a chat counts once, by its strongest state: request > error > new result;
  *  - streaming and stopped chats are not in the Inbox;
  *  - unreviewed write runs count once per automation, whatever their number;
@@ -17,6 +19,8 @@
  */
 import { unreviewedWriteRuns, type AutomationRunRecord } from "./automations";
 import { dailyPulseNeedsReview, type DailyPulseReviewState } from "./daily-pulse";
+import { deriveLane, type SessionSnapshot } from "./session-cards";
+import { effectiveSnoozed, wokeAt } from "./thread-lifecycle";
 
 export type InboxKind = "request" | "error" | "result";
 export type InboxSource = "chat" | "runs" | "run" | "proposals" | "pulse" | "answer";
@@ -49,10 +53,14 @@ export interface InboxChat {
   pendingPerm: boolean;
   pendingAsk: boolean;
   poisoned: boolean;
+  archived: boolean;
+  hasMessages: boolean;
   permRule?: string;
   updatedAt?: number;
   lastActiveAt?: number;
   seenAt?: number;
+  snoozedUntil?: number;
+  snoozedAt?: number;
 }
 
 export interface InboxAnswer {
@@ -87,13 +95,29 @@ const ANSWER_WINDOW_MS = DAY;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * A turn landed here since the user last had the chat in view or marked it
- * read. Never the chat in front of you: you are reading it.
+ * The one visibility rule: a chat the sidebar lists, and so a chat the Inbox
+ * may count. Archived chats are put away, and a chat with no messages that is
+ * not running or blocked is an empty husk with nothing to say.
  */
-export function isUnseen(
-  c: Pick<InboxChat, "focused" | "updatedAt" | "lastActiveAt" | "seenAt">,
-): boolean {
-  return !c.focused && (c.updatedAt ?? 0) > Math.max(c.lastActiveAt ?? 0, c.seenAt ?? 0);
+export function isListedChat(c: SessionSnapshot): boolean {
+  return !c.archived && deriveLane(c).lane !== "idle";
+}
+
+export type UnseenFacts = Pick<
+  InboxChat,
+  "focused" | "updatedAt" | "lastActiveAt" | "seenAt" | "snoozedUntil" | "snoozedAt" | "pendingPerm" | "pendingAsk"
+>;
+
+/**
+ * The one read rule, for the Inbox, the sidebar rows and the tab strip: a turn
+ * landed, or the chat woke from a snooze, since the user last had it in view or
+ * marked it read. Never the chat in front of you (you are reading it), and
+ * never a chat still snoozed: "not now" holds until it wakes.
+ */
+export function isUnseen(c: UnseenFacts, now: number): boolean {
+  if (c.focused || effectiveSnoozed(c, now)) return false;
+  const news = Math.max(c.updatedAt ?? 0, wokeAt(c, now) ?? 0);
+  return news > Math.max(c.lastActiveAt ?? 0, c.seenAt ?? 0);
 }
 
 /** Which automation a run belongs to: its file slug, else (pre-v2) its name. */
@@ -153,7 +177,8 @@ export function openFailedRuns(runs: readonly AutomationRunRecord[]): Automation
     .sort((a, b) => b.startedAt - a.startedAt);
 }
 
-function chatItem(c: InboxChat): InboxItem | null {
+function chatItem(c: InboxChat, now: number): InboxItem | null {
+  if (!isListedChat(c)) return null;
   const base = { source: "chat" as const, title: c.title || "Untitled", at: c.updatedAt ?? 0, target: c.id };
   if (c.pendingPerm) {
     return {
@@ -168,7 +193,7 @@ function chatItem(c: InboxChat): InboxItem | null {
   if (c.pendingAsk) {
     return { ...base, id: `chat:${c.id}:ask`, kind: "request", detail: "Asked you a question", verbs: ["resolve"] };
   }
-  if (c.streaming || c.stopped || !isUnseen(c)) return null;
+  if (c.streaming || c.stopped || !isUnseen(c, now)) return null;
   if (c.poisoned) {
     return {
       ...base,
@@ -216,7 +241,7 @@ const KIND_ORDER: Record<InboxKind, number> = { request: 0, error: 1, result: 2 
 export function buildInbox(i: InboxInput): Inbox {
   const items: InboxItem[] = [];
   for (const c of i.chats ?? []) {
-    const it = chatItem(c);
+    const it = chatItem(c, i.now);
     if (it) items.push(it);
   }
   for (const g of groupUnreviewedRuns(i.runs)) {

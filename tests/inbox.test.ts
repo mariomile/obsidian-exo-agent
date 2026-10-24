@@ -25,6 +25,8 @@ const chat = (id: string, over: Partial<InboxChat> = {}): InboxChat => ({
   pendingPerm: false,
   pendingAsk: false,
   poisoned: false,
+  archived: false,
+  hasMessages: true,
   updatedAt: NOW - HOUR,
   lastActiveAt: NOW - 2 * HOUR,
   ...over,
@@ -55,14 +57,20 @@ const input = (over: Partial<InboxInput> = {}): InboxInput => ({
 
 describe("isUnseen", () => {
   it("is true when a turn landed after the last visit", () => {
-    expect(isUnseen(chat("a"))).toBe(true);
+    expect(isUnseen(chat("a"), NOW)).toBe(true);
   });
   it("is false for the chat in front of you", () => {
-    expect(isUnseen(chat("a", { focused: true }))).toBe(false);
+    expect(isUnseen(chat("a", { focused: true }), NOW)).toBe(false);
   });
   it("is cleared by a read mark as well as by a visit", () => {
-    expect(isUnseen(chat("a", { seenAt: NOW - HOUR / 2 }))).toBe(false);
-    expect(isUnseen(chat("a", { lastActiveAt: NOW }))).toBe(false);
+    expect(isUnseen(chat("a", { seenAt: NOW - HOUR / 2 }), NOW)).toBe(false);
+    expect(isUnseen(chat("a", { lastActiveAt: NOW }), NOW)).toBe(false);
+  });
+  it("holds while a chat is snoozed and turns true when it wakes", () => {
+    const snoozed = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR });
+    expect(isUnseen({ ...snoozed, snoozedUntil: NOW + HOUR }, NOW)).toBe(false);
+    expect(isUnseen({ ...snoozed, snoozedUntil: NOW - HOUR }, NOW)).toBe(true);
+    expect(isUnseen({ ...snoozed, snoozedUntil: NOW - HOUR, seenAt: NOW - HOUR / 2 }, NOW)).toBe(false);
   });
 });
 
@@ -76,6 +84,18 @@ describe("buildInbox: chats", () => {
   it("files an open question as an ask request", () => {
     const inbox = buildInbox(input({ chats: [chat("a", { pendingAsk: true, streaming: true })] }));
     expect(inbox.items.map((i) => i.id)).toEqual(["chat:a:ask"]);
+  });
+
+  it("leaves archived chats and empty husks out, as the sidebar does", () => {
+    const inbox = buildInbox(input({
+      chats: [chat("arch", { archived: true }), chat("arch-err", { archived: true, poisoned: true }), chat("husk", { hasMessages: false })],
+    }));
+    expect(inbox.count).toBe(0);
+  });
+
+  it("leaves a still-snoozed chat out until it wakes", () => {
+    const c = chat("a", { snoozedAt: NOW - HOUR / 2, snoozedUntil: NOW + HOUR });
+    expect(buildInbox(input({ chats: [c] })).count).toBe(0);
   });
 
   it("leaves streaming and stopped chats out", () => {

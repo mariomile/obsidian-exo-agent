@@ -85,7 +85,6 @@ describe("chats sidebar search looks inside the chat", () => {
     archived: false,
     open: false,
     pinned: false,
-    unseen: false,
     messageCount: 1,
     streaming: false,
     pendingPerm: false,
