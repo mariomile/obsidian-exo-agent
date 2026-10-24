@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolFilePath, toolFilePaths } from "../src/ui/tools";
+import { toolFilePath, toolFilePaths, toolMeta } from "../src/ui/tools";
 
 describe("toolFilePaths", () => {
   it("returns both rename endpoints so rewind can restore both", () => {
@@ -13,6 +13,12 @@ describe("toolFilePaths", () => {
 
   it("save_to_note targets its path, so rewind and click-to-open see it", () => {
     expect(toolFilePaths("mcp__obsidian__save_to_note", { path: "Projects/Pricing.md", text: "x" })).toEqual(["Projects/Pricing.md"]);
+  });
+
+  it("propose_correction has a label and its note as target, but no rewind path: it writes nothing", () => {
+    expect(toolMeta("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md", old_line: "a", new_text: "b" }))
+      .toEqual({ icon: "file-check", label: "Propose correction", target: "Pricing.md", openPath: undefined });
+    expect(toolFilePaths("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md" })).toEqual([]);
   });
 
   it("keeps one-path tools compatible", () => {

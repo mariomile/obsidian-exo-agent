@@ -28,7 +28,7 @@ import * as convoBridge from "./ui/convo-bridge";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
 import { defaultModel, stripObsoleteSettings } from "./settings-schema";
 import { pluginMemoryCaps, registerMemory, undoMemoryWrite } from "./obsidian/memory-wiring";
-import { registerNoteSaves } from "./obsidian/note-save";
+import { noteCorrections, registerNoteSaves } from "./obsidian/note-save";
 import type { MemoryHarvester } from "./obsidian/memory-harvest";
 import type { HarvestLog } from "./obsidian/harvest-log";
 import type { MemoryCaps } from "./core/memory-caps";
@@ -340,8 +340,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;
-    // The route is lazy: the acceptance deps are built right after, and it writes
-    // loops and decisions on append, playbooks on accept.
+    // Lazy route: deps are built below; memory kinds route on append, the rest on accept.
     this.proposalStore = new ProposalStore({
       read: async (relativePath) => {
         const path = `${proposalRoot}/${relativePath}`;
@@ -393,6 +392,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       openLoopsPath: this.paths.openLoops,
       decisionsDir: this.paths.decisions,
       noteWrite: (paths) => this.noteVaultWrite(paths),
+      corrections: noteCorrections(this.app, () => this.noteSaves, (paths) => this.noteVaultWrite(paths)),
     });
 
     registerMemory(this);

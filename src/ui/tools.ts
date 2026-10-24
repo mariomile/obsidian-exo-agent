@@ -62,6 +62,7 @@ const OBSIDIAN_META: Record<string, { icon: string; label: string; targetKey?: s
   get_active_context: { icon: "crosshair", label: "Active context" },
   create_note: { icon: "file-plus", label: "Create note", targetKey: "path" },
   save_to_note: { icon: "file-down", label: "Save to note", targetKey: "path" },
+  propose_correction: { icon: "file-check", label: "Propose correction", targetKey: "path" },
   update_frontmatter: { icon: "settings-2", label: "Frontmatter", targetKey: "target" },
   add_links: { icon: "link", label: "Add links", targetKey: "target" },
   open_note: { icon: "external-link", label: "Open note", targetKey: "target" },

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TFile, TFolder, type App } from "obsidian";
-import { saveToNote, undoSave } from "../src/obsidian/note-save";
+import { noteCorrections, saveToNote, undoSave } from "../src/obsidian/note-save";
 import { SaveLog } from "../src/obsidian/save-log";
 import { buildObsidianTools } from "../src/obsidian/tools";
 import { renderSaveReceipt } from "../src/ui/save-receipt";
@@ -231,5 +231,105 @@ describe("renderSaveReceipt", () => {
     undo.click();
     expect(calls).toEqual(["open", "undo"]);
     expect(el.all().some((c) => c.tag === "button")).toBe(false);
+  });
+});
+
+describe("noteCorrections (accepted correction proposals)", () => {
+  const input = { proposalId: "p1", title: "Correct old", convoId: "c1" };
+
+  it("writes frontmatter through the receipt log, tells git autocommit, and undoes like a save", async () => {
+    const before = "---\nstatus: active\ntype: decision\n---\nBody.\n";
+    const { app, notes } = vault({ "D/old.md": before });
+    const log = memLog();
+    const wrote: string[][] = [];
+    const target = noteCorrections(app, () => log, (paths) => wrote.push([...paths]));
+    await expect(target.apply({ ...input, path: "D/old.md", change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[new]]" } } }))
+      .resolves.toEqual({ path: "D/old.md" });
+    expect(notes.get("D/old.md")).toBe('---\nstatus: "superseded"\ntype: decision\nsuperseded_by: "[[new]]"\n---\nBody.\n');
+    expect(wrote).toEqual([["D/old.md"]]);
+    const [r] = await log.list();
+    expect(r).toMatchObject({ op: "frontmatter", path: "D/old.md", provenance: { convoId: "c1", chatTitle: "Correct old" } });
+    expect((await undoSave(app, log))?.ok).toBe(true);
+    expect(notes.get("D/old.md")).toBe(before);
+  });
+
+  it("replaces the outdated line and refuses, writing nothing, when it changed or is ambiguous", async () => {
+    const { app, notes } = vault({ "N.md": "- Pro is 29 euro\n", "Two.md": "- x\n- x\n" });
+    const log = memLog();
+    const target = noteCorrections(app, () => log, () => {});
+    const newLine = "- Pro is 39 euro (dal 2026-10-24; prima Pro is 29 euro)";
+    await target.apply({ ...input, path: "N.md", change: { type: "line", oldLine: "- Pro is 29 euro", newLine } });
+    expect(notes.get("N.md")).toBe(`${newLine}\n`);
+    await expect(target.apply({ ...input, path: "N.md", change: { type: "line", oldLine: "- Pro is 29 euro", newLine } }))
+      .rejects.toThrow("The outdated line is no longer in N. Open the note to fix it by hand.");
+    await expect(target.apply({ ...input, path: "Two.md", change: { type: "line", oldLine: "- x", newLine: "- y" } }))
+      .rejects.toThrow("The outdated line appears more than once in Two. Open the note to fix it by hand.");
+    await expect(target.apply({ ...input, path: "Gone.md", change: { type: "line", oldLine: "- x", newLine: "- y" } }))
+      .rejects.toThrow("Note not found: Gone.md");
+    expect(notes.get("Two.md")).toBe("- x\n- x\n");
+    expect(await log.list()).toHaveLength(1);
+  });
+});
+
+describe("propose_correction tool", () => {
+  function withHost(files: Record<string, string>, enabled = true) {
+    const v = vault(files);
+    const appended: { candidate: { payload: unknown }; source: { convoId: string } }[] = [];
+    let refreshed = 0;
+    (v.app as unknown as { plugins: unknown }).plugins = {
+      plugins: {
+        "exo-agent": {
+          loadAutomationRuns: async () => [],
+          runPlaybook: async () => true,
+          settings: { collaboUrl: "", proposalKernelEnabled: enabled },
+          proposalStore: {
+            append: async (candidate: { payload: unknown }, source: { convoId: string }) => {
+              const dup = appended.some((a) => JSON.stringify(a.candidate.payload) === JSON.stringify(candidate.payload));
+              if (!dup) appended.push({ candidate, source });
+              return { status: dup ? "duplicate" : "appended" };
+            },
+          },
+          inbox: { refresh: async () => void refreshed++ },
+        },
+      },
+    };
+    const run = async (args: Record<string, unknown>) => {
+      const t = buildObsidianTools(v.app, { convoId: "c1" }).find((x) => x.name === "propose_correction")!;
+      const res = await (t.handler as (a: unknown, e: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(args, {});
+      return { text: res.content[0].text, isError: res.isError === true };
+    };
+    return { ...v, appended, run, refreshed: () => refreshed };
+  }
+
+  it("proposes the line in the vault's changed-fact format and never touches the note", async () => {
+    const { notes, appended, run, refreshed } = withHost({ "Pricing.md": "# Pricing\n- Pro is 29 euro\n" });
+    const res = await run({ path: "Pricing.md", old_line: "Pro is 29 euro", new_text: "Pro is 39 euro" });
+    expect(res).toEqual({ text: "Correction proposed for Pricing. Mario accepts it in the Inbox.", isError: false });
+    expect(notes.get("Pricing.md")).toBe("# Pricing\n- Pro is 29 euro\n");
+    expect(appended).toHaveLength(1);
+    expect(appended[0].source).toMatchObject({ convoId: "c1" });
+    expect(appended[0].candidate.payload).toMatchObject({
+      kind: "correction",
+      path: "Pricing.md",
+      change: { type: "line", oldLine: "- Pro is 29 euro", newLine: expect.stringMatching(/^- Pro is 39 euro \(dal \d{4}-\d{2}-\d{2}; prima Pro is 29 euro\)$/) },
+    });
+    expect(refreshed()).toBe(1);
+    expect((await run({ path: "Pricing.md", old_line: "Pro is 29 euro", new_text: "Pro is 39 euro" })).isError).toBe(false);
+    expect(appended).toHaveLength(1);
+  });
+
+  it("errors the model can act on: unknown note, missing or ambiguous line, suggestions off", async () => {
+    const { run } = withHost({ "N.md": "- a\n- a\n" });
+    expect((await run({ path: "Nope", old_line: "a", new_text: "b" })).text).toBe("Note not found: Nope");
+    expect((await run({ path: "N.md", old_line: "zzz", new_text: "b" })).text).toBe("Line not found in N. Quote the outdated line exactly as it is in the note.");
+    expect((await run({ path: "N.md", old_line: "- a", new_text: "b" })).text).toBe("That line appears more than once in N. Quote a longer, unique line.");
+    const off = withHost({ "N.md": "- a\n" }, false);
+    expect(await off.run({ path: "N.md", old_line: "- a", new_text: "b" })).toEqual({ text: "Suggestions are off, so no correction can be proposed.", isError: true });
+  });
+
+  it("is registered only with a conversation", () => {
+    const { app } = vault({});
+    expect(buildObsidianTools(app, { convoId: "c1" }).map((t) => t.name)).toContain("propose_correction");
+    expect(buildObsidianTools(app).map((t) => t.name)).not.toContain("propose_correction");
   });
 });

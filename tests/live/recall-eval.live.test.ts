@@ -13,6 +13,9 @@
  *
  * The adapter's own semantic call is not used here on purpose: it may refresh
  * the script it runs inside the plugin folder, and this run must not write.
+ * For the same reason the supersede index is built here from the same
+ * frontmatter the adapter reads, and the correction proposals recall would
+ * make are only listed, never appended.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -41,6 +44,7 @@ import {
   type CaseScore,
   type EvalCase,
 } from "../../src/core/recall-eval";
+import { buildSupersedeIndex, markersOf } from "../../src/core/supersede";
 import { parseFrontMatterAliases, type App } from "obsidian";
 
 const VAULT = "marioverse.ai";
@@ -70,7 +74,7 @@ interface LiveVault {
   sonar: NoteHit[][];
   /** Milliseconds per Sonar call, as the turn would pay it. */
   sonarMs: number[];
-  names: { path: string; basename: string; frontmatter: Record<string, unknown> | null }[];
+  names: { path: string; basename: string; frontmatter: Record<string, unknown> | null; links: { key: string; target: string }[] }[];
 }
 
 /** One Obsidian round trip for every question. Every call in it only reads. */
@@ -92,8 +96,13 @@ function liveVault(queries: string[]): LiveVault {
       sonar: hits.map((hs) => hs.map((h) => ({ path: h.path, title: h.title, score: h.score, excerpt: h.excerpt ?? "" }))),
       sonarMs,
       names: app.vault.getMarkdownFiles().map((f) => {
-        const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-        return { path: f.path, basename: f.basename, frontmatter: fm ? { aliases: fm.aliases, alias: fm.alias } : null };
+        const cache = app.metadataCache.getFileCache(f);
+        const fm = cache?.frontmatter;
+        const links = (cache?.frontmatterLinks ?? [])
+          .filter((l) => /^supersede(s|d_by)(\\.|$)/.test(l.key))
+          .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
+        const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by } : null;
+        return { path: f.path, basename: f.basename, frontmatter: keep, links };
       }),
     });
   })()`;
@@ -150,9 +159,11 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
     const now = Date.now();
 
-    const names = vault.names
-      .filter((n) => !exclude(n.path))
-      .map((n) => ({ path: n.path, basename: n.basename, aliases: parseFrontMatterAliases(n.frontmatter) ?? [] }));
+    const kept = vault.names.filter((n) => !exclude(n.path));
+    const names = kept.map((n) => ({ path: n.path, basename: n.basename, aliases: parseFrontMatterAliases(n.frontmatter) ?? [] }));
+    // The supersede index the turn builds (obsidian/turn-recall `scanNotes`).
+    const supersede = buildSupersedeIndex(kept.map((n) => markersOf(n.path, n.frontmatter ?? undefined, n.links)));
+    const proposed = new Set<string>();
     const stampBefore = indexStamp();
 
     const rows: string[] = [];
@@ -171,7 +182,8 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       semanticMs.push(sem.ms);
       const semIds = sem.scored && sem.scored.map((x) => x.id);
       const semanticChats = sem.scored && chatsFromIds(semanticHits(sem.scored), store, { excludeId: "" });
-      const ranked = rankRecall({ sonar, title, lexicalChats, semanticChats }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS });
+      const ranked = rankRecall({ sonar, title, lexicalChats, semanticChats }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede.index });
+      for (const n of ranked.notes) if (supersede.fixes.some((f) => f.path === n.path)) proposed.add(n.path);
       const score = scoreCase(recallItems(ranked), c);
       scores.push(score);
 
@@ -217,12 +229,16 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         `sonar lane: ${ms(vault.sonarMs)}`,
         `title lane (${names.length} notes): ${ms(titleMs)}`,
         `semantic lane (node spawn + embed): ${ms(semanticMs)}`,
+        `supersede: ${supersede.fixes.length} notes with disagreeing markers, ${supersede.broken.length} broken links; ` +
+          `the 10 questions would propose ${proposed.size} correction(s)`,
+        ...supersede.fixes.map((f) => `  ${proposed.has(f.path) ? "*" : " "} ${f.path}: ${JSON.stringify(f.set)}`),
         `ordinary prompts (${ordinary.length}): ${total("before")} chats injected without the semantic floor, ${total("after")} with it (${ordinary.map((o) => `${o.before}>${o.after}`).join(" ")})`,
       ].join("\n"),
     );
 
-    // S3 exit check (plan 5): every question finds a source it needs. Traps
-    // may still lead until the supersede labels land.
+    // S6 exit check (plan 5): every question finds a source it needs, and no
+    // superseded note leads unlabelled.
     expect(summary.hitAt5).toBe(10);
+    expect(summary.traps).toBe(0);
   }, 300_000);
 });

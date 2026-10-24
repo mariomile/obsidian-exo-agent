@@ -7,7 +7,7 @@
  * Every dependency failure is converted to a route result so ProposalStore can
  * leave the record pending, keep the error, and offer Retry.
  */
-import type { ProposalPayload, ProposalRecord } from "../core/proposals";
+import type { CorrectionChange, ProposalPayload, ProposalRecord } from "../core/proposals";
 import type { ProposalRouteResult } from "./proposal-store";
 
 export type ProposalAcceptanceResult = ProposalRouteResult;
@@ -28,6 +28,14 @@ export interface DecisionCaptureInput {
   rationale: string;
 }
 
+export interface CorrectionApplyInput {
+  proposalId: string;
+  title: string;
+  convoId: string;
+  path: string;
+  change: CorrectionChange;
+}
+
 export interface ProposalAcceptanceDeps {
   /** Production implementation must use the shared Open Loops WriteQueue. */
   loops: {
@@ -44,6 +52,10 @@ export interface ProposalAcceptanceDeps {
    */
   playbooks: {
     save(playbook: { proposalId: string; name: string; prompt: string }): Promise<{ name: string }>;
+  };
+  /** Writes the fix into the note atomically and keeps an undo receipt; throws when it no longer applies. */
+  corrections: {
+    apply(correction: CorrectionApplyInput): Promise<{ path: string }>;
   };
 }
 
@@ -112,6 +124,16 @@ export async function routeAcceptedProposal(
       case "playbook": {
         const created = await deps.playbooks.save({ proposalId: record.id, name: payload.name, prompt: payload.prompt });
         return { ok: true, target: created.name };
+      }
+      case "correction": {
+        const { path } = await deps.corrections.apply({
+          proposalId: record.id,
+          title: record.title,
+          convoId: record.source.convoId,
+          path: payload.path,
+          change: payload.change,
+        });
+        return { ok: true, target: path };
       }
       default:
         return unsupportedPayload(payload);

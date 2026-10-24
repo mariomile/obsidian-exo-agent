@@ -16,6 +16,8 @@ import {
   type NoteRecall,
   type TitleHit,
 } from "../core/turn-recall";
+import { buildSupersedeIndex, markersOf, type MarkerFix, type SupersedeIndex } from "../core/supersede";
+import { proposeMarkerFixes } from "./corrections";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
 import { recallChatScores, recallHost } from "../ui/chat-recall";
 import type { PathFilter } from "../core/vault-exclusions";
@@ -51,12 +53,21 @@ function withinBudget<T>(p: Promise<T>, ms: number): Promise<T | null> {
   });
 }
 
-/** Every note's name and aliases, minus excluded paths: the title lane's input. */
-function noteNames(app: App, exclude: PathFilter) {
-  return app.vault
-    .getMarkdownFiles()
-    .filter((f) => !exclude(f.path))
-    .map((f) => ({ path: f.path, basename: f.basename, aliases: parseFrontMatterAliases(app.metadataCache.getFileCache(f)?.frontmatter) ?? [] }));
+/** One pass over the notes, minus excluded paths: names and aliases for the
+ *  title lane, supersede markers (links resolved to paths) for the index. */
+function scanNotes(app: App, exclude: PathFilter) {
+  const files = app.vault.getMarkdownFiles().filter((f) => !exclude(f.path));
+  const names = [];
+  const markers = [];
+  for (const f of files) {
+    const cache = app.metadataCache.getFileCache(f);
+    names.push({ path: f.path, basename: f.basename, aliases: parseFrontMatterAliases(cache?.frontmatter) ?? [] });
+    const links = (cache?.frontmatterLinks ?? [])
+      .filter((l) => /^supersede(s|d_by)(\.|$)/.test(l.key))
+      .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
+    markers.push(markersOf(f.path, cache?.frontmatter, links));
+  }
+  return { names, supersede: buildSupersedeIndex(markers) };
 }
 
 /**
@@ -80,9 +91,12 @@ export async function recallForTurn(
       : Promise.resolve(null);
   let sonar: NoteRecall[] = [];
   let title: TitleHit[] = [];
+  let supersede: { index: SupersedeIndex; fixes: MarkerFix[] } | undefined;
   try {
     const exclude = input.exclude ?? vaultExclusion(app);
-    title = titleLane(keywords, noteNames(app, exclude)).slice(0, RECALL_LANE_DEPTH);
+    const scan = scanNotes(app, exclude);
+    supersede = scan.supersede;
+    title = titleLane(keywords, scan.names).slice(0, RECALL_LANE_DEPTH);
     const { hits } = await searchVaultNotes(app, keywords.join(" "), RECALL_LANE_DEPTH, exclude);
     sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
   } catch {
@@ -92,8 +106,12 @@ export async function recallForTurn(
   const scored = await semantic;
   const { notes, chats } = rankRecall(
     { sonar, title, lexicalChats, semanticChats: scored && chatsFromIds(semanticHits(scored), input.chats, { excludeId: input.convoId }) },
-    { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS },
+    { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede?.index },
   );
+  // A recalled note whose markers disagree becomes a correction proposal.
+  const recalled = new Set(notes.map((n) => n.path));
+  const fixes = supersede?.fixes.filter((f) => recalled.has(f.path)) ?? [];
+  if (fixes.length) void proposeMarkerFixes(app, fixes, input.convoId).catch(() => {});
   const block = formatRecallBlock(notes, chats);
   return block ? { block, notes, chats } : null;
 }

@@ -5,19 +5,22 @@
  * never removed. No Obsidian import.
  */
 import type { PatchPlan, Provenance, SaveBlock } from "./block-patch";
+import { frontmatterKeyLines, setFrontmatterKeyLines } from "./frontmatter-patch";
 import { uniqueRun } from "./memory-undo";
 import { bodyLines, type SectionRef } from "./save-target";
 
 export interface SaveReceipt {
   /** = the block anchor. */
   id: string;
-  op: "insert" | "replace";
+  op: "insert" | "replace" | "frontmatter";
   path: string;
   section: SectionRef;
-  /** Exact inserted block lines (insert) or `[newLine]` (replace). */
+  /** Exact inserted block lines (insert), `[newLine]` (replace), the key lines written (frontmatter). */
   lines: string[];
   /** The old line (replace). */
   replaced?: string;
+  /** Each frontmatter key set: its lines before ([] = absent) and the line written. */
+  keys?: { key: string; before: string[]; after: string }[];
   /** The heading line Exo added, if any. */
   createdHeading?: string;
   /** Blank separators Exo added around the insert. */
@@ -73,6 +76,13 @@ export function planUndo(current: string, r: SaveReceipt): UndoPlan {
   if (r.undoneAt) return { ok: false, reason: "already-undone" };
   const lines = bodyLines(current);
   const view = lines.map(plain);
+
+  if (r.op === "frontmatter") {
+    const keys = r.keys ?? [];
+    if (keys.some((k) => frontmatterKeyLines(current, k.key).join("\n") !== k.after)) return { ok: false, reason: "line-changed" };
+    const created = keys.every((k) => !k.before.length);
+    return { ok: true, next: keys.reduce((doc, k) => setFrontmatterKeyLines(doc, k.key, k.before, created), current) };
+  }
 
   if (r.op === "replace") {
     const i = uniqueRun(view, r.lines.slice(0, 1));

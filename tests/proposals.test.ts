@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  correctionCandidate,
   evaluateProposal,
+  isMemoryProposalKind,
   fingerprintProposal,
   formatProposalPreview,
   parseProposalCandidates,
@@ -218,10 +220,67 @@ describe("pruneProposalRecords", () => {
 describe("formatProposalPreview", () => {
   it("formats a compact, single-line, quiet preview", () => {
     expect(formatProposalPreview(candidate({ rationale: "Explicit\ncommitment   from Mario." }))).toBe(
-      "Playbook · Write release notes — Explicit commitment from Mario."
+      "Playbook · Write release notes: Explicit commitment from Mario."
     );
     const long = formatProposalPreview(candidate({ rationale: "x".repeat(500) }));
     expect(long).toHaveLength(180);
     expect(long.endsWith("…")).toBe(true);
+  });
+});
+
+describe("correction proposals", () => {
+  const path = "_system/memory/decisions/2026-09-24-vault-lean.md";
+  const frontmatter = { type: "frontmatter" as const, set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" } };
+  const line = { type: "line" as const, oldLine: "- Pro is 29 euro", newLine: "- Pro is 39 euro (dal 2026-10-24; prima Pro is 29 euro)" };
+
+  it("builds a titled candidate whose rationale is the reason", () => {
+    expect(correctionCandidate(path, frontmatter, "A newer note supersedes it.")).toEqual({
+      kind: "correction",
+      title: "Correct 2026-09-24-vault-lean",
+      payload: { kind: "correction", path, change: frontmatter, because: "A newer note supersedes it." },
+      rationale: "A newer note supersedes it.",
+    });
+  });
+
+  it("round-trips both change shapes through the validator", () => {
+    for (const change of [frontmatter, line]) {
+      const value = correctionCandidate(path, change, "Outdated.");
+      const parsed = parseProposalCandidates(JSON.stringify([{ ...value.payload, rationale: value.rationale }]));
+      expect(parsed).toEqual({ status: "ok", value: [value] });
+    }
+  });
+
+  it("rejects a correction without a path, with an unknown change, or with an empty or non-string set", () => {
+    const base = { kind: "correction", path, because: "x", rationale: "x" };
+    const bad = [
+      { ...base, path: " ", change: frontmatter },
+      { ...base, change: { type: "rewrite" } },
+      { ...base, change: { type: "frontmatter", set: {} } },
+      { ...base, change: { type: "frontmatter", set: { status: 3 } } },
+      { ...base, change: { type: "line", oldLine: "- a", newLine: " " } },
+      { ...base, change: frontmatter, because: "" },
+    ];
+    for (const value of bad) expect(parseProposalCandidates(JSON.stringify([value])).status).toBe("invalid");
+  });
+
+  it("is not a memory kind: it waits for Mario's accept", () => {
+    expect(isMemoryProposalKind("correction")).toBe(false);
+  });
+
+  it("fingerprints on path and change, not on the reason, and set key order does not matter", () => {
+    const a = correctionCandidate(path, frontmatter, "one reason").payload;
+    const b = correctionCandidate(path, { type: "frontmatter", set: { superseded_by: "[[2026-09-25-memoria]]", status: "superseded" } }, "another").payload;
+    expect(fingerprintProposal(a)).toBe(fingerprintProposal(b));
+    expect(fingerprintProposal(correctionCandidate("Other.md", frontmatter, "x").payload)).not.toBe(fingerprintProposal(a));
+    expect(fingerprintProposal(correctionCandidate(path, line, "x").payload)).not.toBe(fingerprintProposal(a));
+  });
+
+  it("deduplicates pending, accepted and also dismissed corrections, so recall never re-proposes one Mario turned down", () => {
+    const value = correctionCandidate(path, frontmatter, "x");
+    const existing = (status: ProposalRecord["status"]) =>
+      record(status, NOW - DAY, { kind: "correction", title: value.title, payload: value.payload, rationale: value.rationale, fingerprint: fingerprintProposal(value.payload) });
+    expect(evaluateProposal(value, [existing("pending")], NOW).status).toBe("duplicate");
+    expect(evaluateProposal(value, [existing("accepted")], NOW).status).toBe("duplicate");
+    expect(evaluateProposal(value, [existing("dismissed")], NOW).status).toBe("duplicate");
   });
 });

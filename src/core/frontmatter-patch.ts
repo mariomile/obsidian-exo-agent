@@ -33,16 +33,20 @@ function topLevelKey(line: string): string | null {
   return raw;
 }
 
-function replaceKeyBlock(block: string, key: string, line: string | null, newline: string): string {
-  const lines = block ? block.split(/\r?\n/) : [];
+/** Where `key`'s block (its line plus indented continuation lines) sits. */
+function keySpan(lines: readonly string[], key: string): { start: number; end: number } | null {
   const start = lines.findIndex((candidate) => topLevelKey(candidate) === key);
-  if (start < 0) {
-    if (line !== null) lines.push(line);
-    return lines.join(newline);
-  }
+  if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length && topLevelKey(lines[end]) === null) end++;
-  lines.splice(start, end - start, ...(line === null ? [] : [line]));
+  return { start, end };
+}
+
+function replaceKeyBlock(block: string, key: string, replacement: readonly string[], newline: string): string {
+  const lines = block ? block.split(/\r?\n/) : [];
+  const span = keySpan(lines, key);
+  if (!span) lines.push(...replacement);
+  else lines.splice(span.start, span.end - span.start, ...replacement);
   return lines.join(newline);
 }
 
@@ -83,11 +87,31 @@ export function patchFrontmatter(
   const newline = documentNewline(content);
   let block = content.slice(bounds.start, bounds.end);
   for (const key of removeKeys) {
-    block = replaceKeyBlock(block, key, null, newline);
+    block = replaceKeyBlock(block, key, [], newline);
   }
   for (const [key, value] of entries) {
     const line = `${yamlKey(key)}: ${yamlValue(value)}`;
-    block = replaceKeyBlock(block, key, line, newline);
+    block = replaceKeyBlock(block, key, [line], newline);
   }
+  return content.slice(0, bounds.start) + block + content.slice(bounds.end);
+}
+
+/** The raw lines of top-level `key` (continuation lines included, no CR), or
+ *  [] when the key or the frontmatter is absent. */
+export function frontmatterKeyLines(content: string, key: string): string[] {
+  const bounds = frontmatterBounds(content);
+  if (!bounds) return [];
+  const lines = content.slice(bounds.start, bounds.end).split(/\r?\n/);
+  const span = keySpan(lines, key);
+  return span ? lines.slice(span.start, span.end) : [];
+}
+
+/** Put back `key` as exactly `lines` ([] removes it). A frontmatter left with
+ *  nothing in it is removed, fences included, when `dropEmpty` is set. */
+export function setFrontmatterKeyLines(content: string, key: string, lines: readonly string[], dropEmpty = false): string {
+  const bounds = frontmatterBounds(content);
+  if (!bounds) return lines.length ? `---\n${lines.join("\n")}\n---\n${content}` : content;
+  const block = replaceKeyBlock(content.slice(bounds.start, bounds.end), key, lines, documentNewline(content));
+  if (dropEmpty && !block.trim()) return content.slice(bounds.end).replace(/^\r?\n---(?:\r?\n|$)/, "");
   return content.slice(0, bounds.start) + block + content.slice(bounds.end);
 }

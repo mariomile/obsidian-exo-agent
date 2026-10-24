@@ -28,7 +28,26 @@ export function proposalTargetLabel(payload: ProposalPayload): string {
     case "loop": return "Open Loops";
     case "decision": return "Decision record";
     case "playbook": return "Custom prompts";
+    case "correction": return payload.path;
   }
+}
+
+type CorrectionPayload = Extract<ProposalPayload, { kind: "correction" }>;
+
+/** What an accepted correction writes: the line before and after, or the frontmatter keys it sets. */
+function correctionDetails({ change }: CorrectionPayload): { label: string; value: string }[] {
+  if (change.type === "line") {
+    return [
+      { label: "Correction", value: "Replace outdated line" },
+      { label: "Before", value: change.oldLine },
+      { label: "After", value: change.newLine },
+    ];
+  }
+  const by = change.set.superseded_by?.replace(/^\[\[|\]\]$/g, "");
+  return [
+    { label: "Correction", value: by ? `Mark as superseded by ${by}` : "Mark as superseded" },
+    { label: "After", value: Object.entries(change.set).map(([k, v]) => `${k}: ${v}`).join("\n") },
+  ];
 }
 
 export function proposalPayloadDetails(payload: ProposalPayload): { label: string; value: string }[] {
@@ -47,6 +66,8 @@ export function proposalPayloadDetails(payload: ProposalPayload): { label: strin
       ];
     case "playbook":
       return [{ label: "Prompt", value: payload.prompt }, ...playbookMetadataDetails(payload)];
+    case "correction":
+      return correctionDetails(payload);
   }
 }
 
@@ -215,7 +236,7 @@ export class ProposalsModal extends Modal {
 
   /**
    * Persist any pending name/prompt edit for a playbook before it is routed, so
-   * Accept always commits the values the user last saw — never a stale copy.
+   * Accept always commits the values the user last saw, never a stale copy.
    */
   private async persistPlaybookEdit(id: string): Promise<void> {
     const edit = this.editBuffer;

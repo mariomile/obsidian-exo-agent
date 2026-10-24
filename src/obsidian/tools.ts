@@ -36,6 +36,7 @@ import {
 import { automationSlug } from "./automation-store";
 import { ok, err, ensureParentFolder, getExo, pluginInstance, today, type Result } from "./tool-kit";
 import { buildSaveTool } from "./save-tool";
+import { buildCorrectionTool } from "./corrections";
 import type { SaveReceipt } from "../core/save-undo";
 import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools";
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
@@ -1112,7 +1113,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     // `rethink_memory` also needs a live view bridge to render its diff.
     ...(memory.rethink && rethinkBridge ? [rethinkMemory] : []),
     ...buildMemoryTools(app, memory, convoId),
-    ...(convoId ? buildChatTools(app, convoId) : []),
+    ...(convoId ? [...buildChatTools(app, convoId), buildCorrectionTool(app, convoId)] : []),
     ...(browserBridge ? buildBrowserTools(browserBridge) : []),
     ...(collaboBridge ? buildCollaboTools(collaboBridge) : []),
   ];

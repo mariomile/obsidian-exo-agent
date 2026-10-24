@@ -1,15 +1,18 @@
 /**
  * "Save to note", Obsidian side: write a block through `vault.process`, keep
  * its receipt, undo it exactly. The rules (where, what, when undo is safe)
- * live in core/save-target, core/block-patch and core/save-undo.
+ * live in core/save-target, core/block-patch and core/save-undo. Accepted
+ * correction proposals write here too, so they share receipts and undo.
  */
 import { Notice, TFile, type App } from "obsidian";
 import type ExoPlugin from "../main";
+import { planCorrection } from "../core/correction";
 import { formatSaveBlock, newAnchor, planInsert, type PatchPlan, type Provenance, type SaveBlock } from "../core/block-patch";
 import { sectionIsList, type SaveTarget } from "../core/save-target";
 import { planUndo, receiptFor, type SaveReceipt, type UndoPlan } from "../core/save-undo";
+import type { ProposalAcceptanceDeps } from "./proposal-router";
 import { SaveLog } from "./save-log";
-import { ensureParentFolder } from "./tool-kit";
+import { ensureParentFolder, today } from "./tool-kit";
 
 export type SaveError = "section-missing" | "nothing-to-save";
 
@@ -49,6 +52,38 @@ export async function saveToNote(
   const receipt = receiptFor({ path, section: target.section, block, plan, provenance: input.provenance, createdNote: !file, savedAt: Date.now() });
   await log.record(receipt);
   return receipt;
+}
+
+const CORRECTION_ERROR = {
+  "line-missing": "The outdated line is no longer in",
+  "line-ambiguous": "The outdated line appears more than once in",
+} as const;
+
+/** Where an accepted correction proposal is written: in place, through
+ *  `vault.process`, with a receipt in the save log so "Undo last save" and
+ *  the Inbox undo revert it like any save. Throws a readable reason. */
+export function noteCorrections(
+  app: App,
+  log: () => SaveLog,
+  noteWrite: (paths: readonly string[]) => void,
+): ProposalAcceptanceDeps["corrections"] {
+  return {
+    apply: async ({ path, change, convoId, title }) => {
+      const file = app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) throw new Error(`Note not found: ${path}`);
+      const provenance: Provenance = { convoId, msgIndex: 0, chatTitle: title, date: today() };
+      let made = null as ReturnType<typeof planCorrection> | null;
+      await app.vault.process(file, (content) => {
+        made = planCorrection(content, change, { id: newAnchor(Math.random, content), path, provenance, savedAt: Date.now() });
+        return "error" in made ? content : made.next;
+      });
+      if (!made) throw new Error(`Note not found: ${path}`);
+      if ("error" in made) throw new Error(`${CORRECTION_ERROR[made.error]} ${file.basename}. Open the note to fix it by hand.`);
+      await log().record(made.receipt);
+      noteWrite([path]);
+      return { path };
+    },
+  };
 }
 
 async function undoIn(app: App, r: SaveReceipt, path: string): Promise<UndoPlan> {

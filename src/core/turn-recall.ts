@@ -5,6 +5,7 @@
  * `obsidian/turn-recall.ts`. No Obsidian import.
  */
 import { chatLines, localDate, type ChatRecord } from "./recent-chats";
+import { applySupersede, type SupersedeIndex } from "./supersede";
 
 export const RECALL_OPEN = "[vault-recall]";
 export const RECALL_CLOSE = "[/vault-recall]";
@@ -78,6 +79,8 @@ export function recallKeywords(message: string): string[] {
 export interface NoteRecall {
   path: string;
   excerpt: string;
+  /** The current note that replaces this one (core/supersede). */
+  supersededBy?: string;
 }
 
 export interface ChatRecall {
@@ -254,15 +257,21 @@ function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
  *  search to have found it too: three shared words lift it from anywhere in
  *  that search ("turno open core" for turno-saas-open-core), two only reorder
  *  the notes the search would inject anyway ("Orchestration Board" for
- *  "Orchestration Board Ideas" must not push out the decision about it). */
-export function rankRecall(lanes: RecallLanes, opts: { maxNotes: number; maxChats: number }): { notes: NoteRecall[]; chats: ChatRecall[] } {
+ *  "Orchestration Board Ideas" must not push out the decision about it).
+ *  With `supersede`, a superseded note gives its slot to the current one and
+ *  stays right below it, labelled. */
+export function rankRecall(
+  lanes: RecallLanes,
+  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex },
+): { notes: NoteRecall[]; chats: ChatRecall[] } {
   const found = new Set(lanes.sonar.map((n) => n.path));
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
   const title = lanes.title
     .filter((t) => t.whole || (t.shared >= 3 ? found : injected).has(t.path))
     .map((t) => ({ path: t.path, excerpt: "" }));
+  const notes = fuse([lanes.sonar, title], (n) => n.path).slice(0, opts.maxNotes);
   return {
-    notes: fuse([lanes.sonar, title], (n) => n.path).slice(0, opts.maxNotes),
+    notes: opts.supersede ? applySupersede(notes, opts.supersede, (path) => ({ path, excerpt: "" })).slice(0, opts.maxNotes) : notes,
     chats: fuse([lanes.lexicalChats, lanes.semanticChats ?? []], (c) => c.id).slice(0, opts.maxChats),
   };
 }
@@ -275,7 +284,8 @@ export function rankRecall(lanes: RecallLanes, opts: { maxNotes: number; maxChat
 export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly ChatRecall[]): string {
   const noteLines = notes.slice(0, RECALL_MAX_NOTES).map((n) => {
     const excerpt = flat(n.excerpt, RECALL_EXCERPT_CHARS);
-    return excerpt ? `- ${n.path}: ${excerpt}` : `- ${n.path}`;
+    const label = n.supersededBy ? ` (superseded by ${n.supersededBy.replace(/^.*\//, "").replace(/\.md$/, "")}, use that)` : "";
+    return `${excerpt ? `- ${n.path}: ${excerpt}` : `- ${n.path}`}${label}`;
   });
   const chatLinesOut = chats.slice(0, RECALL_MAX_CHATS).map((c) => `- "${flat(c.title, 80)}" (${c.date}): ${c.snippet}`);
   const render = (): string => {

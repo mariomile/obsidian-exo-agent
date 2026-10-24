@@ -19,7 +19,7 @@ export const BUILTIN_TOOLS = [
 ];
 export const FILE_BUILTINS = new Set(["Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit"]);
 export const NATIVE_READ = ["search_vault", "read_note", "get_backlinks", "get_neighborhood", "list_notes", "list_tags", "get_active_context"];
-export const NATIVE_WRITE = ["create_note", "save_to_note", "update_frontmatter", "add_links", "open_note", "edit_note", "insert_at_cursor", "rename_note"];
+export const NATIVE_WRITE = ["create_note", "save_to_note", "propose_correction", "update_frontmatter", "add_links", "open_note", "edit_note", "insert_at_cursor", "rename_note"];
 export const NATIVE_MEMORY = ["capture_decision", "open_loop", "close_loop", "undo_memory_write"];
 
 async function scanNames(dir: string): Promise<{ folders: string[]; mds: string[] }> {

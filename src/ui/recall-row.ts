@@ -21,14 +21,22 @@ export function renderRecallRow(
   setIcon(header.createSpan({ cls: "mva-recall-caret" }), "chevron-right");
 
   const list = wrap.createDiv({ cls: "mva-recall-list" });
-  for (const note of recall.notes) {
-    const item = list.createDiv({ cls: "mva-recall-item" });
-    item.createSpan({ cls: "mva-recall-meta", text: "note" });
-    const link = item.createEl("a", { cls: "mva-recall-text", text: note.path, href: "#" });
+  const noteLink = (item: HTMLElement, text: string, path: string): void => {
+    const link = item.createEl("a", { cls: "mva-recall-text", text, href: "#" });
     clickable(link, (e) => {
       e.preventDefault();
-      open.openPath(note.path);
+      open.openPath(path);
     });
+  };
+  for (const note of recall.notes) {
+    const item = list.createDiv({ cls: "mva-recall-item" });
+    item.createSpan({ cls: "mva-recall-meta", text: note.supersededBy ? "superseded" : "note" });
+    noteLink(item, note.path, note.path);
+    // Demoted, never hidden: the old note stays, pointing at the current one.
+    if (note.supersededBy) {
+      item.createSpan({ cls: "mva-recall-meta", text: "by" });
+      noteLink(item, note.supersededBy.replace(/^.*\//, "").replace(/\.md$/, ""), note.supersededBy);
+    }
   }
   for (const chat of recall.chats) {
     const item = list.createDiv({ cls: "mva-recall-item" });

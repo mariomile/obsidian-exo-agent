@@ -51,4 +51,8 @@ describe("WRITE_TOOLS", () => {
   it("save_to_note is a write, so the touched footer and headless runs count it", () => {
     expect(WRITE_TOOLS.test("mcp__obsidian__save_to_note")).toBe(true);
   });
+
+  it("propose_correction is not a write: the note changes only when Mario accepts", () => {
+    expect(WRITE_TOOLS.test("mcp__obsidian__propose_correction")).toBe(false);
+  });
 });

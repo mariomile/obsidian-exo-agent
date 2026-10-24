@@ -107,4 +107,22 @@ describe("renderRecallRow", () => {
     const { turn } = render();
     expect(turn.all().filter((e) => e.tag === "button")).toEqual([]);
   });
+
+  it("a superseded note says so and links the note that replaced it", () => {
+    const turn = new El();
+    const opened: string[] = [];
+    const demoted: TurnRecall = {
+      block: "x",
+      notes: [{ path: "D/2026-09-25-memoria.md", excerpt: "" }, { path: "D/2026-09-24-vault-lean.md", excerpt: "lean", supersededBy: "D/2026-09-25-memoria.md" }],
+      chats: [],
+    };
+    renderRecallRow(turn as unknown as HTMLElement, demoted, { openPath: (p) => opened.push(p), openChat: () => {} });
+    const [current, old] = turn.find("mva-recall-item");
+    expect(current.find("mva-recall-meta").map((e) => e.text)).toEqual(["note"]);
+    expect(old.find("mva-recall-meta").map((e) => e.text)).toEqual(["superseded", "by"]);
+    const links = old.find("mva-recall-text");
+    expect(links.map((l) => [l.tag, l.text])).toEqual([["a", "D/2026-09-24-vault-lean.md"], ["a", "2026-09-25-memoria"]]);
+    links[1].click();
+    expect(opened).toEqual(["D/2026-09-25-memoria.md"]);
+  });
 });

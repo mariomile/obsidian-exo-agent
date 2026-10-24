@@ -54,6 +54,10 @@ export function describeActivity(name: string, input: unknown): string {
       const p = base(asStr(i.file_path || i.notebook_path || i.target || i.path));
       return p ? `Writing ${p}` : "Writing a note";
     }
+    case "mcp__obsidian__propose_correction": {
+      const p = base(asStr(i.path));
+      return p ? `Proposing a correction to ${p}` : "Proposing a correction";
+    }
     case "WebSearch": {
       const q = asStr(i.query).trim();
       return q ? `Searching the web — ${q}` : "Searching the web";

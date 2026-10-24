@@ -47,4 +47,22 @@ describe("proposal inbox presentation", () => {
     ]);
     expect(playbookMetadataDetails({ kind: "playbook", name: "P", prompt: "Run" })).toEqual([]);
   });
+
+  it("shows a correction's note and the exact change, before and after", () => {
+    const fm = { kind: "correction" as const, path: "D/2026-09-24-vault-lean.md", because: "x", change: { type: "frontmatter" as const, set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" } } };
+    expect(proposalTargetLabel(fm)).toBe("D/2026-09-24-vault-lean.md");
+    expect(proposalPayloadDetails(fm)).toEqual([
+      { label: "Correction", value: "Mark as superseded by 2026-09-25-memoria" },
+      { label: "After", value: "status: superseded\nsuperseded_by: [[2026-09-25-memoria]]" },
+    ]);
+    expect(proposalPayloadDetails({ ...fm, change: { type: "frontmatter", set: { status: "superseded" } } })[0])
+      .toEqual({ label: "Correction", value: "Mark as superseded" });
+    const line = { kind: "correction" as const, path: "Pricing.md", because: "x", change: { type: "line" as const, oldLine: "- Pro is 29", newLine: "- Pro is 39 (dal 2026-10-24; prima Pro is 29)" } };
+    expect(proposalTargetLabel(line)).toBe("Pricing.md");
+    expect(proposalPayloadDetails(line)).toEqual([
+      { label: "Correction", value: "Replace outdated line" },
+      { label: "Before", value: "- Pro is 29" },
+      { label: "After", value: "- Pro is 39 (dal 2026-10-24; prima Pro is 29)" },
+    ]);
+  });
 });

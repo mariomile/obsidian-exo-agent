@@ -19,6 +19,7 @@ import {
 } from "../src/core/turn-recall";
 import { recallForTurn, SEMANTIC_BUDGET_MS } from "../src/obsidian/turn-recall";
 import { recallChatScores } from "../src/ui/chat-recall";
+import { buildSupersedeIndex } from "../src/core/supersede";
 
 vi.mock("../src/ui/chat-recall", () => ({
   recallChatScores: vi.fn(() => Promise.resolve(null)),
@@ -246,6 +247,43 @@ describe("rankRecall fusion", () => {
   });
 });
 
+describe("rankRecall with superseded notes", () => {
+  const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
+  const { index } = buildSupersedeIndex([
+    { path: "D/2026-09-24-vault-lean.md", status: "active", supersedes: [], supersededBy: [] },
+    { path: "D/2026-09-25-memoria.md", supersedes: ["D/2026-09-24-vault-lean.md"], supersededBy: [] },
+  ]);
+  const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: index };
+  const lanes = (sonar: NoteRecall[]) => ({ sonar, title: [], lexicalChats: [], semanticChats: null });
+
+  it("the head takes the superseded note's slot; the old note stays right below, labelled", () => {
+    const r = rankRecall(lanes(["D/2026-09-24-vault-lean.md", "A.md", "B.md", "C.md", "E.md"].map(n)), opts);
+    expect(r.notes).toEqual([
+      { path: "D/2026-09-25-memoria.md", excerpt: "" },
+      { path: "D/2026-09-24-vault-lean.md", excerpt: "about D/2026-09-24-vault-lean.md", supersededBy: "D/2026-09-25-memoria.md" },
+      n("A.md"),
+      n("B.md"),
+      n("C.md"),
+    ]);
+  });
+
+  it("a head already recalled means label only", () => {
+    const r = rankRecall(lanes(["D/2026-09-24-vault-lean.md", "A.md", "D/2026-09-25-memoria.md"].map(n)), opts);
+    expect(r.notes.map((x) => [x.path, x.supersededBy])).toEqual([
+      ["D/2026-09-24-vault-lean.md", "D/2026-09-25-memoria.md"],
+      ["A.md", undefined],
+      ["D/2026-09-25-memoria.md", undefined],
+    ]);
+  });
+
+  it("the block tells the model which note to use instead", () => {
+    const r = rankRecall(lanes([n("D/2026-09-24-vault-lean.md")]), opts);
+    const block = formatRecallBlock(r.notes, []);
+    expect(block).toContain("- D/2026-09-25-memoria.md\n");
+    expect(block).toContain("- D/2026-09-24-vault-lean.md: about D/2026-09-24-vault-lean.md (superseded by 2026-09-25-memoria, use that)");
+  });
+});
+
 describe("semanticHits", () => {
   const background = Array.from({ length: 10 }, (_, i) => ({ id: `bg${i}`, score: 0.82 - i * 0.001 }));
 
@@ -369,6 +407,55 @@ describe("recallForTurn", () => {
     } as never;
     const r = await recallForTurn(a, { message: "what are the Exo pricing tiers", convoId: "current", chats: [], now: NOW });
     expect(r!.notes.map((x) => x.path)).toEqual(["Misc/Plan.md", "Projects/Exo Pricing Tiers.md"]);
+  });
+
+  it("reads supersede markers from frontmatter links and proposes the fix for a recalled note", async () => {
+    const old = { path: "D/2026-09-24-vault-lean.md", basename: "2026-09-24-vault-lean" };
+    const cur = { path: "D/2026-09-25-memoria.md", basename: "2026-09-25-memoria" };
+    const appended: { candidate: unknown; source: { convoId: string; turnId: string } }[] = [];
+    const refreshed: number[] = [];
+    const exo = (enabled: boolean) => ({
+      loadAutomationRuns: async () => [],
+      runPlaybook: async () => true,
+      settings: { proposalKernelEnabled: enabled },
+      proposalStore: { append: async (candidate: unknown, source: { convoId: string; turnId: string }) => (appended.push({ candidate, source }), { status: "appended" }) },
+      inbox: { refresh: async () => void refreshed.push(1) },
+    });
+    const a = (enabled: boolean) =>
+      ({
+        vault: { getMarkdownFiles: () => [old, cur] },
+        metadataCache: {
+          getFileCache: (f: { path: string }) =>
+            f.path === cur.path
+              ? { frontmatter: { status: "active" }, frontmatterLinks: [{ key: "supersedes", link: "2026-09-24-vault-lean", original: "" }] }
+              : { frontmatter: { status: "active" } },
+          getFirstLinkpathDest: (link: string) => [old, cur].find((f) => f.basename === link) ?? null,
+        },
+        plugins: {
+          plugins: {
+            sonar: { search: async () => [{ path: old.path, title: "Vault lean", score: 3, excerpt: "lean vault" }] },
+            "exo-agent": exo(enabled),
+          },
+        },
+      }) as never;
+
+    const r = await recallForTurn(a(true), { message: "what did we decide about the lean vault", convoId: "current", chats: [], now: NOW });
+    expect(r!.notes.map((x) => [x.path, x.supersededBy])).toEqual([
+      [cur.path, undefined],
+      [old.path, cur.path],
+    ]);
+    await vi.waitFor(() => expect(refreshed).toHaveLength(1));
+    expect(appended).toHaveLength(1);
+    expect(appended[0].source).toMatchObject({ convoId: "current" });
+    expect(appended[0].candidate).toMatchObject({
+      kind: "correction",
+      payload: { kind: "correction", path: old.path, change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" } } },
+    });
+
+    appended.length = 0;
+    await recallForTurn(a(false), { message: "what did we decide about the lean vault", convoId: "current", chats: [], now: NOW });
+    await new Promise((res) => setTimeout(res, 0));
+    expect(appended).toEqual([]);
   });
 
   it("a semantic answer with nothing standing out adds no chat", async () => {

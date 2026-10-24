@@ -4,6 +4,7 @@ import type { AutomationConfig, AutomationRunRecord } from "../core/automations"
 import type { AgentDef } from "../core/agents";
 import type { AgentCaller } from "../core/agent-runs";
 import type { ChatRecord } from "../core/recent-chats";
+import type { ProposalCandidate, ProposalRecord } from "../core/proposals";
 import type { SaveLog } from "./save-log";
 
 /** The shape every in-process tool returns. Free-form human-readable text —
@@ -28,6 +29,8 @@ export interface ExoToolHost {
     collaboUrl: string;
     collaboApiKey: string;
     collaboShares: Record<string, { slug: string; ownerSecret: string; accessToken: string; role: string }>;
+    /** Suggestions (the Proposal Kernel) on: corrections are proposals, so off means none. */
+    proposalKernelEnabled: boolean;
   };
   saveSettings(): Promise<void>;
   /** The chat's own title (obsidian/chat-tools.ts `update_chat`). */
@@ -80,6 +83,9 @@ export interface ExoToolHost {
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }>;
   /** Receipts of "Save to note" (obsidian/note-save). */
   noteSaves: SaveLog;
+  /** The proposal inbox: corrections wait here for Mario's accept. */
+  proposalStore: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string }> };
+  inbox: { refresh(): Promise<void> };
 }
 
 /** Another plugin's live instance by id, or undefined when it is absent or
