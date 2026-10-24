@@ -102,6 +102,7 @@ import {
   type ProposalTargetVaultAdapter,
 } from "./obsidian/proposal-targets";
 import { parseLoopsFile } from "./core/open-loops";
+import { memoTtl } from "./core/ttl-memo";
 import {
   DailyPulseSlotRunner,
   dailyPulseReviewAfterRun,
@@ -1810,10 +1811,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   /** Epoch ms of the most recent `exo: auto-commit` in the vault's git log, or
    *  null when it can't be determined (not a repo, git missing, no such commit).
-   *  Read-only, never throws — same execFile discipline as the auto-commit path.
-   *  Used by the Actions hub (W2-UX) to show the last auto-commit time; the panel
-   *  calls it once per open and async-fills, so a slow git call never blocks render. */
-  async lastAutoCommitEpoch(): Promise<number | null> {
+   *  Read-only, never throws, same execFile discipline as the auto-commit path. */
+  private async readAutoCommitEpoch(): Promise<number | null> {
     const cwd = this.vaultPath();
     if (cwd === ".") return null;
     try {
@@ -1828,6 +1827,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       return null;
     }
   }
+
+  /** The last auto-commit time, cached 60s: the Overview tab repaints on every chat switch. */
+  readonly lastAutoCommitEpoch = memoTtl(() => this.readAutoCommitEpoch(), 60_000);
 
   /** Run one playbook headlessly and write its report. Write-enabled runs also
    *  persist a restorable run record (files touched + pre-write snapshots). */
