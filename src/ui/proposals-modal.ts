@@ -46,6 +46,7 @@ function correctionDetails({ change }: CorrectionPayload): { label: string; valu
   const by = change.set.superseded_by?.replace(/^\[\[|\]\]$/g, "");
   return [
     { label: "Correction", value: by ? `Mark as superseded by ${by}` : "Mark as superseded" },
+    { label: "Before", value: Object.keys(change.set).map((k) => change.before[k] ?? `${k}: (missing)`).join("\n") },
     { label: "After", value: Object.entries(change.set).map(([k, v]) => `${k}: ${v}`).join("\n") },
   ];
 }

@@ -36,6 +36,12 @@ describe("formatProvenance", () => {
     expect(formatProvenance(P)).toBe(PROV);
   });
 
+  it("with no chat (a headless run) it names the automation and carries no link", () => {
+    expect(formatProvenance({ ...P, convoId: "", msgIndex: 0, chatTitle: "Weekly digest" })).toBe(
+      '[fonte: automazione "Weekly digest"; dal: 2026-10-24]',
+    );
+  });
+
   it("never lets a quote or newline in the title break the line", () => {
     expect(formatProvenance({ ...P, chatTitle: 'A "b"\nc' })).toContain('chat "A \'b\' c"');
   });
@@ -113,6 +119,11 @@ describe("planInsert", () => {
 
   it("a fenced heading is not a section", () => {
     expect(planInsert("```\n## Decisions\n```\n", DEC, FACT)).toEqual({ error: "section-missing" });
+  });
+
+  it("a ~~~ line inside a ``` block does not hide the section after it", () => {
+    const content = "```\n~~~\n```\n## Decisions\n- one\n";
+    expect(plan(planInsert(content, DEC, FACT)).next).toBe(`${content}${FACT.lines[0]}\n`);
   });
 
   it("a missing section is an error, the content is not touched", () => {

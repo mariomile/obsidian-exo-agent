@@ -50,8 +50,11 @@ export function newAnchor(rand: () => number, content = ""): string {
   }
 }
 
+/** A headless run has no chat to link back to (`convoId` empty): the line
+ *  names the automation or playbook instead. */
 export function formatProvenance(p: Provenance): string {
   const title = safeTitle(p.chatTitle).replace(/"/g, "'");
+  if (!p.convoId) return `[fonte: automazione "${title}"; dal: ${p.date}]`;
   return `[fonte: chat "${title}" (${chatLink(p.convoId, p.msgIndex)}); dal: ${p.date}]`;
 }
 
@@ -95,10 +98,11 @@ export function planInsert(content: string, target: SectionRef, block: SaveBlock
   const span = resolveSection(content, target);
   if (!span) return { error: "section-missing" };
   const lines = bodyLines(content);
-  const { locked, frontmatterEnd } = protectedLines(lines);
+  const prot = protectedLines(lines);
+  const { frontmatterEnd } = prot;
   let at = span.end;
   while (at > span.start && blank(lines[at - 1])) at--;
-  if (inFence(lines, locked, at, frontmatterEnd)) return { error: "section-missing" };
+  if (inFence(prot, at)) return { error: "section-missing" };
 
   const created = target.kind === "new" ? [`${"#".repeat(target.level)} ${target.heading.trim()}`] : [];
   const added = [...created, ...block.lines];

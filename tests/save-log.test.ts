@@ -34,7 +34,7 @@ describe("SaveLog", () => {
     const log = new SaveLog(file);
     await log.record(receipt("exo-1"));
     await log.record(receipt("exo-2"));
-    expect((await log.last())?.id).toBe("exo-2");
+    expect((await log.undoable()).map((r) => r.id)).toEqual(["exo-2", "exo-1"]);
     expect(await log.find("exo-1")).toEqual(receipt("exo-1"));
     expect(JSON.parse(box.content ?? "[]")).toHaveLength(2);
   });
@@ -48,14 +48,14 @@ describe("SaveLog", () => {
     expect(all[0].id).toBe(`exo-${MAX_SAVES + 4}`);
   });
 
-  it("last() skips undone receipts; markUndone stamps the time", async () => {
+  it("undoable() lists the receipts not undone, newest first; markUndone stamps the time", async () => {
     const { file } = memFile();
     const log = new SaveLog(file);
     await log.record(receipt("exo-1"));
     await log.record(receipt("exo-2"));
     await log.markUndone("exo-2", 99);
     expect((await log.find("exo-2"))?.undoneAt).toBe(99);
-    expect((await log.last())?.id).toBe("exo-1");
+    expect((await log.undoable()).map((r) => r.id)).toEqual(["exo-1"]);
   });
 
   it("stores the exact lines only, never a note body", async () => {

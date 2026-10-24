@@ -423,10 +423,10 @@ export function applyAdd(content: string, section: string | undefined, text: str
   const line = `- ${oneLine(text)}`;
   if (structural(oneLine(text))) return null;
   const lines = content.replace(/\s+$/, "").split("\n");
-  const { locked, open, frontmatterEnd } = protectedLines(lines);
+  const prot = protectedLines(lines);
+  const { open, frontmatterEnd, fenced } = prot;
   if (open) return null;
-  const heading = (i: number): boolean =>
-    i > frontmatterEnd && /^#{1,6}\s/.test(lines[i]) && !inFence(lines, locked, i, frontmatterEnd);
+  const heading = (i: number): boolean => i > frontmatterEnd && /^#{1,6}\s/.test(lines[i]) && !fenced[i];
   const want = section?.replace(/^#+\s*/, "").trim().toLowerCase();
   if (want) {
     const start = lines.findIndex((l, i) => heading(i) && l.replace(/^#+\s*/, "").trim().toLowerCase() === want);
@@ -442,7 +442,7 @@ export function applyAdd(content: string, section: string | undefined, text: str
       }
       let at = end;
       while (at > start + 1 && !lines[at - 1].trim()) at--;
-      if (!inFence(lines, locked, at, frontmatterEnd)) {
+      if (!inFence(prot, at)) {
         lines.splice(at, 0, line);
         return { content: `${lines.join("\n")}\n`, line };
       }

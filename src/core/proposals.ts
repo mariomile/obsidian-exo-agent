@@ -37,9 +37,11 @@ export type ProposalPayload =
   | { kind: "correction"; path: string; change: CorrectionChange; because: string };
 
 /** A fix to an existing note: frontmatter keys to set, or one outdated line
- *  replaced (`newLine` already in the vault's changed-fact format). */
+ *  replaced (`newLine` already in the vault's changed-fact format). `before`
+ *  holds each key's raw lines as they were when proposed (joined by "\n"); a
+ *  key absent from it was expected to be missing. Not part of the fingerprint. */
 export type CorrectionChange =
-  | { type: "frontmatter"; set: Record<string, string> }
+  | { type: "frontmatter"; set: Record<string, string>; before: Record<string, string> }
   | { type: "line"; oldLine: string; newLine: string };
 
 export interface ProposalRecord {
@@ -88,7 +90,8 @@ export interface ProposalValidationError {
 export type ProposalResult<T> =
   | { status: "ok"; value: T }
   | { status: "invalid"; errors: ProposalValidationError[] }
-  | { status: "duplicate"; value: T; duplicateOf: ProposalRecord };
+  /** `duplicateOf` is absent when the match is a closed correction whose record was pruned. */
+  | { status: "duplicate"; value: T; duplicateOf?: ProposalRecord };
 
 export type ProposalParseResult<T> =
   | { status: "ok"; value: T }
@@ -234,7 +237,16 @@ function validateChange(value: unknown, path: string): ValidationResult<Correcti
     if (v.status !== "ok") return v;
     out[key] = v.value;
   }
-  return { status: "ok", value: { type: "frontmatter", set: out } };
+  const rawBefore = asObject(change.before);
+  if (!rawBefore) return validationError("required", `${path}.before`, "before must be an object");
+  const before: Record<string, string> = {};
+  for (const key of Object.keys(rawBefore)) {
+    if (!(key in out)) return validationError("invalid_type", `${path}.before.${key}`, "before may only name keys in set");
+    const v = requiredString(rawBefore, key, `${path}.before.${key}`, PROPOSAL_LIMITS.content);
+    if (v.status !== "ok") return v;
+    before[key] = v.value;
+  }
+  return { status: "ok", value: { type: "frontmatter", set: out, before } };
 }
 
 /** Foundry signatures are opaque machine strings; length-cap them and trust no further. */
@@ -430,25 +442,36 @@ function resolutionTime(record: ProposalRecord): number {
 /**
  * Pending records always deduplicate. Accepted records deduplicate through the
  * inclusive 30-day window; dismissed and older accepted records do not, except
- * a dismissed correction: recall finds the same fix every turn, and a fix
- * Mario turned down must not come back while its record is kept.
+ * a correction: recall finds the same fix every turn, so one Mario accepted or
+ * turned down never comes back. `closed` holds those corrections'
+ * fingerprints past pruning (`closeCorrection`).
  */
 export function evaluateProposal(
   candidate: ProposalCandidate,
   existing: readonly ProposalRecord[],
-  now: number
+  now: number,
+  closed: readonly string[] = []
 ): ProposalResult<ProposalCandidate> {
   const fingerprint = fingerprintProposal(candidate.payload);
   const cutoff = now - PROPOSAL_LIMITS.resolvedRetentionDays * DAY_MS;
   const duplicate = existing.find((record) =>
     record.fingerprint === fingerprint
     && (record.status === "pending"
-      || (record.status === "accepted" && resolutionTime(record) >= cutoff)
-      || (record.status === "dismissed" && record.kind === "correction"))
+      || record.kind === "correction"
+      || (record.status === "accepted" && resolutionTime(record) >= cutoff))
   );
-  return duplicate
-    ? { status: "duplicate", value: candidate, duplicateOf: duplicate }
-    : { status: "ok", value: candidate };
+  if (duplicate) return { status: "duplicate", value: candidate, duplicateOf: duplicate };
+  if (candidate.kind === "correction" && closed.includes(fingerprint)) return { status: "duplicate", value: candidate };
+  return { status: "ok", value: candidate };
+}
+
+/** Closed correction fingerprints kept past pruning: far more than recall
+ *  can surface, still a bounded file. */
+export const CLOSED_CORRECTIONS_MAX = 500;
+
+/** Remember a closed (accepted or dismissed) correction, newest first, capped. */
+export function closeCorrection(closed: readonly string[], fingerprint: string): string[] {
+  return [fingerprint, ...closed.filter((f) => f !== fingerprint)].slice(0, CLOSED_CORRECTIONS_MAX);
 }
 
 /** Keep all pending plus the newest 200 resolved records from the last 30 days. */

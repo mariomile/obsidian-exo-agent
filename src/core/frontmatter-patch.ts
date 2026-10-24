@@ -68,6 +68,12 @@ export function frontmatterBounds(content: string): { start: number; end: number
 export const documentNewline = (content: string): string =>
   content.includes("\r\n") ? "\r\n" : "\n";
 
+/** A frontmatter block put on top of a note that has none, in its newline style. */
+function newBlock(lines: readonly string[], content: string): string {
+  const nl = documentNewline(content);
+  return `---${nl}${lines.join(nl)}${nl}---${nl}${content}`;
+}
+
 /** Merge/remove top-level keys while preserving every unrelated frontmatter byte. */
 export function patchFrontmatter(
   content: string,
@@ -78,13 +84,13 @@ export function patchFrontmatter(
   if (!entries.length && !removeKeys.length) return content;
 
   const bounds = frontmatterBounds(content);
+  const newline = documentNewline(content);
   if (!bounds) {
     if (!entries.length) return content;
-    const lines = entries.map(([key, value]) => `${yamlKey(key)}: ${yamlValue(value)}`).join("\n");
-    return `---\n${lines}\n---\n${content}`;
+    const lines = entries.map(([key, value]) => `${yamlKey(key)}: ${yamlValue(value)}`);
+    return newBlock(lines, content);
   }
 
-  const newline = documentNewline(content);
   let block = content.slice(bounds.start, bounds.end);
   for (const key of removeKeys) {
     block = replaceKeyBlock(block, key, [], newline);
@@ -110,7 +116,7 @@ export function frontmatterKeyLines(content: string, key: string): string[] {
  *  nothing in it is removed, fences included, when `dropEmpty` is set. */
 export function setFrontmatterKeyLines(content: string, key: string, lines: readonly string[], dropEmpty = false): string {
   const bounds = frontmatterBounds(content);
-  if (!bounds) return lines.length ? `---\n${lines.join("\n")}\n---\n${content}` : content;
+  if (!bounds) return lines.length ? newBlock(lines, content) : content;
   const block = replaceKeyBlock(content.slice(bounds.start, bounds.end), key, lines, documentNewline(content));
   if (dropEmpty && !block.trim()) return content.slice(bounds.end).replace(/^\r?\n---(?:\r?\n|$)/, "");
   return content.slice(0, bounds.start) + block + content.slice(bounds.end);

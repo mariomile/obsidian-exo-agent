@@ -2,7 +2,9 @@
  * An accepted correction applied to a note's text, with the receipt that
  * undoes it: a line goes through `planReplaceLine` (op "replace"), frontmatter
  * keys through the raw-preserving patcher with a snapshot of each touched key
- * (op "frontmatter"). No Obsidian import.
+ * (op "frontmatter"). A correction is one line: it never writes a newline. A
+ * frontmatter fix applies only while each key still reads as it did when it
+ * was proposed. No Obsidian import.
  */
 import { planReplaceLine, type Provenance } from "./block-patch";
 import { frontmatterKeyLines, patchFrontmatter } from "./frontmatter-patch";
@@ -30,18 +32,23 @@ export function quotedLine(content: string, quoted: string): string | { error: "
   return hits[0] as string;
 }
 
+export type CorrectionError = "line-missing" | "line-ambiguous" | "stale" | "multi-line";
+
 export function planCorrection(
   content: string,
   change: CorrectionChange,
   meta: { id: string; path: string; provenance: Provenance; savedAt: number },
-): { next: string; receipt: SaveReceipt } | { error: "line-missing" | "line-ambiguous" } {
+): { next: string; receipt: SaveReceipt } | { error: CorrectionError } {
   const base = { id: meta.id, path: meta.path, section: { kind: "end" as const }, provenance: meta.provenance, savedAt: meta.savedAt };
   if (change.type === "line") {
+    if (/[\r\n]/.test(change.oldLine) || /[\r\n]/.test(change.newLine)) return { error: "multi-line" };
     const plan = planReplaceLine(content, change.oldLine, change.newLine);
     if ("error" in plan) return plan;
     const replaced = bodyLines(content)[plan.inserted.start].replace(/\r$/, "");
     return { next: plan.next, receipt: { ...base, op: "replace", lines: [change.newLine], replaced } };
   }
+  const stale = Object.keys(change.set).some((key) => frontmatterKeyLines(content, key).join("\n") !== (change.before[key] ?? ""));
+  if (stale) return { error: "stale" };
   const next = patchFrontmatter(content, change.set);
   const keys = Object.keys(change.set).map((key) => ({
     key,

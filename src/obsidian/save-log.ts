@@ -45,9 +45,9 @@ export class SaveLog {
     });
   }
 
-  /** The newest receipt not yet undone. */
-  async last(): Promise<SaveReceipt | undefined> {
-    return (await this.list()).find((r) => !r.undoneAt);
+  /** Receipts not yet undone, newest first: what "Undo a save to note..." offers. */
+  async undoable(): Promise<SaveReceipt[]> {
+    return (await this.list()).filter((r) => !r.undoneAt);
   }
 
   async find(id: string): Promise<SaveReceipt | undefined> {

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  inFence,
   listSections,
+  protectedLines,
   resolveSection,
   sectionLabel,
   sectionIsList,
@@ -110,5 +112,22 @@ describe("suggestTargets", () => {
 
   it("works without an active note", () => {
     expect(suggestTargets({ activePath: null, recalled: [], touched: ["X.md"] })).toEqual(["X.md"]);
+  });
+});
+
+describe("inFence (one fence scanner)", () => {
+  const lines = ["# T", "```", "~~~", "code", "```", "after", "~~~", "open"];
+  const p = protectedLines(lines);
+  it("a ~~~ line inside a ``` block is content, not a fence", () => {
+    expect(inFence(p, 3)).toBe(true);
+    expect(inFence(p, 5)).toBe(false);
+    expect(inFence(p, 6)).toBe(false);
+  });
+  it("an insertion point after an opening fence that never closes is inside", () => {
+    expect(inFence(p, 7)).toBe(true);
+    expect(inFence(p, 8)).toBe(true);
+  });
+  it("the closing fence marks the end of the block", () => {
+    expect(p.closing).toEqual([false, false, false, false, true, false, false, false]);
   });
 });

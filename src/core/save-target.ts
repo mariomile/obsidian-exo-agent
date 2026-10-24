@@ -27,17 +27,23 @@ export interface SectionSpan {
 /**
  * Lines memory must never touch, per line index: the YAML frontmatter block,
  * fenced code, headings, table rows, horizontal rules and blank lines.
- * `fenced` marks fence lines and everything between them. `open` is true when
- * the frontmatter never closes (then nothing may be appended).
+ * `fenced` marks fence lines and everything between them, `closing` the line
+ * that closes a block. `open` is true when the frontmatter never closes (then
+ * nothing may be appended). This is the only fence scanner: a `~~~` line
+ * inside a ``` block is content, not a fence.
  */
-export function protectedLines(lines: readonly string[]): {
+export interface ProtectedLines {
   locked: boolean[];
   fenced: boolean[];
+  closing: boolean[];
   frontmatterEnd: number;
   open: boolean;
-} {
+}
+
+export function protectedLines(lines: readonly string[]): ProtectedLines {
   const locked = lines.map(() => false);
   const fenced = lines.map(() => false);
+  const closing = lines.map(() => false);
   let frontmatterEnd = -1;
   let open = false;
   let start = 0;
@@ -54,7 +60,10 @@ export function protectedLines(lines: readonly string[]): {
     const f = /^(```|~~~)/.exec(t);
     if (fence) {
       locked[i] = fenced[i] = true;
-      if (f && t.startsWith(fence)) fence = null;
+      if (f && t.startsWith(fence)) {
+        fence = null;
+        closing[i] = true;
+      }
       continue;
     }
     if (f) {
@@ -64,16 +73,13 @@ export function protectedLines(lines: readonly string[]): {
     }
     if (!t || /^#{1,6}\s/.test(t) || t.startsWith("|") || /^(-{3,}|\*{3,}|_{3,})$/.test(t)) locked[i] = true;
   }
-  return { locked, fenced, frontmatterEnd, open };
+  return { locked, fenced, closing, frontmatterEnd, open };
 }
 
-/** True when index `i` sits between an opening and a closing fence. */
-export function inFence(lines: readonly string[], locked: readonly boolean[], i: number, frontmatterEnd: number): boolean {
-  let fence = false;
-  for (let k = frontmatterEnd + 1; k < i && k < lines.length; k++) {
-    if (/^(```|~~~)/.test(lines[k].trim()) && locked[k]) fence = !fence;
-  }
-  return fence;
+/** True when an insertion before line `i` sits between an opening and a
+ *  closing fence, read off the one fence map above. */
+export function inFence(p: Pick<ProtectedLines, "fenced" | "closing">, i: number): boolean {
+  return i > 0 && p.fenced[i - 1] === true && !p.closing[i - 1];
 }
 
 export interface Heading {

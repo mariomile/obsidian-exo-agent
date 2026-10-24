@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLOSED_CORRECTIONS_MAX,
+  closeCorrection,
   correctionCandidate,
   evaluateProposal,
   isMemoryProposalKind,
@@ -230,7 +232,7 @@ describe("formatProposalPreview", () => {
 
 describe("correction proposals", () => {
   const path = "_system/memory/decisions/2026-09-24-vault-lean.md";
-  const frontmatter = { type: "frontmatter" as const, set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" } };
+  const frontmatter = { type: "frontmatter" as const, set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" }, before: { status: "status: active" } };
   const line = { type: "line" as const, oldLine: "- Pro is 29 euro", newLine: "- Pro is 39 euro (dal 2026-10-24; prima Pro is 29 euro)" };
 
   it("builds a titled candidate whose rationale is the reason", () => {
@@ -256,7 +258,9 @@ describe("correction proposals", () => {
       { ...base, path: " ", change: frontmatter },
       { ...base, change: { type: "rewrite" } },
       { ...base, change: { type: "frontmatter", set: {} } },
-      { ...base, change: { type: "frontmatter", set: { status: 3 } } },
+      { ...base, change: { type: "frontmatter", set: { status: 3 }, before: {} } },
+      { ...base, change: { type: "frontmatter", set: { status: "superseded" } } },
+      { ...base, change: { type: "frontmatter", set: { status: "superseded" }, before: { other: "other: x" } } },
       { ...base, change: { type: "line", oldLine: "- a", newLine: " " } },
       { ...base, change: frontmatter, because: "" },
     ];
@@ -267,9 +271,9 @@ describe("correction proposals", () => {
     expect(isMemoryProposalKind("correction")).toBe(false);
   });
 
-  it("fingerprints on path and change, not on the reason, and set key order does not matter", () => {
+  it("fingerprints on path and change, not on the reason or the expected before, and set key order does not matter", () => {
     const a = correctionCandidate(path, frontmatter, "one reason").payload;
-    const b = correctionCandidate(path, { type: "frontmatter", set: { superseded_by: "[[2026-09-25-memoria]]", status: "superseded" } }, "another").payload;
+    const b = correctionCandidate(path, { type: "frontmatter", set: { superseded_by: "[[2026-09-25-memoria]]", status: "superseded" }, before: {} }, "another").payload;
     expect(fingerprintProposal(a)).toBe(fingerprintProposal(b));
     expect(fingerprintProposal(correctionCandidate("Other.md", frontmatter, "x").payload)).not.toBe(fingerprintProposal(a));
     expect(fingerprintProposal(correctionCandidate(path, line, "x").payload)).not.toBe(fingerprintProposal(a));
@@ -282,5 +286,23 @@ describe("correction proposals", () => {
     expect(evaluateProposal(value, [existing("pending")], NOW).status).toBe("duplicate");
     expect(evaluateProposal(value, [existing("accepted")], NOW).status).toBe("duplicate");
     expect(evaluateProposal(value, [existing("dismissed")], NOW).status).toBe("duplicate");
+  });
+
+  it("a closed correction never comes back, even after pruning dropped its record", () => {
+    const value = correctionCandidate(path, frontmatter, "x");
+    const fp = fingerprintProposal(value.payload);
+    expect(evaluateProposal(value, [], NOW, [fp]).status).toBe("duplicate");
+    expect(evaluateProposal(value, [], NOW, []).status).toBe("ok");
+    const old = record("accepted", NOW - 90 * DAY, { kind: "correction", title: value.title, payload: value.payload, rationale: value.rationale, fingerprint: fp });
+    expect(evaluateProposal(value, [old], NOW).status).toBe("duplicate");
+  });
+
+  it("closedCorrections remembers closed correction fingerprints, newest first, capped", () => {
+    expect(closeCorrection(["a", "b"], "c")).toEqual(["c", "a", "b"]);
+    expect(closeCorrection(["a", "b"], "b")).toEqual(["b", "a"]);
+    const full = Array.from({ length: CLOSED_CORRECTIONS_MAX }, (_, i) => `f${i}`);
+    const next = closeCorrection(full, "new");
+    expect(next).toHaveLength(CLOSED_CORRECTIONS_MAX);
+    expect(next[0]).toBe("new");
   });
 });

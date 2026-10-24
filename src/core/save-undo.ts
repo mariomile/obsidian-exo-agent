@@ -111,6 +111,12 @@ export function planUndo(current: string, r: SaveReceipt): UndoPlan {
     }
   }
   if (headingGone && r.pad?.before && blank(lines[a - 1])) a--;
+  // A line written after the save since: removing both separators would join
+  // it to the paragraph above, so one blank stays.
+  if (a > 0 && b < lines.length && !blank(lines[a - 1]) && !blank(lines[b])) {
+    if (b > k + 1) b--;
+    else if (a < s - (headingGone && r.createdHeading ? 1 : 0)) a++;
+  }
   const next = rejoin(current, [...lines.slice(0, a), ...lines.slice(b)]);
   return { ok: true, next: r.createdNote && emptyNote(next) ? null : next };
 }

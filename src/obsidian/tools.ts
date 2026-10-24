@@ -169,6 +169,8 @@ export interface ObsidianToolOpts {
   agentCaller?: AgentCaller;
   /** View-side: show a `save_to_note` receipt under the running turn. */
   onSaved?: (r: SaveReceipt) => void;
+  /** Headless only: the automation or playbook a save's provenance names. */
+  runName?: string;
 }
 
 /**
@@ -199,6 +201,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     paths = exoPaths(LEGACY_MEMORY_ROOT),
     agentCaller = EXO_CALLER,
     onSaved,
+    runName,
   } = opts ?? {};
   const need = (target: string): TFile => {
     const f = resolveLink(app, target);
@@ -1104,7 +1107,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
   return [
     searchVault, readNote, getBacklinks, getNeighborhood, getConnections, listNotes, listTags, getActiveContext,
     listAnnotations, listSonarActions, askUser, listLoops,
-    createNote, buildSaveTool(app, convoId, onSaved), updateFrontmatter, addLinks, linkMentions, ignoreMentionTool, openNote,
+    createNote, buildSaveTool(app, convoId, onSaved, runName), updateFrontmatter, addLinks, linkMentions, ignoreMentionTool, openNote,
     editNote, insertAtCursor, renameNote, resolveAnnotation, runSonarAction,
     listAgents, invokeAgent, manageAgent,
     listAutomations, savePlaybook, manageAutomation, reviewAutomationRun,

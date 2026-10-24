@@ -14,13 +14,15 @@ import { saveToNote } from "./note-save";
 import { err, getExo, ok, today } from "./tool-kit";
 
 /** Provenance for the assistant message being produced: it is pushed at turn
- *  end, so its index is the conversation's current length. */
-async function provenanceFor(app: App, convoId: string | undefined): Promise<Provenance> {
-  const rec = convoId ? (await getExo(app)?.readConversationStore())?.find((c) => c.id === convoId) : undefined;
-  return { convoId: convoId ?? "", msgIndex: rec?.messages.length ?? 0, chatTitle: rec?.title ?? "Exo", date: today() };
+ *  end, so its index is the conversation's current length. A headless run has
+ *  no chat: the provenance names the run instead (`formatProvenance`). */
+async function provenanceFor(app: App, convoId: string | undefined, runName: string | undefined): Promise<Provenance> {
+  if (!convoId) return { convoId: "", msgIndex: 0, chatTitle: runName ?? "Exo", date: today() };
+  const rec = (await getExo(app)?.readConversationStore())?.find((c) => c.id === convoId);
+  return { convoId, msgIndex: rec?.messages.length ?? 0, chatTitle: rec?.title ?? "Exo", date: today() };
 }
 
-export function buildSaveTool(app: App, convoId: string | undefined, onSaved?: (r: SaveReceipt) => void) {
+export function buildSaveTool(app: App, convoId: string | undefined, onSaved?: (r: SaveReceipt) => void, runName?: string) {
   const { tool } = claudeSdk();
   return tool(
     "save_to_note",
@@ -51,7 +53,7 @@ export function buildSaveTool(app: App, convoId: string | undefined, onSaved?: (
         }
         section = hit;
       }
-      const r = await saveToNote(app, log, { target: { path, section }, text: args.text, provenance: await provenanceFor(app, convoId) });
+      const r = await saveToNote(app, log, { target: { path, section }, text: args.text, provenance: await provenanceFor(app, convoId, runName) });
       if ("error" in r) return err(r.error === "nothing-to-save" ? "Nothing to save." : "Section not found. Pick another.");
       onSaved?.(r);
       return ok(`Saved to ${r.path.replace(/^.*\//, "").replace(/\.md$/, "")} > ${sectionLabel(r.section)} (^${r.id}).`);

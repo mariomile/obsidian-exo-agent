@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { TFile, TFolder, type App } from "obsidian";
-import { noteCorrections, saveToNote, undoSave } from "../src/obsidian/note-save";
+import { describe, it, expect, vi } from "vitest";
+import { Notice, TFile, TFolder, type App } from "obsidian";
+import { noteCorrections, registerNoteSaves, saveToNote, undoSave } from "../src/obsidian/note-save";
+import { SavePicker, saveLabel } from "../src/ui/pickers";
 import { SaveLog } from "../src/obsidian/save-log";
 import { buildObsidianTools } from "../src/obsidian/tools";
 import { renderSaveReceipt } from "../src/ui/save-receipt";
@@ -81,7 +82,7 @@ describe("saveToNote", () => {
     const r = receipt(await saveToNote(app, log, { target: { path: "N.md", section: DEC }, text: "two", provenance: P }));
     expect(notes.get("N.md")).toBe(`## Decisions\n- one\n${r.lines[0]}\n\n## Notes\n`);
     expect(r.lines[0]).toMatch(/^- two \[fonte: chat "Pricing" \(obsidian:\/\/exo-chat\?id=c1&msg=3\); dal: 2026-10-24\] \^exo-[0-9a-z]{6}$/);
-    expect((await log.last())?.id).toBe(r.id);
+    expect((await log.undoable())[0]?.id).toBe(r.id);
   });
 
   it("creates a missing note, parent folder included", async () => {
@@ -100,7 +101,7 @@ describe("saveToNote", () => {
       error: "section-missing",
     });
     expect(notes.get("N.md")).toBe("text\n");
-    expect(await log.last()).toBeUndefined();
+    expect(await log.undoable()).toEqual([]);
   });
 
   it("empty text is nothing to save", async () => {
@@ -112,12 +113,12 @@ describe("saveToNote", () => {
 });
 
 describe("undoSave", () => {
-  it("undoes the last save, then reports already-undone", async () => {
+  it("undoes the chosen save, then reports already-undone", async () => {
     const { app, notes } = vault({ "N.md": "para\n" });
     const log = memLog();
     await saveToNote(app, log, { target: { path: "N.md", section: { kind: "end" } }, text: "Saved", provenance: P });
     const id = (await log.list())[0].id;
-    expect(await undoSave(app, log)).toEqual({ ok: true, next: "para\n" });
+    expect(await undoSave(app, log, id)).toEqual({ ok: true, next: "para\n" });
     expect(notes.get("N.md")).toBe("para\n");
     expect(await undoSave(app, log, id)).toEqual({ ok: false, reason: "already-undone" });
   });
@@ -136,8 +137,8 @@ describe("undoSave", () => {
   it("a created note left empty goes to the trash", async () => {
     const { app, notes, trashed } = vault({});
     const log = memLog();
-    await saveToNote(app, log, { target: { path: "New.md", section: { kind: "end" } }, text: "Saved", provenance: P });
-    expect(await undoSave(app, log)).toEqual({ ok: true, next: null });
+    const r = receipt(await saveToNote(app, log, { target: { path: "New.md", section: { kind: "end" } }, text: "Saved", provenance: P }));
+    expect(await undoSave(app, log, r.id)).toEqual({ ok: true, next: null });
     expect(trashed).toEqual(["New.md"]);
     expect(notes.has("New.md")).toBe(false);
   });
@@ -145,10 +146,72 @@ describe("undoSave", () => {
   it("an edited block is refused and stays", async () => {
     const { app, notes } = vault({ "N.md": "para\n" });
     const log = memLog();
-    await saveToNote(app, log, { target: { path: "N.md", section: { kind: "end" } }, text: "Saved", provenance: P });
+    const r = receipt(await saveToNote(app, log, { target: { path: "N.md", section: { kind: "end" } }, text: "Saved", provenance: P }));
     notes.set("N.md", notes.get("N.md")!.replace("Saved", "Saved, edited"));
-    expect(await undoSave(app, log)).toEqual({ ok: false, reason: "block-edited" });
+    expect(await undoSave(app, log, r.id)).toEqual({ ok: false, reason: "block-edited" });
     expect(notes.get("N.md")).toContain("Saved, edited");
+  });
+});
+
+describe("Undo a save to note... (command and picker)", () => {
+  const NOW = Date.UTC(2026, 9, 24, 12);
+  const base = (over: Partial<SaveReceipt>): SaveReceipt => ({
+    id: "exo-aaaaaa",
+    op: "insert",
+    path: "Projects/Pricing.md",
+    section: DEC,
+    lines: ["x ^exo-aaaaaa"],
+    provenance: P,
+    savedAt: NOW - 30 * 60_000,
+    ...over,
+  });
+
+  it("each row reads <Note> > <Section> · <relative time>; a correction says so", () => {
+    expect(saveLabel(base({}), NOW)).toBe("Pricing > ## Decisions · 30m");
+    expect(saveLabel(base({ section: { kind: "end" }, savedAt: NOW - 4 * 86_400_000 }), NOW)).toBe("Pricing > End of note · 4d");
+    expect(saveLabel(base({ op: "replace", section: { kind: "end" }, replaced: "- old" }), NOW)).toBe("Pricing > Correction · 30m");
+    expect(saveLabel(base({ op: "frontmatter", section: { kind: "end" }, keys: [] }), NOW)).toBe("Pricing > Correction · 30m");
+  });
+
+  it("lists the saves not undone, newest first, and picking one undoes exactly that save", async () => {
+    const { app, notes } = vault({ "A.md": "a\n", "B.md": "b\n" });
+    const commands: { id: string; name: string; callback: () => void }[] = [];
+    const files = new Map<string, string>();
+    const plugin = {
+      app: Object.assign(app, {
+        vault: Object.assign(app.vault, {
+          adapter: {
+            exists: async (p: string) => files.has(p),
+            read: async (p: string) => files.get(p) ?? "",
+            write: async (p: string, c: string) => void files.set(p, c),
+          },
+        }),
+      }),
+      manifest: { dir: "plugin" },
+      addCommand: (c: { id: string; name: string; callback: () => void }) => commands.push(c),
+    };
+    const log = registerNoteSaves(plugin as never);
+    expect(commands.map((c) => [c.id, c.name])).toEqual([["undo-save", "Undo a save to note..."]]);
+
+    const a = receipt(await saveToNote(app, log, { target: { path: "A.md", section: { kind: "end" } }, text: "first", provenance: P }));
+    const b = receipt(await saveToNote(app, log, { target: { path: "B.md", section: { kind: "end" } }, text: "second", provenance: P }));
+    const c = receipt(await saveToNote(app, log, { target: { path: "A.md", section: { kind: "end" } }, text: "third", provenance: P }));
+    await log.markUndone(c.id, Date.now());
+
+    let picker: SavePicker | null = null;
+    const open = vi.spyOn(SavePicker.prototype, "open").mockImplementation(function (this: SavePicker) {
+      picker = this;
+    });
+    commands[0].callback();
+    await vi.waitFor(() => expect(picker).not.toBeNull());
+    const p = picker as unknown as SavePicker;
+    expect(p.getItems().map((r) => r.id)).toEqual([b.id, a.id]);
+    p.onChooseItem(a);
+    await vi.waitFor(() => expect(notes.get("A.md")).not.toContain("first"));
+    expect(notes.get("B.md")).toContain("second");
+    expect((await log.find(a.id))?.undoneAt).toBeTypeOf("number");
+    expect((await log.find(b.id))?.undoneAt).toBeUndefined();
+    open.mockRestore();
   });
 });
 
@@ -168,8 +231,8 @@ describe("save_to_note tool", () => {
       },
     };
     const saved: SaveReceipt[] = [];
-    const run = async (args: Record<string, unknown>) => {
-      const t = buildObsidianTools(v.app, { convoId: "c1", onSaved: (r) => saved.push(r) }).find((x) => x.name === "save_to_note")!;
+    const run = async (args: Record<string, unknown>, opts: { convoId?: string; runName?: string } = { convoId: "c1" }) => {
+      const t = buildObsidianTools(v.app, { ...opts, onSaved: (r) => saved.push(r) }).find((x) => x.name === "save_to_note")!;
       const res = await (t.handler as (a: unknown, e: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>)(args, {});
       return { text: res.content[0].text, isError: res.isError === true };
     };
@@ -183,6 +246,15 @@ describe("save_to_note tool", () => {
     expect(saved.map((r) => r.path)).toEqual(["N.md"]);
     expect(res.text).toMatch(/^Saved to N > ## Decisions \(\^exo-[0-9a-z]{6}\)\.$/);
     expect(notes.get("N.md")).toContain('[fonte: chat "Pricing" (obsidian://exo-chat?id=c1&msg=3); dal: ');
+  });
+
+  it("a headless save names the automation, never an empty chat link, and keeps its receipt", async () => {
+    const { notes, run, log } = withHost({ "N.md": "## Decisions\n- one\n" });
+    const res = await run({ path: "N.md", section: "Decisions", text: "two" }, { runName: "Weekly digest" });
+    expect(res.isError).toBe(false);
+    expect(notes.get("N.md")).toMatch(/^- two \[fonte: automazione "Weekly digest"; dal: \d{4}-\d{2}-\d{2}\] \^exo-[0-9a-z]{6}$/m);
+    expect(notes.get("N.md")).not.toContain("exo-chat");
+    expect((await log.list()).map((r) => r.path)).toEqual(["N.md"]);
   });
 
   it("no section means end of note; new_section creates one", async () => {
@@ -243,14 +315,27 @@ describe("noteCorrections (accepted correction proposals)", () => {
     const log = memLog();
     const wrote: string[][] = [];
     const target = noteCorrections(app, () => log, (paths) => wrote.push([...paths]));
-    await expect(target.apply({ ...input, path: "D/old.md", change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[new]]" } } }))
+    await expect(target.apply({ ...input, path: "D/old.md", change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[new]]" }, before: { status: "status: active" } } }))
       .resolves.toEqual({ path: "D/old.md" });
     expect(notes.get("D/old.md")).toBe('---\nstatus: "superseded"\ntype: decision\nsuperseded_by: "[[new]]"\n---\nBody.\n');
     expect(wrote).toEqual([["D/old.md"]]);
     const [r] = await log.list();
     expect(r).toMatchObject({ op: "frontmatter", path: "D/old.md", provenance: { convoId: "c1", chatTitle: "Correct old" } });
-    expect((await undoSave(app, log))?.ok).toBe(true);
+    expect((await undoSave(app, log, r.id))?.ok).toBe(true);
     expect(notes.get("D/old.md")).toBe(before);
+  });
+
+  it("refuses a stale frontmatter fix with a clear Notice and never overwrites Mario's value", async () => {
+    const note = "---\nstatus: archived\n---\nBody.\n";
+    const { app, notes } = vault({ "D/old.md": note });
+    const log = memLog();
+    const target = noteCorrections(app, () => log, () => {});
+    const change = { type: "frontmatter" as const, set: { status: "superseded" }, before: { status: "status: active" } };
+    const msg = "old changed since this correction was proposed. Nothing was written: open the note to fix it by hand.";
+    await expect(target.apply({ ...input, path: "D/old.md", change })).rejects.toThrow(msg);
+    expect(Notice.last).toBe(msg);
+    expect(notes.get("D/old.md")).toBe(note);
+    expect(await log.list()).toEqual([]);
   });
 
   it("replaces the outdated line and refuses, writing nothing, when it changed or is ambiguous", async () => {
@@ -325,6 +410,19 @@ describe("propose_correction tool", () => {
     expect((await run({ path: "N.md", old_line: "- a", new_text: "b" })).text).toBe("That line appears more than once in N. Quote a longer, unique line.");
     const off = withHost({ "N.md": "- a\n" }, false);
     expect(await off.run({ path: "N.md", old_line: "- a", new_text: "b" })).toEqual({ text: "Suggestions are off, so no correction can be proposed.", isError: true });
+  });
+
+  it("a multi-line new_text or old_line is refused: a correction is one line", async () => {
+    const { run, appended } = withHost({ "N.md": "- a\n- b\n" });
+    expect(await run({ path: "N.md", old_line: "- a", new_text: "c\n- injected" })).toEqual({
+      text: "new_text must be a single line. Propose one correction per line.",
+      isError: true,
+    });
+    expect(await run({ path: "N.md", old_line: "- a\n- b", new_text: "c" })).toEqual({
+      text: "old_line must be a single line. Quote one line of the note.",
+      isError: true,
+    });
+    expect(appended).toEqual([]);
   });
 
   it("is registered only with a conversation", () => {

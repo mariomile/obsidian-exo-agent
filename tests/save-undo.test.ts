@@ -40,6 +40,13 @@ describe("planUndo: insert", () => {
     expect(ok(planUndo(edited, r))).toBe(BASE.replace("- one", "- one, edited"));
   });
 
+  it("never merges Mario's line into the paragraph above: one blank separator stays", () => {
+    const { next, r } = save("para\n", { kind: "end" }, "Line one\nLine two", false);
+    expect(ok(planUndo(`${next}Mario wrote this\n`, r))).toBe("para\n\nMario wrote this\n");
+    const list = save(BASE, DEC, "a fact", true);
+    expect(ok(planUndo(list.next.replace("\n\n## Notes", "\n- Mario's fact\n\n## Notes"), list.r))).toBe(BASE.replace("- one\n", "- one\n- Mario's fact\n"));
+  });
+
   it("an edit inside the block refuses with block-edited", () => {
     const { next, r } = save("para\n", { kind: "end" }, "Line one\nLine two", false);
     expect(planUndo(next.replace("Line one", "Line uno"), r)).toEqual({ ok: false, reason: "block-edited" });

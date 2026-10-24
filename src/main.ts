@@ -1843,7 +1843,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const startedAt = Date.now();
     new Notice(`Running playbook "${name}"…`);
-    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge() };
+    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge(), runName: name };
     const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
     if (result.writes.length) this.noteVaultWrite(result.writes);
     const path = await writeReport(this.app, name, result, this.paths.reports);
@@ -2506,7 +2506,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       const memory = await this.agentStore.loadMemory(agent, today);
       // This run's tools delegate as this agent, one level deeper than its caller.
       const headlessOpts: HeadlessOpts = {
-        write,
+        write, runName: agent.brain.name,
         agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
         codexBridge: await this.headlessBridge(),
         mcp: agent.contract.mcp,

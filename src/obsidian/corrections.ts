@@ -7,6 +7,7 @@ import * as z from "zod";
 import { TFile, type App } from "obsidian";
 import { claudeSdk } from "../providers/sdk-loader";
 import { quotedLine } from "../core/correction";
+import { frontmatterKeyLines } from "../core/frontmatter-patch";
 import { correctionCandidate, type ProposalCandidate } from "../core/proposals";
 import { formatSupersede, type MarkerFix } from "../core/supersede";
 import { resolveLink } from "./graph";
@@ -25,12 +26,24 @@ async function propose(app: App, candidates: readonly ProposalCandidate[], convo
   return statuses;
 }
 
-/** Recall found notes whose supersede markers disagree: propose the fix. */
+/** Recall found notes whose supersede markers disagree: propose the fix,
+ *  with each key as it reads now so a later accept can tell it went stale. */
 export async function proposeMarkerFixes(app: App, fixes: readonly MarkerFix[], convoId: string): Promise<void> {
-  if (!fixes.length) return;
-  const set = (f: MarkerFix): Record<string, string> => Object.fromEntries(Object.entries(f.set).filter(([, v]) => v !== undefined));
-  const candidates = fixes.map((f) => correctionCandidate(f.path, { type: "frontmatter", set: set(f) }, f.because));
-  await propose(app, candidates, convoId, `recall-${Date.now()}`);
+  const candidates: ProposalCandidate[] = [];
+  for (const f of fixes) {
+    const file = app.vault.getAbstractFileByPath(f.path);
+    if (!(file instanceof TFile)) continue;
+    const content = await app.vault.cachedRead(file);
+    const set = Object.fromEntries(Object.entries(f.set).filter((e): e is [string, string] => e[1] !== undefined));
+    const before = Object.fromEntries(
+      Object.keys(set).flatMap((key) => {
+        const lines = frontmatterKeyLines(content, key);
+        return lines.length ? [[key, lines.join("\n")]] : [];
+      }),
+    );
+    candidates.push(correctionCandidate(f.path, { type: "frontmatter", set, before }, f.because));
+  }
+  if (candidates.length) await propose(app, candidates, convoId, `recall-${Date.now()}`);
 }
 
 const basename = (path: string): string => path.replace(/^.*\//, "").replace(/\.md$/, "");
@@ -47,6 +60,8 @@ export function buildCorrectionTool(app: App, convoId: string) {
     async (args) => {
       const file = resolveLink(app, args.path);
       if (!(file instanceof TFile)) return err(`Note not found: ${args.path}`);
+      if (/[\r\n]/.test(args.old_line.trim())) return err("old_line must be a single line. Quote one line of the note.");
+      if (/[\r\n]/.test(args.new_text.trim())) return err("new_text must be a single line. Propose one correction per line.");
       if (!getExo(app)?.settings.proposalKernelEnabled) return err("Suggestions are off, so no correction can be proposed.");
       const name = basename(file.path);
       const line = quotedLine(await app.vault.cachedRead(file), args.old_line);

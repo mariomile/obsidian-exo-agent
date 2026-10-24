@@ -6,11 +6,12 @@
  */
 import { Notice, TFile, type App } from "obsidian";
 import type ExoPlugin from "../main";
-import { planCorrection } from "../core/correction";
+import { planCorrection, type CorrectionError } from "../core/correction";
 import { formatSaveBlock, newAnchor, planInsert, type PatchPlan, type Provenance, type SaveBlock } from "../core/block-patch";
 import { sectionIsList, type SaveTarget } from "../core/save-target";
 import { planUndo, receiptFor, type SaveReceipt, type UndoPlan } from "../core/save-undo";
 import type { ProposalAcceptanceDeps } from "./proposal-router";
+import { SavePicker } from "../ui/pickers";
 import { SaveLog } from "./save-log";
 import { ensureParentFolder, today } from "./tool-kit";
 
@@ -54,14 +55,17 @@ export async function saveToNote(
   return receipt;
 }
 
-const CORRECTION_ERROR = {
-  "line-missing": "The outdated line is no longer in",
-  "line-ambiguous": "The outdated line appears more than once in",
-} as const;
+const CORRECTION_ERROR: Record<CorrectionError, (name: string) => string> = {
+  "line-missing": (n) => `The outdated line is no longer in ${n}. Open the note to fix it by hand.`,
+  "line-ambiguous": (n) => `The outdated line appears more than once in ${n}. Open the note to fix it by hand.`,
+  stale: (n) => `${n} changed since this correction was proposed. Nothing was written: open the note to fix it by hand.`,
+  "multi-line": (n) => `This correction spans more than one line, so nothing was written to ${n}.`,
+};
 
 /** Where an accepted correction proposal is written: in place, through
- *  `vault.process`, with a receipt in the save log so "Undo last save" and
- *  the Inbox undo revert it like any save. Throws a readable reason. */
+ *  `vault.process`, with a receipt in the save log so "Undo a save to note"
+ *  reverts it like any save. A fix that no longer applies writes nothing,
+ *  says why in a Notice and throws the same readable reason. */
 export function noteCorrections(
   app: App,
   log: () => SaveLog,
@@ -78,7 +82,11 @@ export function noteCorrections(
         return "error" in made ? content : made.next;
       });
       if (!made) throw new Error(`Note not found: ${path}`);
-      if ("error" in made) throw new Error(`${CORRECTION_ERROR[made.error]} ${file.basename}. Open the note to fix it by hand.`);
+      if ("error" in made) {
+        const reason = CORRECTION_ERROR[made.error](file.basename);
+        new Notice(reason);
+        throw new Error(reason);
+      }
       await log().record(made.receipt);
       noteWrite([path]);
       return { path };
@@ -98,10 +106,10 @@ async function undoIn(app: App, r: SaveReceipt, path: string): Promise<UndoPlan>
   return plan;
 }
 
-/** Undo save `id`, or the last one not undone. A block that moved is found by
- *  its anchor in the metadata cache, once. Null when there is nothing to undo. */
-export async function undoSave(app: App, log: SaveLog, id?: string): Promise<UndoPlan | null> {
-  const r = id ? await log.find(id) : await log.last();
+/** Undo save `id`. A block that moved is found by its anchor in the metadata
+ *  cache, once. Null when the receipt is gone. */
+export async function undoSave(app: App, log: SaveLog, id: string): Promise<UndoPlan | null> {
+  const r = await log.find(id);
   if (!r) return null;
   let plan = await undoIn(app, r, r.path);
   if (!plan.ok && plan.reason === "block-missing") {
@@ -122,13 +130,14 @@ const UNDO_NOTICE: Record<string, string> = {
 };
 
 /** Undo and say what happened. True when the save is undone. */
-export async function undoSaveWithNotice(app: App, log: SaveLog, id?: string): Promise<boolean> {
+export async function undoSaveWithNotice(app: App, log: SaveLog, id: string): Promise<boolean> {
   const plan = await undoSave(app, log, id);
   new Notice(UNDO_NOTICE[!plan ? "none" : plan.ok ? "ok" : plan.reason]);
   return plan?.ok === true;
 }
 
-/** The receipt log in the plugin folder and the "Undo last save to note" command. */
+/** The receipt log in the plugin folder and the "Undo a save to note..."
+ *  command: pick any save not undone yet, newest first, and undo exactly it. */
 export function registerNoteSaves(plugin: ExoPlugin): SaveLog {
   const path = `${plugin.manifest.dir}/note-saves.json`;
   const adapter = plugin.app.vault.adapter;
@@ -138,9 +147,13 @@ export function registerNoteSaves(plugin: ExoPlugin): SaveLog {
     preserveCorrupt: (content) => adapter.write(`${plugin.manifest.dir}/note-saves.corrupt-${Date.now()}.json`, content),
   });
   plugin.addCommand({
-    id: "undo-last-save",
-    name: "Undo last save to note",
-    callback: () => void undoSaveWithNotice(plugin.app, log),
+    id: "undo-save",
+    name: "Undo a save to note...",
+    callback: () =>
+      void log.undoable().then((saves) => {
+        if (!saves.length) new Notice(UNDO_NOTICE.none);
+        else new SavePicker(plugin.app, saves, (r) => void undoSaveWithNotice(plugin.app, log, r.id)).open();
+      }),
   });
   return log;
 }
