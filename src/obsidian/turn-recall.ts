@@ -3,8 +3,10 @@ import type { ChatRecord } from "../core/recent-chats";
 import {
   formatRecallBlock,
   matchPastChats,
+  rankRecall,
   recallKeywords,
   shouldRecall,
+  RECALL_MAX_CHATS,
   RECALL_MAX_NOTES,
   type ChatRecall,
   type NoteRecall,
@@ -32,17 +34,19 @@ export async function recallForTurn(
   if (!shouldRecall(input.message)) return null;
   const keywords = recallKeywords(input.message);
   if (!keywords.length) return null;
-  let notes: NoteRecall[] = [];
+  let sonar: NoteRecall[] = [];
   try {
     const exclude = input.exclude ?? vaultExclusion(app);
     const { hits } = await searchVaultNotes(app, keywords.join(" "), RECALL_MAX_NOTES, exclude);
-    notes = hits
-      .slice(0, RECALL_MAX_NOTES)
-      .map((h) => ({ path: h.path, excerpt: h.excerpt }));
+    sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
   } catch {
     /* search failed: chats alone may still recall something */
   }
-  const chats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
+  const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
+  const { notes, chats } = rankRecall(
+    { sonar, title: [], lexicalChats, semanticChats: null },
+    { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS },
+  );
   const block = formatRecallBlock(notes, chats);
   return block ? { block, notes, chats } : null;
 }

@@ -2,11 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   formatRecallBlock,
   matchPastChats,
+  rankRecall,
   recallKeywords,
   shouldRecall,
   RECALL_CLOSE,
   RECALL_MAX_CHARS,
+  RECALL_MAX_CHATS,
+  RECALL_MAX_NOTES,
   RECALL_OPEN,
+  type ChatRecall,
+  type NoteRecall,
 } from "../src/core/turn-recall";
 import { recallForTurn } from "../src/obsidian/turn-recall";
 import type { ChatRecord } from "../src/core/recent-chats";
@@ -131,6 +136,30 @@ describe("formatRecallBlock", () => {
     expect(block.length).toBeLessThanOrEqual(RECALL_MAX_CHARS);
     expect((block.match(/^- N\//gm) ?? []).length).toBeLessThanOrEqual(5);
     expect((block.match(/^- "T/gm) ?? []).length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("rankRecall on single lanes (parity with the pre-extraction pipeline)", () => {
+  const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
+  const before = (sonar: NoteRecall[], lexical: ChatRecall[]) => ({
+    notes: sonar.slice(0, RECALL_MAX_NOTES),
+    chats: lexical.slice(0, RECALL_MAX_CHATS),
+  });
+  const lanes = (sonar: NoteRecall[], lexicalChats: ChatRecall[]) => ({ sonar, title: [], lexicalChats, semanticChats: null });
+  const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
+
+  it("keeps Sonar's order and the lexical chats as they were", () => {
+    const sonar = ["B.md", "A.md", "C.md"].map(n);
+    const lexical = matchPastChats(chats, ["pricing", "tiers", "launch"], { excludeId: "current", now: NOW });
+    expect(rankRecall(lanes(sonar, lexical), opts)).toEqual(before(sonar, lexical));
+  });
+  it("cuts a long Sonar lane to five notes", () => {
+    const sonar = Array.from({ length: 9 }, (_, i) => n(`N/${9 - i}.md`));
+    expect(rankRecall(lanes(sonar, []), opts)).toEqual(before(sonar, []));
+  });
+  it("chats alone when the vault search found nothing", () => {
+    const lexical: ChatRecall[] = [1, 2, 3].map((i) => ({ id: `c${i}`, title: `T${i}`, date: "2026-10-01", snippet: "s", msgIndex: 0 }));
+    expect(rankRecall(lanes([], lexical), opts)).toEqual(before([], lexical));
   });
 });
 

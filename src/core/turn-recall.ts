@@ -137,6 +137,25 @@ export function matchPastChats(
     .map((s) => s.recall);
 }
 
+/** Every source of one recall, before ranking. The adapter fetches them; the
+ *  eval feeds the live ones into the same {@link rankRecall}, so what is
+ *  measured is what ships. */
+export interface RecallLanes {
+  /** Sonar (or the built-in scorer), best first, exclusions already applied. */
+  sonar: NoteRecall[];
+  /** Notes whose name matches the message. */
+  title: NoteRecall[];
+  /** {@link matchPastChats}. */
+  lexicalChats: ChatRecall[];
+  /** The semantic chat index, best first; null when it could not run. */
+  semanticChats: ChatRecall[] | null;
+}
+
+/** The notes and chats one turn injects, best first. */
+export function rankRecall(lanes: RecallLanes, opts: { maxNotes: number; maxChats: number }): { notes: NoteRecall[]; chats: ChatRecall[] } {
+  return { notes: lanes.sonar.slice(0, opts.maxNotes), chats: lanes.lexicalChats.slice(0, opts.maxChats) };
+}
+
 /**
  * The block that rides the outbound message, or "" when there is nothing.
  * Entries are dropped from the end (chats first, then the weakest notes) until

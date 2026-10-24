@@ -1,0 +1,66 @@
+{
+  "status": "proposal: the 10 questions of plan 4.2, not yet confirmed by Mario",
+  "cases": [
+    {
+      "id": "q01",
+      "question": "Quale task manager uso adesso per i miei task, Todoist o Notion?",
+      "expect": [{ "note": "_system/memory/decisions/2026-10-20-todoist-task-manager-notion-sospeso.md" }],
+      "mustNotLead": ["_system/memory/decisions/2026-08-27-notion-solo-progetti-e-task.md"]
+    },
+    {
+      "id": "q02",
+      "question": "Chi scrive la memoria del vault e come funziona la memoria automatica?",
+      "expect": [
+        { "note": "_system/memory/decisions/2026-09-25-memoria-automatica-nel-vault.md" },
+        { "note": "_system/memory/decisions/2026-10-06-memoria-senza-umano-nel-giro.md" }
+      ],
+      "mustNotLead": ["_system/memory/decisions/2026-09-24-vault-lean.md"]
+    },
+    {
+      "id": "q03",
+      "question": "Qual è la mia strategia di carriera: fondare subito o entrare prima in un'azienda Tier 1?",
+      "expect": [{ "note": "_system/memory/decisions/2026-09-10-founder-via-tier-1.md" }]
+    },
+    {
+      "id": "q04",
+      "question": "Per le candidature Tier 1 conta più il ruolo o il brand dell'azienda?",
+      "expect": [{ "note": "_system/memory/decisions/2026-10-10-candidature-brand-first.md" }]
+    },
+    {
+      "id": "q05",
+      "question": "Cosa abbiamo deciso sulla Orchestration Board e sul confine di Exo rispetto a T3 Code e Kore?",
+      "expect": [
+        { "note": "_system/memory/decisions/2026-10-24-exo-agente-di-obsidian.md" },
+        { "note": "Active/Projects/Exo/Exo Strategia miglioramento 2026-10-24.md" }
+      ]
+    },
+    {
+      "id": "q06",
+      "question": "Chi gestisce il prep dei meeting e i follow-up da quando il bot Relazioni è stato dismesso?",
+      "expect": [{ "note": "_system/memory/decisions/2026-10-15-relazioni-dismesso.md" }]
+    },
+    {
+      "id": "q07",
+      "question": "Chi è Alberto Aspese e quanti eventi in calendario abbiamo avuto insieme?",
+      "expect": [
+        { "note": "CRM/People/Alberto Aspese.md" },
+        { "chat": { "title": "Calendar Totale Alberto Aspese", "date": "2026-07-28" } }
+      ]
+    },
+    {
+      "id": "q08",
+      "question": "Cosa avevamo detto su cosa rubare da Honcho per la memoria di Exo?",
+      "expect": [{ "chat": { "title": "Honcho memory ideas for Exo", "date": "2026-10-08" } }]
+    },
+    {
+      "id": "q09",
+      "question": "Che cosa è diventato Turno e con quale modello di business open-core?",
+      "expect": [{ "note": "_system/memory/decisions/2026-10-03-turno-saas-open-core.md" }]
+    },
+    {
+      "id": "q10",
+      "question": "Cosa ci eravamo detti sull'equity come vero moltiplicatore di ricchezza e Bending Spoons?",
+      "expect": [{ "chat": { "title": "Equity il vero moltiplicatore di ricchezza", "date": "2026-10-07" } }]
+    }
+  ]
+}
