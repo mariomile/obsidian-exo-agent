@@ -7,7 +7,6 @@
  */
 import type { App } from "obsidian";
 import { formatSaveBlock, planInsert, type Provenance } from "../core/block-patch";
-import type { Message } from "../core/model";
 import { buildRecap } from "../core/recap";
 import { listSections, sectionIsList, sectionLabel, suggestTargets, type SaveTarget, type SectionRef } from "../core/save-target";
 import type { SaveReceipt } from "../core/save-undo";
@@ -38,18 +37,6 @@ export interface SavePanelDeps {
 const noteName = (path: string): string => path.replace(/^.*\//, "").replace(/\.md$/, "");
 /** Shown in the preview only; the save draws its own anchor. */
 const PREVIEW_ANCHOR = "exo-xxxxxx";
-
-/** Index of the assistant message whose text is `answer`: the provenance link
- *  points there. A live turn not stored yet gets the next index. */
-export function answerIndex(messages: readonly Message[], answer: string): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "assistant") continue;
-    const text = m.segments.map((s) => (s.t === "text" ? s.md : "")).join("");
-    if (text === answer) return i;
-  }
-  return messages.length;
-}
 
 export function renderSavePanel(host: HTMLElement, text: string, deps: SavePanelDeps): { el: HTMLElement; idle: () => Promise<void>; close: () => void } {
   const wrap = host.createDiv({ cls: "mva-rethink" });
@@ -84,10 +71,14 @@ export function renderSavePanel(host: HTMLElement, text: string, deps: SavePanel
   const ready = (): boolean =>
     !saving && !!target && !!body.trim() && (section.kind !== "new" || !!section.heading.trim());
 
+  const setDisabled = (on: boolean) => {
+    saveBtn.toggleClass("is-disabled", on);
+    saveBtn.setAttribute("aria-disabled", String(on));
+  };
   const renderDiff = () => {
     diff.empty();
     statusEl.setText(status || (target && !body.trim() ? "Nothing to save." : ""));
-    saveBtn.toggleClass("is-disabled", !ready());
+    setDisabled(!ready());
     if (!ready()) return;
     const block = formatSaveBlock(body, deps.provenance, PREVIEW_ANCHOR, sectionIsList(content, section));
     const plan = planInsert(content, section, block);
@@ -182,7 +173,7 @@ export function renderSavePanel(host: HTMLElement, text: string, deps: SavePanel
     if (!ready() || !target) return;
     const input = { target: { path: target, section }, text: body, provenance: deps.provenance };
     saving = true;
-    saveBtn.addClass("is-disabled");
+    setDisabled(true);
     pending = deps.save(input).then((r) => {
       if ("error" in r) {
         saving = false;
@@ -207,25 +198,36 @@ export function renderSavePanel(host: HTMLElement, text: string, deps: SavePanel
 
 const open = new WeakMap<HTMLElement, { el: HTMLElement; close: () => void }>();
 
+/** The selected text inside `turnEl`, trimmed, or "". */
+function selectionIn(turnEl: HTMLElement): string {
+  const s = window.getSelection();
+  return s && !s.isCollapsed && turnEl.contains(s.anchorNode) ? s.toString().trim() : "";
+}
+
 /** The turn's "Save to note" control: toggles the panel under `turnEl`, the
- *  text prefilled with the selection inside the answer, else the whole answer. */
+ *  text prefilled with the selection inside the answer, else the whole answer.
+ *  The provenance link points at the turn's message (`data-msg`); a turn not
+ *  stored yet points at the next one. */
 export function bindSaveToNote(control: HTMLElement, app: App, log: SaveLog, turnEl: HTMLElement, answer: string, convo: Convo, rel: (p: string) => string): void {
-  let picked = "";
-  // Read the selection before the press collapses it.
+  let pressed = "";
+  // A mouse press collapses the selection before the click: read it first.
   control.addEventListener("mousedown", () => {
-    const s = window.getSelection();
-    picked = s && !s.isCollapsed && turnEl.contains(s.anchorNode) ? s.toString().trim() : "";
+    pressed = selectionIn(turnEl);
   });
   clickable(control, () => {
+    // From the keyboard the selection is still there when the panel opens.
+    const picked = selectionIn(turnEl) || pressed;
+    pressed = "";
     const prev = open.get(turnEl);
     open.delete(turnEl);
     if (prev?.el.isConnected) return prev.close();
     const recap = buildRecap(convo.messages, rel);
     const touched = [...recap.written.map((w) => w.path), ...recap.read];
+    const msg = turnEl.dataset.msg;
     const panel = renderSavePanel(turnEl, picked || answer, {
       active: app.workspace.getActiveFile()?.path ?? null,
       touched,
-      provenance: { convoId: convo.id, msgIndex: answerIndex(convo.messages, answer), chatTitle: convo.title, date: today() },
+      provenance: { convoId: convo.id, msgIndex: msg ? Number(msg) : convo.messages.length, chatTitle: convo.title, date: today() },
       read: async (p) => {
         const f = app.vault.getFileByPath(p);
         return f ? app.vault.cachedRead(f) : null;

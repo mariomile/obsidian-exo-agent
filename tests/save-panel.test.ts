@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { renderSavePanel, answerIndex, type SavePanelDeps } from "../src/ui/save-panel";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+import { renderSavePanel, bindSaveToNote, type SavePanelDeps } from "../src/ui/save-panel";
+import { SaveLog } from "../src/obsidian/save-log";
+import type { Convo } from "../src/ui/convo-types";
 import type { Provenance } from "../src/core/block-patch";
 import type { SaveTarget } from "../src/core/save-target";
 import type { SaveReceipt } from "../src/core/save-undo";
-import type { Message } from "../src/core/model";
 import { FakeEl, asEl } from "./fake-dom";
 
 const P: Provenance = { convoId: "c1", msgIndex: 1, chatTitle: "Pricing", date: "2026-10-24" };
@@ -60,6 +61,7 @@ describe("save panel", () => {
     expect(diffText(host)).toContain("two");
     expect(diffText(host)).toContain('[fonte: chat "Pricing"');
     expect(saveBtn(host).hasClass("is-disabled")).toBe(false);
+    expect(saveBtn(host).getAttribute("aria-disabled")).toBe("false");
   });
 
   it("no active note: only the picker, Save disabled until a note is chosen", async () => {
@@ -68,6 +70,7 @@ describe("save panel", () => {
     expect(host.find("mva-gallery-chip").map((c) => c.textContent)).toEqual(["Choose note..."]);
     expect(host.textContent).toContain("Open a note or choose one to save into.");
     expect(saveBtn(host).hasClass("is-disabled")).toBe(true);
+    expect(saveBtn(host).getAttribute("aria-disabled")).toBe("true");
     host.byText("Choose note...")!.click();
     pick("Projects/Pricing.md");
     await panel.idle();
@@ -186,17 +189,50 @@ describe("save panel", () => {
   });
 });
 
-describe("answerIndex", () => {
-  const msgs: Message[] = [
-    { role: "user", text: "q1" },
-    { role: "assistant", segments: [{ t: "text", md: "a" }, { t: "tool", name: "x", input: {}, ok: true, output: "" }, { t: "text", md: "b" }] },
-    { role: "user", text: "q2" },
-    { role: "assistant", segments: [{ t: "text", md: "ab" }] },
-  ];
-  it("is the last assistant message whose text is the answer", () => {
-    expect(answerIndex(msgs, "ab")).toBe(3);
+describe("bindSaveToNote", () => {
+  const NOTE = "# Pricing\n\n## Notes\ntext\n";
+  const app = {
+    workspace: { getActiveFile: () => ({ path: "Projects/Pricing.md" }) },
+    vault: { getFileByPath: (p: string) => ({ path: p }), cachedRead: async () => NOTE },
+  } as never;
+  const convo = { id: "c9", title: "Pricing", messages: [{ role: "user", text: "q" }, { role: "assistant", segments: [{ t: "text", md: "answer" }] }] } as unknown as Convo;
+  let selection: { isCollapsed: boolean; anchorNode: unknown; toString: () => string } | null = null;
+  (globalThis as { getSelection?: () => unknown }).getSelection = () => selection;
+  afterEach(() => {
+    selection = null;
   });
-  it("falls back to the next index when the answer is not stored yet", () => {
-    expect(answerIndex(msgs, "zzz")).toBe(4);
+
+  function mount(msg?: string) {
+    const turn = new FakeEl();
+    if (msg !== undefined) turn.dataset.msg = msg;
+    const body = turn.createDiv({ text: "answer" });
+    const control = new FakeEl("span");
+    bindSaveToNote(asEl(control), app, new SaveLog(), asEl(turn), "the whole answer", convo, (p) => p);
+    return { turn, body, control, text: () => (turn.find("mva-pv-input").find((f) => f.tag === "textarea")?.value ?? "") };
+  }
+
+  it("opened from the keyboard, the panel is prefilled with the current selection in the answer", () => {
+    const { body, control, text } = mount("1");
+    selection = { isCollapsed: false, anchorNode: body, toString: () => "  a picked line  " };
+    control.fire("keydown", { key: "Enter" });
+    expect(text()).toBe("a picked line");
+  });
+
+  it("no selection: the whole answer", () => {
+    const { control, text } = mount("1");
+    control.click();
+    expect(text()).toBe("the whole answer");
+  });
+
+  it("the provenance link points at the turn's own message index", async () => {
+    const { turn, control } = mount("7");
+    control.click();
+    await vi.waitFor(() => expect(diffText(turn)).toContain("&msg=7)"));
+  });
+
+  it("a turn with no message index yet points at the next message", async () => {
+    const { turn, control } = mount();
+    control.click();
+    await vi.waitFor(() => expect(diffText(turn)).toContain("&msg=2)"));
   });
 });
