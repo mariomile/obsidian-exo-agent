@@ -882,6 +882,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   async newConversation(): Promise<void> { await this.activateView(); convoBridge.chatView(this.app)?.newConversation(); }
   setConvoPinned(id: string, pinned: boolean): boolean { return convoBridge.setConvoPinned(this.app, id, pinned); }
   decidePermission(id: string, verdict: "allow" | "deny"): boolean { return convoBridge.decidePermission(this.app, id, verdict); }
+  markSeen(ids: readonly string[]): void { convoBridge.markSeen(this.app, ids); }
   activeConvoId(): string | null { return convoBridge.activeConvoId(this.app); }
   retitleConversation(id: string): Promise<boolean> { return convoBridge.retitleConversation(this, id); }
   backfillTitles(): Promise<void> { return convoBridge.backfillTitles(this); }
@@ -2137,11 +2138,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /** Pending queue requests (for the Autonomy card). */
   countQueuePending(): Promise<number> {
     return countPendingQueue(this.app, this.settings);
-  }
-
-  /** Live attention data for the Cockpit (blocked / streaming conversations). */
-  liveAttention(): { id: string; title: string; blocked: boolean; streaming: boolean }[] {
-    return convoBridge.chatView(this.app)?.convoAttention() ?? [];
   }
 
   /** Open the chat view on a specific conversation (Cockpit "Resume" rows). */

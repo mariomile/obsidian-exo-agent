@@ -231,7 +231,12 @@ export class CockpitView extends ItemView {
       // Attention strip (only when non-empty)
       const pulseState = this.plugin.settings.dailyPulseReviewState;
       const attention = buildAttention({
-        convos: this.plugin.liveAttention(),
+        convos: (this.plugin.listChatRows() ?? []).map((r) => ({
+          id: r.id,
+          title: r.title,
+          blocked: r.pendingPerm || r.pendingAsk,
+          streaming: r.streaming,
+        })),
         answers,
         unreviewedRuns,
         dailyPulseItems: dailyPulseNeedsReview(pulseState) ? pulseState.itemCount : 0,

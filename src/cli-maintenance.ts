@@ -54,7 +54,7 @@ export async function maybeAutoUpdateCli(plugin: ExoPlugin, force = false): Prom
     if (plugin.unloaded) return;
     const now = Date.now();
     if (!force && plugin.settings.cliUpdateCheckAt && now - plugin.settings.cliUpdateCheckAt < DAY) return;
-    if (plugin.liveAttention().some((a) => a.streaming)) return; // never mid-turn
+    if (plugin.listChatRows()?.some((r) => r.streaming)) return; // never mid-turn
 
     const cli = await resolveCli("claude", plugin.settings.claudeBin);
     const channel = claudeInstallChannel(cli.bin);

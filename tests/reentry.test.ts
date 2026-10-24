@@ -258,7 +258,7 @@ describe("resume verbs", () => {
  * ------------------------------------------------------------------------ */
 
 const convo = (messages: Message[], readIndex?: number): Convo =>
-  ({ messages, readIndex, unread: false }) as unknown as Convo;
+  ({ messages, readIndex }) as unknown as Convo;
 
 /** One reveal, applied exactly as `revealReentry` applies it. */
 const reveal = (c: Convo, streaming = false) => {
@@ -306,7 +306,7 @@ describe("the read position, over a session", () => {
     c.messages.push(user("do X"), ...work12());
     noteTurnEnd(c, { active: true, visible: true, turnFrom });
     expect(c.readIndex).toBe(c.messages.length);
-    expect(c.unread).toBe(false);
+    expect(c.seenAt).toBeDefined();
     expect(reveal(c)).toBeNull();
   });
 
@@ -319,12 +319,12 @@ describe("the read position, over a session", () => {
     expect(reveal(c)?.work.steps).toBe(2);
   });
 
-  it("marks a turn that landed in another chat unread and leaves its position", () => {
+  it("leaves a turn that landed in another chat unseen and its position alone", () => {
     const c = convo([user("a")], 1);
     const turnFrom = c.messages.length;
     c.messages.push(...work12());
     noteTurnEnd(c, { active: false, visible: true, turnFrom });
-    expect(c.unread).toBe(true);
+    expect(c.seenAt).toBeUndefined();
     expect(c.readIndex).toBe(1);
     expect(reveal(c)?.work.files).toBe(2);
   });
@@ -545,7 +545,7 @@ const domConvo = (messages: Message[], readIndex: number | undefined, turns: (nu
     turn.dataset.msg = String(msg);
     if (messages[msg]?.role === "assistant") turn.createDiv({ cls: "mva-steps is-collapsed" });
   }
-  const c = { messages, readIndex, unread: false, streaming: false, listEl } as unknown as Convo;
+  const c = { messages, readIndex, streaming: false, listEl } as unknown as Convo;
   return { c, listEl };
 };
 

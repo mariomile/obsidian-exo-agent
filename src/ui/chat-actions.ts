@@ -91,6 +91,25 @@ export function decidePermission(view: ChatView, id: string, verdict: "allow" | 
 }
 
 /**
+ * Mark chats read: the Inbox's "Mark read" and "Dismiss" on a chat. Writes the
+ * read watermark (`seenAt`), the one field `isUnseen` reads besides a visit, so
+ * the tab dot, the sidebar row and the Inbox item all clear together.
+ */
+export function markSeen(view: ChatView, ids: readonly string[]): void {
+  const now = Date.now();
+  let changed = false;
+  for (const id of ids) {
+    const c = find(view, id);
+    if (!c) continue;
+    c.seenAt = now;
+    changed = true;
+  }
+  if (!changed) return;
+  view.persist();
+  view.renderTabs();
+}
+
+/**
  * Mirror a settled conversation into its vault note, and return the path (null
  * when there is nothing to write). MANUAL only: this has exactly two callers,
  * the sidebar's row menu and the palette command — nothing on the turn path

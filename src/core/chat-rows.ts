@@ -87,6 +87,8 @@ export interface ChatRowSource {
   focused?: boolean;
   /** Last time the user had this chat in view. Clears the "woke" marker. */
   lastActiveAt?: number;
+  /** Read watermark (core/inbox `isUnseen`): a read mark clears "woke" too. */
+  seenAt?: number;
   /** The agent's checklist, shown on a running row. */
   planProgress?: PlanProgress;
   /** The conversation itself, by reference, for searching what was said
@@ -389,7 +391,7 @@ function stampShelf(row: ChatRow, s: ChatRowSource, now: number, quietMs: number
     row.settledAt = s.settledAt;
   }
   const woke = wokeAt(s, now);
-  if (!s.focused && woke !== null && woke > (s.lastActiveAt ?? 0)) row.unseen = true;
+  if (!s.focused && woke !== null && woke > Math.max(s.lastActiveAt ?? 0, s.seenAt ?? 0)) row.unseen = true;
   if (row.lane === "running" && s.planProgress) row.progress = s.planProgress;
   return row;
 }

@@ -57,8 +57,8 @@ export interface ReentryHost {
  * reports as news the twelve steps and three files you sat and watched land —
  * and prints them above the prompt you typed yourself.
  *
- *  - `active`: this is the conversation the view is showing. Its complement is
- *    the existing unread dot, which is the same question asked of the strip.
+ *  - `active`: this is the conversation the view is showing. Watched live, the
+ *    turn also moves `seenAt`, so it never comes back as a new reply.
  *  - `visible`: the pane itself is on screen. A turn that finished while the
  *    Exo pane was behind another Obsidian tab is exactly the work the band
  *    exists to report, so it must NOT count as read.
@@ -71,8 +71,8 @@ export function noteTurnEnd(
   c: Convo,
   seen: { active: boolean; visible: boolean; turnFrom: number },
 ): void {
-  if (!seen.active) c.unread = true;
-  else if (seen.visible) {
+  if (seen.active && seen.visible) {
+    c.seenAt = Date.now();
     c.readIndex = readIndexAfterTurn({
       messages: c.messages,
       readIndex: c.readIndex,

@@ -61,7 +61,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (review Release 1): la coda vive sopra il composer,
   // un solo TurnOpts per invio e drain, steer in un solo punto. 6007 -> 5959
   // righe reali, tetto 5964.
-  "src/view.ts": 5964,
+  // Abbassato il 2026-10-24 (Release 2, seen watermark): `Convo.unread` e
+  // `convoAttention` cancellati, il non letto e' `isUnseen` (core/inbox).
+  // 5959 -> 5942 righe reali, tetto 5947.
+  "src/view.ts": 5947,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -97,7 +100,9 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 2, rinomine): l'alias
   // `activateConnections` e' cancellato, si usa `activateHub()`. 2828 -> 2823
   // righe reali, tetto 2828.
-  "src/main.ts": 2828,
+  // Abbassato il 2026-10-24 (Release 2, seen watermark): `liveAttention`
+  // cancellato. 2823 -> 2819 righe reali, tetto 2824.
+  "src/main.ts": 2824,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza

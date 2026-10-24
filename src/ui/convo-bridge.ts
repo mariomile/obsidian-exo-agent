@@ -58,6 +58,12 @@ export function decidePermission(app: App, convoId: string, verdict: "allow" | "
   return view ? actions.decidePermission(view, convoId, verdict) : false;
 }
 
+/** Mark chats read from the Inbox (seen watermark). No-op when Exo is not mounted. */
+export function markSeen(app: App, convoIds: readonly string[]): void {
+  const view = chatView(app);
+  if (view) actions.markSeen(view, convoIds);
+}
+
 /** Which conversation the user is standing in, or null when Exo is not mounted.
  *  The anchor the "next chat needing you" cycle counts from. */
 export function activeConvoId(app: App): string | null {

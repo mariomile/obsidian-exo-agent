@@ -572,13 +572,14 @@ describe("buildChatList — unseen", () => {
     expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON - 2 * HOUR })]), "active")[0].unseen).toBe(true);
   });
 
-  it("clears the woke marker once the user has had the chat in view, or while it is focused", () => {
+  it("clears the woke marker once the user has had the chat in view, marked it read, or while it is focused", () => {
     const woke = {
       snoozedAt: NOON - 3 * HOUR,
       snoozedUntil: NOON - HOUR,
       updatedAt: NOON - 3 * HOUR,
     };
     expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON })]), "active")[0].unseen).toBe(false);
+    expect(rows(build([src({ id: "a", ...woke, seenAt: NOON })]), "active")[0].unseen).toBe(false);
     expect(rows(build([src({ id: "a", ...woke, focused: true })]), "active")[0].unseen).toBe(false);
   });
 });
