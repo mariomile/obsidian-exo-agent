@@ -17,8 +17,10 @@ import { clickable } from "../dom";
 import { NoteDiffModal } from "../note-diff";
 import { basename as noteBasename } from "../../obsidian/graph";
 import {
+  awaitsReview,
   legacyRuns,
   runsForSlug,
+  type AutomationRef,
   type AutomationRunRecord,
 } from "../../core/automations";
 import {
@@ -27,6 +29,7 @@ import {
   type Automation,
 } from "../../core/automation-model";
 import { dailyPulseMetaLabel } from "../../core/daily-pulse";
+import { openFailedRuns } from "../../core/inbox";
 import { formatAge } from "../../core/actions-hub";
 import type { HubTabContext } from "./shared";
 import { openAutomationEditor, editingState } from "./automation-editor";
@@ -81,7 +84,9 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
     });
   }
 
-  for (const a of autos) renderCard(list, a, runs, ctx);
+  // The failed runs the Inbox lists as errors: same rule, same automations.
+  const openFailed = new Set(openFailedRuns(runs, autos).map((r) => r.id));
+  for (const a of autos) renderCard(list, a, runs, openFailed, ctx);
 
   const foot = host.createDiv({ cls: "mva-auto-foot" });
   const add = foot.createEl("button", { cls: "mva-btn", text: "New automation" });
@@ -93,7 +98,7 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
   const words = foot.createEl("button", { cls: "mva-btn", text: "Describe it in a chat" });
   words.onclick = () => void describeAutomationInChat(ctx.plugin);
 
-  renderLegacyRuns(host, runs, autos.map((a) => a.name), ctx);
+  renderLegacyRuns(host, runs, autos, openFailed, ctx);
 }
 
 /* ------------------------------- one card ------------------------------- */
@@ -102,6 +107,7 @@ function renderCard(
   list: HTMLElement,
   a: Automation,
   runs: AutomationRunRecord[],
+  openFailed: ReadonlySet<string>,
   ctx: HubTabContext
 ): void {
   const store = ctx.plugin.automationStore;
@@ -182,7 +188,7 @@ function renderCard(
 
   if (ctx.expanded(runsKey) && own.length) {
     const timeline = list.createDiv({ cls: "mva-auto2-timeline" });
-    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, ctx);
+    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, openFailed, ctx);
   }
 }
 
@@ -192,10 +198,11 @@ function renderCard(
 function renderLegacyRuns(
   host: HTMLElement,
   runs: AutomationRunRecord[],
-  claimedNames: string[],
+  automations: readonly AutomationRef[],
+  openFailed: ReadonlySet<string>,
   ctx: HubTabContext
 ): void {
-  const old = legacyRuns(runs, claimedNames);
+  const old = legacyRuns(runs, automations);
   if (!old.length) return;
   const key = "auto-runs:legacy";
   const head = host.createDiv({ cls: "mva-pv-label mva-auto2-legacy", text: `Older runs (${old.length})` });
@@ -207,10 +214,16 @@ function renderLegacyRuns(
   });
   if (!ctx.expanded(key)) return;
   const wrap = host.createDiv({ cls: "mva-auto2-timeline" });
-  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, ctx);
+  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, openFailed, ctx);
 }
 
-function renderRunRow(host: HTMLElement, r: AutomationRunRecord, ctx: HubTabContext): void {
+/** `openFailed`: ids of the failed runs the Inbox lists as errors (`openFailedRuns`). */
+function renderRunRow(
+  host: HTMLElement,
+  r: AutomationRunRecord,
+  openFailed: ReadonlySet<string>,
+  ctx: HubTabContext
+): void {
   const wrap = host.createDiv();
   const row = wrap.createDiv({ cls: "mva-auto-runrow" });
   const when = new Date(r.startedAt);
@@ -247,12 +260,19 @@ function renderRunRow(host: HTMLElement, r: AutomationRunRecord, ctx: HubTabCont
     });
   }
 
-  if (!r.reviewedAt && !r.restoredAt && r.writes.length) {
+  if (awaitsReview(r)) {
     const reviewed = row.createEl("button", { cls: "mva-btn", text: "Reviewed" });
     reviewed.onclick = () => {
       reviewed.setAttr("disabled", "true");
-      void ctx.plugin.markAutomationRunReviewed(r.id).finally(() => ctx.rerender());
+      void ctx.plugin.markAutomationRunsReviewed([r.id]).finally(() => ctx.rerender());
     };
+  }
+
+  // A failed run that wrote nothing has nothing to review: Dismiss clears it
+  // from the Inbox (same `reviewedAt` the Inbox's own Dismiss sets).
+  if (openFailed.has(r.id)) {
+    const dismiss = row.createSpan({ cls: "mva-btn", text: "Dismiss" });
+    clickable(dismiss, () => void ctx.plugin.markAutomationRunsReviewed([r.id]).finally(() => ctx.rerender()));
   }
 
   if (r.reportPath) {

@@ -160,7 +160,7 @@ export function memoryActions(input: MemoryActionsInput): HubAction[] {
   const due = dueLoops(input.loops, input.now).length;
   const actions: HubAction[] = [
     { id: "undo-harvest", label: "Undo last memory write", enabled: input.canUndo },
-    { id: "open-inbox", label: "Open today's memory inbox", enabled: input.inboxExists },
+    { id: "open-inbox", label: "Open today's unfiled memory", enabled: input.inboxExists },
     { id: "open-loops", label: "Open open-loops", enabled: true, ...(due > 0 ? { badge: `${due} due` } : {}) },
   ];
   if (input.reviewExists) actions.push({ id: "open-review", label: "Open review.md", enabled: true });

@@ -34,7 +34,7 @@ export interface ExoToolHost {
   retitleConversation(id: string): Promise<boolean>;
   loadAutomationRuns(): Promise<AutomationRunRecord[]>;
   restoreAutomationRun(id: string): Promise<string[]>;
-  markAutomationRunReviewed(id: string): Promise<void>;
+  markAutomationRunsReviewed(ids: readonly string[]): Promise<void>;
   runPlaybook(name: string, prompt: string, opts?: { write?: boolean; slug?: string }): Promise<boolean>;
   /** Unified automation files — the store behind the Automations tab. */
   automationStore: {

@@ -5,6 +5,7 @@ import type { ChatRowSource } from "../core/chat-rows";
 import * as actions from "./chat-actions";
 import type { HarvestSource } from "../obsidian/memory-harvest";
 import type { ChatRecord } from "../core/recent-chats";
+import type { ChatSession } from "../core/session-summary";
 
 /** The mounted ChatView, or null when none is — including when the leaf exists
  *  but is still a deferred placeholder, on which `instanceof` is false. */
@@ -56,6 +57,18 @@ export function applyLifecycle(app: App, convoId: string, v: actions.LifecycleVe
 export function decidePermission(app: App, convoId: string, verdict: "allow" | "deny"): boolean {
   const view = chatView(app);
   return view ? actions.decidePermission(view, convoId, verdict) : false;
+}
+
+/** Mark chats read from the Inbox (seen watermark). No-op when Exo is not mounted. */
+export function markSeen(app: App, convoIds: readonly string[]): void {
+  const view = chatView(app);
+  if (view) actions.markSeen(view, convoIds);
+}
+
+/** The open chat's session (Capabilities Overview), or null when Exo is not mounted. */
+export function sessionSnapshot(app: App): ChatSession | null {
+  const view = chatView(app);
+  return view?.active ? actions.sessionSnapshot(view) : null;
 }
 
 /** Which conversation the user is standing in, or null when Exo is not mounted.

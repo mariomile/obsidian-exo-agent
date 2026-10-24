@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decidePermission } from "../src/ui/chat-actions";
+import { decidePermission, markSeen, sessionSnapshot } from "../src/ui/chat-actions";
 import type { ChatView } from "../src/view";
 import type { Convo, PermDecision } from "../src/ui/convo-types";
 
@@ -72,5 +72,44 @@ describe("decidePermission", () => {
   it("returns false for a conversation the view does not have", () => {
     const view = viewOf([convo("c1", card().decision)]);
     expect(decidePermission(view, "gone", "allow")).toBe(false);
+  });
+});
+
+describe("markSeen", () => {
+  it("stamps the read watermark on the named chats only, then persists once", () => {
+    const a = { id: "a" } as Convo;
+    const b = { id: "b" } as Convo;
+    const calls: string[] = [];
+    const view = {
+      allConvos: () => [a, b],
+      persist: () => calls.push("persist"),
+      renderTabs: () => calls.push("tabs"),
+    } as unknown as ChatView;
+    markSeen(view, ["a", "missing"]);
+    expect(a.seenAt).toBeGreaterThan(0);
+    expect(b.seenAt).toBeUndefined();
+    expect(calls).toEqual(["persist", "tabs"]);
+  });
+
+  it("writes nothing when no id matches", () => {
+    const calls: string[] = [];
+    const view = { allConvos: () => [], persist: () => calls.push("persist") } as unknown as ChatView;
+    markSeen(view, ["x"]);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("sessionSnapshot", () => {
+  it("reports the effort the chat's model actually runs with, and its own allow count", () => {
+    const active = { provider: "claude", model: "claude-haiku-4-5", allow: new Set(["Read", "Bash(git)"]) } as unknown as Convo;
+    const view = { active, plugin: { settings: { effort: "high" } } } as unknown as ChatView;
+    expect(sessionSnapshot(view)).toEqual({ provider: "claude", model: "claude-haiku-4-5", effort: "default", allowed: 2, mcp: null });
+  });
+
+  it("reports MCP status from the chat's own session, not another chat's", () => {
+    const caps = { mcpServers: [{ name: "vault", status: "connected" }] };
+    const active = { provider: "claude", model: "", allow: new Set(), caps } as unknown as Convo;
+    const view = { active, plugin: { settings: { effort: "high" }, lastSessionCaps: { mcpServers: [] } } } as unknown as ChatView;
+    expect(sessionSnapshot(view).mcp).toEqual([{ name: "vault", status: "connected" }]);
   });
 });

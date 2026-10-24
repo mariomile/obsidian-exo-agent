@@ -63,7 +63,8 @@ const src = (over: Partial<ChatRowSource> = {}): ChatRowSource => ({
   archived: false,
   open: false,
   pinned: false,
-  unseen: false,
+  // Read up to its last turn: a fixture is not news unless a test says so.
+  lastActiveAt: NOON,
   messageCount: 3,
   streaming: false,
   pendingPerm: false,
@@ -96,25 +97,25 @@ const dayIds = (vm: ChatListVM): string[] => daySections(vm).flatMap((s) => s.it
 const dayLabels = (vm: ChatListVM): string[] => daySections(vm).map((s) => s.label);
 
 describe("buildChatList — state sections", () => {
-  it("puts a streaming conversation in the Inbox, marked running", () => {
+  it("puts a streaming conversation on Active, marked running", () => {
     const vm = build([src({ id: "a", streaming: true })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
-    expect(rows(vm, "inbox")[0].lane).toBe("running");
-    expect(vm.sections.map((s) => s.key)).toEqual(["inbox"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
+    expect(rows(vm, "active")[0].lane).toBe("running");
+    expect(vm.sections.map((s) => s.key)).toEqual(["active"]);
   });
 
-  it("puts an open tab in the Inbox even when nothing is running", () => {
+  it("puts an open tab on Active even when nothing is running", () => {
     // An open tab is a chat you deliberately kept to hand, so it belongs with
     // the work, not the archive.
     const vm = build([src({ id: "a", open: true })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
     expect(ids(vm, "settled")).toEqual([]);
   });
 
-  it("keeps an open tab in the Inbox however long it has been quiet", () => {
+  it("keeps an open tab on Active however long it has been quiet", () => {
     // Open tabs never auto-settle; only settling by hand puts one away.
     const vm = build([src({ id: "a", open: true, updatedAt: NOON - 30 * DAY })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
   });
 
   it("puts a closed idle conversation that went quiet 4 days ago in Settled", () => {
@@ -123,9 +124,9 @@ describe("buildChatList — state sections", () => {
     expect(vm.sections.map((s) => s.key)).toEqual(["settled"]);
   });
 
-  it("keeps a closed idle conversation touched an hour ago in the Inbox", () => {
+  it("keeps a closed idle conversation touched an hour ago on Active", () => {
     const vm = build([src({ id: "a", updatedAt: NOON - HOUR })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
     expect(ids(vm, "settled")).toEqual([]);
   });
 
@@ -144,25 +145,25 @@ describe("buildChatList — state sections", () => {
     // A blocked turn has streaming:true because its finally has not run.
     // Reading streaming first would say "working" about something waiting on you.
     const vm = build([src({ id: "a", streaming: true, pendingPerm: true })]);
-    expect(rows(vm, "inbox")[0].lane).toBe("needs-input");
-    expect(rows(vm, "inbox")[0].reason).toBe("perm");
+    expect(rows(vm, "active")[0].lane).toBe("needs-input");
+    expect(rows(vm, "active")[0].reason).toBe("perm");
     expect(vm.blocked.map((r) => r.id)).toEqual(["a"]);
   });
 
   it("distinguishes an ask-blocked conversation from a permission-blocked one", () => {
     const vm = build([src({ id: "a", streaming: true, pendingAsk: true })]);
-    expect(rows(vm, "inbox")[0].lane).toBe("needs-input");
-    expect(rows(vm, "inbox")[0].reason).toBe("ask");
+    expect(rows(vm, "active")[0].lane).toBe("needs-input");
+    expect(rows(vm, "active")[0].reason).toBe("ask");
   });
 
   it("leaves lane undefined on a merely-open tab", () => {
     const vm = build([src({ id: "a", open: true })]);
-    expect(rows(vm, "inbox")[0].lane).toBeUndefined();
+    expect(rows(vm, "active")[0].lane).toBeUndefined();
   });
 
   /**
    * The precedence, stated once and whole. Every row here qualifies for
-   * several shelves at once — pinned beats snoozed beats settled beats inbox,
+   * several shelves at once: pinned beats snoozed beats settled beats active,
    * and the first one it earns is the only one it gets.
    */
   it("lands every row on exactly one shelf, in precedence order", () => {
@@ -177,7 +178,7 @@ describe("buildChatList — state sections", () => {
     ]);
     expect(vm.sections.map((s) => [s.key, s.items.map((r) => r.id)])).toEqual([
       ["pinned", ["pin", "pinSnoozed"]],
-      ["inbox", ["busy", "errored"]],
+      ["active", ["busy", "errored"]],
       ["snoozed", ["snoozed"]],
       ["settled", ["byHand", "old"]],
     ]);
@@ -188,32 +189,32 @@ describe("buildChatList — state sections", () => {
     // is display text and may be reworded or localized.
     const vm = build([
       src({ id: "pin", pinned: true }),
-      src({ id: "inbox" }),
+      src({ id: "active" }),
       src({ id: "snoozed", snoozedUntil: NOON + HOUR, snoozedAt: NOON }),
       src({ id: "rest", updatedAt: NOON - 4 * DAY }),
     ]);
     expect(vm.sections.map((s) => [s.key, s.label])).toEqual([
       ["pinned", "Pinned"],
-      ["inbox", "Inbox"],
+      ["active", "Active"],
       ["snoozed", "Snoozed"],
       ["settled", "Settled"],
     ]);
   });
 
   /**
-   * An errored row that is ALSO open stays in the Inbox with its badge. There
-   * is no separate attention section any more: the Inbox is where everything
+   * An errored row that is ALSO open stays on Active with its badge. There
+   * is no separate attention section any more: Active is where everything
    * that has not been put away lives, and the badge says what it needs.
    */
-  it("keeps an errored row that is also open in the Inbox, badge intact", () => {
+  it("keeps an errored row that is also open on Active, badge intact", () => {
     const vm = build([src({ id: "a", open: true, poisoned: true })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
-    expect(rows(vm, "inbox")[0].badge).toBe("error");
+    expect(ids(vm, "active")).toEqual(["a"]);
+    expect(rows(vm, "active")[0].badge).toBe("error");
   });
 
-  it("keeps a stopped row in the Inbox as well — a halted turn is yours to resume", () => {
+  it("keeps a stopped row on Active as well: a halted turn is yours to resume", () => {
     const vm = build([src({ id: "a", stopped: true })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
     expect(ids(vm, "settled")).toEqual([]);
   });
 
@@ -223,19 +224,19 @@ describe("buildChatList — state sections", () => {
       src({ id: "week", updatedAt: NOON - 4 * DAY }),
       src({ id: "ancient", updatedAt: NOON - 90 * DAY }),
     ]);
-    expect(vm.sections.map((s) => s.key)).toEqual(["inbox", "settled"]);
-    expect(ids(vm, "inbox")).toEqual(["today"]);
+    expect(vm.sections.map((s) => s.key)).toEqual(["active", "settled"]);
+    expect(ids(vm, "active")).toEqual(["today"]);
     expect(ids(vm, "settled")).toEqual(["week", "ancient"]);
   });
 
   it("stamps the shelf on the row itself", () => {
     const vm = build([
       src({ id: "pin", pinned: true }),
-      src({ id: "inbox" }),
+      src({ id: "active" }),
       src({ id: "snoozed", snoozedUntil: NOON + HOUR, snoozedAt: NOON }),
       src({ id: "rest", updatedAt: NOON - 4 * DAY }),
     ]);
-    expect(vm.sections.map((s) => s.items[0].shelf)).toEqual(["pinned", "inbox", "snoozed", "settled"]);
+    expect(vm.sections.map((s) => s.items[0].shelf)).toEqual(["pinned", "active", "snoozed", "settled"]);
   });
 });
 
@@ -254,23 +255,23 @@ describe("buildChatList — shelves", () => {
     expect(vm.sections.map((s) => s.key)).toEqual(["pinned"]);
   });
 
-  it("hides a snoozed chat until its wake time, then returns it to the Inbox", () => {
+  it("hides a snoozed chat until its wake time, then returns it to Active", () => {
     const hidden = build([src({ id: "a", snoozedUntil: NOON + HOUR, snoozedAt: NOON })]);
     expect(ids(hidden, "snoozed")).toEqual(["a"]);
     expect(rows(hidden, "snoozed")[0].snoozedUntil).toBe(NOON + HOUR);
     const woke = build([src({ id: "a", snoozedUntil: NOON - HOUR, snoozedAt: NOON - 3 * HOUR, updatedAt: NOON - 3 * HOUR })]);
-    expect(ids(woke, "inbox")).toEqual(["a"]);
+    expect(ids(woke, "active")).toEqual(["a"]);
     expect(ids(woke, "snoozed")).toEqual([]);
   });
 
   it("brings a snoozed chat back when a turn lands after the snooze", () => {
     const vm = build([src({ id: "a", snoozedUntil: NOON + HOUR, snoozedAt: NOON - HOUR, updatedAt: NOON })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
   });
 
   it("never snoozes the chat in front of you", () => {
     const vm = build([src({ id: "a", focused: true, snoozedUntil: NOON + HOUR, snoozedAt: NOON })]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
     expect(ids(vm, "snoozed")).toEqual([]);
   });
 
@@ -280,7 +281,7 @@ describe("buildChatList — shelves", () => {
       src({ id: "settled", streaming: true, pendingAsk: true, settledOverride: "settled", settledAt: NOON }),
       src({ id: "old", streaming: true, pendingPerm: true, updatedAt: NOON - 10 * DAY }),
     ]);
-    expect(vm.sections.map((s) => s.key)).toEqual(["inbox"]);
+    expect(vm.sections.map((s) => s.key)).toEqual(["active"]);
     expect(vm.blocked).toHaveLength(3);
   });
 
@@ -289,7 +290,7 @@ describe("buildChatList — shelves", () => {
     expect(ids(kept, "settled")).toEqual(["a"]);
     expect(rows(kept, "settled")[0].settledAt).toBe(NOON);
     const woke = build([src({ id: "a", settledOverride: "settled", settledAt: NOON - HOUR, updatedAt: NOON })]);
-    expect(ids(woke, "inbox")).toEqual(["a"]);
+    expect(ids(woke, "active")).toEqual(["a"]);
   });
 
   it("never settles the chat in front of you, even one settled by hand", () => {
@@ -297,7 +298,7 @@ describe("buildChatList — shelves", () => {
       src({ id: "a", focused: true, settledOverride: "settled", settledAt: NOON }),
       src({ id: "b", focused: true, updatedAt: NOON - 30 * DAY }),
     ]);
-    expect([...ids(vm, "inbox")].sort()).toEqual(["a", "b"]);
+    expect([...ids(vm, "active")].sort()).toEqual(["a", "b"]);
   });
 
   it("settles automatically only after more than 3 quiet days", () => {
@@ -305,13 +306,13 @@ describe("buildChatList — shelves", () => {
       src({ id: "edge", updatedAt: NOON - 3 * DAY }),
       src({ id: "past", updatedAt: NOON - 3 * DAY - 1 }),
     ]);
-    expect(ids(vm, "inbox")).toEqual(["edge"]);
+    expect(ids(vm, "active")).toEqual(["edge"]);
     expect(ids(vm, "settled")).toEqual(["past"]);
   });
 
   it("does not auto-settle a chat taken back out by hand", () => {
     const vm = build([src({ id: "active", settledOverride: "active", updatedAt: NOON - 10 * DAY })]);
-    expect(ids(vm, "inbox")).toEqual(["active"]);
+    expect(ids(vm, "active")).toEqual(["active"]);
     expect(ids(vm, "settled")).toEqual([]);
   });
 
@@ -320,37 +321,37 @@ describe("buildChatList — shelves", () => {
       src({ id: "unsettled", updatedAt: NOON - 10 * DAY, unsettledAt: NOON - HOUR }),
       src({ id: "woke", updatedAt: NOON - 10 * DAY, snoozedAt: NOON - 9 * DAY, snoozedUntil: NOON - HOUR }),
     ]);
-    expect([...ids(vm, "inbox")].sort()).toEqual(["unsettled", "woke"]);
+    expect([...ids(vm, "active")].sort()).toEqual(["unsettled", "woke"]);
   });
 });
 
 describe("buildChatList — ordering inside a section", () => {
-  it("sorts the Inbox by when each chat last came back, not by its state", () => {
+  it("sorts Active by when each chat last came back, not by its state", () => {
     // A chat blocked on you does not outrank a newer one: the strip above the
-    // list is what surfaces it, the Inbox is plain return order.
+    // list is what surfaces it, Active is plain return order.
     const vm = build([
       src({ id: "blocked", pendingPerm: true, streaming: true, updatedAt: NOON - 5 * HOUR }),
       src({ id: "plain", updatedAt: NOON - HOUR }),
       src({ id: "errored", poisoned: true, updatedAt: NOON - 3 * HOUR }),
     ]);
-    expect(ids(vm, "inbox")).toEqual(["plain", "errored", "blocked"]);
+    expect(ids(vm, "active")).toEqual(["plain", "errored", "blocked"]);
   });
 
-  it("does not let an unseen reply jump the Inbox order", () => {
+  it("does not let an unseen reply jump the Active order", () => {
     const vm = build([
       src({ id: "idle", open: true, updatedAt: NOON }),
-      src({ id: "unseen", open: true, unseen: true, updatedAt: NOON - 5 * HOUR }),
+      src({ id: "unseen", open: true, updatedAt: NOON - 5 * HOUR, lastActiveAt: NOON - 6 * HOUR }),
     ]);
-    expect(ids(vm, "inbox")).toEqual(["idle", "unseen"]);
+    expect(ids(vm, "active")).toEqual(["idle", "unseen"]);
   });
 
-  it("counts an un-settle and an elapsed snooze as a return when ordering the Inbox", () => {
+  it("counts an un-settle and an elapsed snooze as a return when ordering Active", () => {
     const vm = build([
       src({ id: "turn", updatedAt: NOON - 4 * HOUR }),
       src({ id: "unsettled", updatedAt: NOON - 9 * DAY, unsettledAt: NOON - HOUR }),
       src({ id: "woke", updatedAt: NOON - 9 * HOUR, snoozedAt: NOON - 8 * HOUR, snoozedUntil: NOON - 2 * HOUR }),
     ]);
-    expect(ids(vm, "inbox")).toEqual(["unsettled", "woke", "turn"]);
+    expect(ids(vm, "active")).toEqual(["unsettled", "woke", "turn"]);
   });
 
   it("sorts Snoozed by soonest wake", () => {
@@ -381,17 +382,17 @@ describe("buildChatList — pinned", () => {
   it("keeps a pinned OPEN conversation in Pinned, not in both", () => {
     const vm = build([src({ id: "a", pinned: true, open: true })]);
     expect(ids(vm, "pinned")).toEqual(["a"]);
-    expect(ids(vm, "inbox")).toEqual([]);
+    expect(ids(vm, "active")).toEqual([]);
   });
 
   it("keeps a pinned RUNNING conversation in Pinned, still marked running", () => {
     const vm = build([src({ id: "a", pinned: true, streaming: true })]);
     expect(ids(vm, "pinned")).toEqual(["a"]);
     expect(rows(vm, "pinned")[0].lane).toBe("running");
-    expect(ids(vm, "inbox")).toEqual([]);
+    expect(ids(vm, "active")).toEqual([]);
   });
 
-  it("still lists a pinned blocked chat in the needs-you strip", () => {
+  it("still lists a pinned blocked chat in the blocked queue", () => {
     const vm = build([src({ id: "a", pinned: true, streaming: true, pendingPerm: true })]);
     expect(ids(vm, "pinned")).toEqual(["a"]);
     expect(vm.blocked.map((r) => r.id)).toEqual(["a"]);
@@ -445,7 +446,7 @@ describe("buildChatList — days mode", () => {
   });
 
   it("keeps every marker on the row — only the grouping changes", () => {
-    const vm = byDays([src({ id: "a", streaming: true, pendingPerm: true, pinned: true, unseen: true })]);
+    const vm = byDays([src({ id: "a", streaming: true, pendingPerm: true, pinned: true, lastActiveAt: NOON - HOUR })]);
     const row = daySections(vm)[0].items[0];
     expect(row.lane).toBe("needs-input");
     expect(row.reason).toBe("perm");
@@ -491,7 +492,7 @@ describe("buildChatList — days mode", () => {
 
   it("defaults to activity mode when no mode is given", () => {
     const vm = buildChatList([src({ id: "a", open: true })], { query: "", now: NOON });
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
   });
 
   it("ignores the shelves too: a snoozed or auto-settled chat sits in its day bucket", () => {
@@ -526,17 +527,17 @@ describe("buildChatList — exclusions", () => {
 describe("buildChatList — badges", () => {
   it("carries a stopped badge on an idle conversation", () => {
     const vm = build([src({ id: "a", stopped: true })]);
-    expect(rows(vm, "inbox")[0].badge).toBe("stopped");
+    expect(rows(vm, "active")[0].badge).toBe("stopped");
   });
 
   it("carries an error badge on a poisoned conversation", () => {
     const vm = build([src({ id: "a", poisoned: true })]);
-    expect(rows(vm, "inbox")[0].badge).toBe("error");
+    expect(rows(vm, "active")[0].badge).toBe("error");
   });
 
   it("prefers stopped over error when both are true", () => {
     const vm = build([src({ id: "a", stopped: true, poisoned: true })]);
-    expect(rows(vm, "inbox")[0].badge).toBe("stopped");
+    expect(rows(vm, "active")[0].badge).toBe("stopped");
   });
 
   it("keeps the badge on the row in days mode too", () => {
@@ -549,14 +550,14 @@ describe("buildChatList — badges", () => {
 
 describe("buildChatList — unseen", () => {
   it("carries the unseen flag onto the row", () => {
-    const vm = build([src({ id: "a", open: true, unseen: true })]);
-    expect(rows(vm, "inbox")[0].unseen).toBe(true);
+    const vm = build([src({ id: "a", open: true, lastActiveAt: NOON - HOUR })]);
+    expect(rows(vm, "active")[0].unseen).toBe(true);
   });
 
   it("does not by itself promote a closed conversation out of Settled", () => {
     // Unseen is a marker, not a state: promoting on it would quietly rebuild
     // the working set out of chats the user already filed away.
-    const vm = build([src({ id: "a", unseen: true, updatedAt: NOON - 4 * DAY })]);
+    const vm = build([src({ id: "a", updatedAt: NOON - 4 * DAY, lastActiveAt: NOON - 5 * DAY })]);
     expect(ids(vm, "settled")).toEqual(["a"]);
     expect(rows(vm, "settled")[0].unseen).toBe(true);
   });
@@ -569,24 +570,37 @@ describe("buildChatList — unseen", () => {
       snoozedUntil: NOON - HOUR,
       updatedAt: NOON - 3 * HOUR,
     };
-    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON - 2 * HOUR })]), "inbox")[0].unseen).toBe(true);
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON - 2 * HOUR })]), "active")[0].unseen).toBe(true);
   });
 
-  it("clears the woke marker once the user has had the chat in view, or while it is focused", () => {
+  it("clears the woke marker once the user has had the chat in view, marked it read, or while it is focused", () => {
     const woke = {
       snoozedAt: NOON - 3 * HOUR,
       snoozedUntil: NOON - HOUR,
       updatedAt: NOON - 3 * HOUR,
     };
-    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON })]), "inbox")[0].unseen).toBe(false);
-    expect(rows(build([src({ id: "a", ...woke, focused: true })]), "inbox")[0].unseen).toBe(false);
+    const before = NOON - 2 * HOUR;
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: NOON })]), "active")[0].unseen).toBe(false);
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: before, seenAt: NOON })]), "active")[0].unseen).toBe(false);
+    expect(rows(build([src({ id: "a", ...woke, lastActiveAt: before, focused: true })]), "active")[0].unseen).toBe(false);
   });
+
+  it("does not mark a chat that is still snoozed, even with a reply it never showed", () => {
+    const vm = build([src({ id: "a", snoozedAt: NOON - HOUR, snoozedUntil: NOON + HOUR, updatedAt: NOON - 2 * HOUR, lastActiveAt: NOON - 3 * HOUR })]);
+    expect(rows(vm, "snoozed")[0].unseen).toBe(false);
+  });
+
+  it("leaves archived chats and empty husks out, the same chats the Inbox leaves out", () => {
+    const vm = build([src({ id: "kept" }), src({ id: "archived", archived: true }), src({ id: "husk", hasMessages: false })]);
+    expect(vm.sections.flatMap((s) => s.items.map((r) => r.id))).toEqual(["kept"]);
+  });
+
 });
 
 describe("buildChatList — search", () => {
   it("matches on title, case-insensitively", () => {
     const vm = build([src({ id: "a", title: "Drag and Drop" }), src({ id: "b", title: "Other" })], "DRAG");
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
   });
 
   it("matches on preview as well as title", () => {
@@ -622,7 +636,7 @@ describe("buildChatList — search", () => {
     expect(build([src({ id: "a", title: "Pero funziona" })], "però").matched).toBe(1);
   });
 
-  it("filters every section, not only the Inbox", () => {
+  it("filters every section, not only Active", () => {
     const vm = build(
       [
         src({ id: "keep", title: "keep", open: true }),
@@ -636,7 +650,7 @@ describe("buildChatList — search", () => {
       ],
       "keep",
     );
-    expect(ids(vm, "inbox")).toEqual(["keep"]);
+    expect(ids(vm, "active")).toEqual(["keep"]);
     expect(ids(vm, "pinned")).toEqual(["pin-keep"]);
     expect(ids(vm, "snoozed")).toEqual(["snooze-keep"]);
     expect(ids(vm, "settled")).toEqual(["rest-keep"]);
@@ -662,13 +676,13 @@ describe("buildChatList — semantic related section", () => {
 
   it("puts Related last, after every state section", () => {
     const vm = sem([src({ id: "a", title: "alpha match", open: true }), src({ id: "b", title: "beta" })], "match", ["b"]);
-    expect(vm.sections.map((s) => s.key)).toEqual(["inbox", "related"]);
+    expect(vm.sections.map((s) => s.key)).toEqual(["active", "related"]);
   });
 
   it("never duplicates a row that already matched literally", () => {
     const vm = sem([src({ id: "a", title: "Vault Blueprint" })], "vault", ["a"]);
     expect(ids(vm, "related")).toEqual([]);
-    expect(ids(vm, "inbox")).toEqual(["a"]);
+    expect(ids(vm, "active")).toEqual(["a"]);
   });
 
   it("preserves the semantic ranking order", () => {
@@ -723,14 +737,14 @@ describe("relativeTime", () => {
 describe("buildChatList — the live activity phrase", () => {
   it("carries the running tool's phrase onto the running row", () => {
     const vm = build([src({ id: "a", streaming: true, activity: "Searching the vault" })]);
-    expect(rows(vm, "inbox")[0].activity).toBe("Searching the vault");
+    expect(rows(vm, "active")[0].activity).toBe("Searching the vault");
   });
 
   it("leaves a running row with no phrase yet without one", () => {
     // Between two tool calls there is genuinely nothing to say; the row falls
     // back to its status chip rather than showing the last tool's phrase.
     const vm = build([src({ id: "a", streaming: true })]);
-    expect(rows(vm, "inbox")[0].activity).toBeUndefined();
+    expect(rows(vm, "active")[0].activity).toBeUndefined();
   });
 
   it("never carries a phrase on a row that is not running", () => {
@@ -742,26 +756,26 @@ describe("buildChatList — the live activity phrase", () => {
     const blockedVm = build([
       src({ id: "b", streaming: true, pendingPerm: true, activity: "Running a command" }),
     ]);
-    expect(rows(blockedVm, "inbox")[0].activity).toBeUndefined();
+    expect(rows(blockedVm, "active")[0].activity).toBeUndefined();
   });
 
   it("carries the checklist progress on a running row only", () => {
     const planProgress = { done: 3, total: 7 };
     const running = build([src({ id: "a", streaming: true, planProgress })]);
-    expect(rows(running, "inbox")[0].progress).toEqual(planProgress);
+    expect(rows(running, "active")[0].progress).toEqual(planProgress);
     const blockedVm = build([src({ id: "b", streaming: true, pendingPerm: true, planProgress })]);
-    expect(rows(blockedVm, "inbox")[0].progress).toBeUndefined();
+    expect(rows(blockedVm, "active")[0].progress).toBeUndefined();
     const idle = build([src({ id: "c", planProgress })]);
-    expect(rows(idle, "inbox")[0].progress).toBeUndefined();
+    expect(rows(idle, "active")[0].progress).toBeUndefined();
   });
 });
 
 /* ---------------------------------------------------------------------------
- * Phase 5 — the mission deck: the needs-you strip and the cycle key.
+ * Phase 5: the blocked queue and the cycle key.
  * ------------------------------------------------------------------------ */
 
-describe("buildChatList — the needs-you strip", () => {
-  it("is empty when nothing is blocked, so the strip renders nothing at all", () => {
+describe("buildChatList: the blocked queue", () => {
+  it("is empty when nothing is blocked", () => {
     const vm = build([src({ id: "a", streaming: true }), src({ id: "b" })]);
     expect(vm.blocked).toEqual([]);
   });
@@ -815,7 +829,7 @@ describe("buildChatList — the needs-you strip", () => {
 
   it("puts the rule on the section row too, so the row can decide in place", () => {
     const vm = build([src({ id: "perm", pendingPerm: true, streaming: true, permRule: "Bash(git)" })]);
-    expect(rows(vm, "inbox")[0].permRule).toBe("Bash(git)");
+    expect(rows(vm, "active")[0].permRule).toBe("Bash(git)");
   });
 });
 
@@ -846,9 +860,17 @@ describe("needsYou", () => {
   const row = (over: Partial<ChatRow> = {}): ChatRow =>
     ({ id: "a", lane: null, badge: null, ...over }) as ChatRow;
 
-  it("is true on both arms: blocked right now, or ended badly and unacknowledged", () => {
+  it("is true on both arms: blocked right now, or ended in an error not yet seen", () => {
     expect(needsYou(row({ lane: "needs-input" }))).toBe(true);
-    expect(needsYou(row({ badge: "error" }))).toBe(true);
+    expect(needsYou(row({ badge: "error", unseen: true }))).toBe(true);
+  });
+
+  it("is false for an error already seen or dismissed in the Inbox", () => {
+    expect(needsYou(row({ badge: "error", unseen: false }))).toBe(false);
+  });
+
+  it("is false for a turn the user stopped", () => {
+    expect(needsYou(row({ badge: "stopped" }))).toBe(false);
   });
 
   it("is false for a running or idle row", () => {
@@ -860,6 +882,6 @@ describe("needsYou", () => {
     // `badge` is a string; the rich row read it as truthy and the compact row
     // read it too, but only one of them also read `lane`. One predicate, one
     // shape, no second copy to drift.
-    expect(needsYou(row({ badge: "error" }))).toBe(true);
+    expect(needsYou(row({ badge: "error", unseen: true }))).toBe(true);
   });
 });

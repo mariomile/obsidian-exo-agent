@@ -329,6 +329,7 @@ describe("automation run history", () => {
     const plugin = Object.create(ExoPlugin.prototype) as InstanceType<typeof ExoPlugin>;
     Object.assign(plugin, {
       manifest: { dir: "plugins/exo" },
+      inbox: { refresh: async () => undefined },
       automationRunsWriteQueue: new (class {
         private tail: Promise<void> = Promise.resolve();
         enqueue<T>(fn: () => Promise<T>): Promise<T> {

@@ -20,6 +20,8 @@ import { canSettle, type SettleSource } from "../core/settle-note";
 import { canSettleThread, canSnooze, lifecycleWrites, type LifecycleFields } from "../core/thread-lifecycle";
 import { adaptAppToSettleVault, settleConversationToNote } from "../obsidian/settle-note";
 import { ADAPTERS } from "../providers/registry";
+import { effortFor } from "../core/model-tuning";
+import type { ChatSession } from "../core/session-summary";
 
 /** Same active fallback the other convo mutations use — the active conversation
  *  is not always in `convos` (several paths push it lazily). */
@@ -88,6 +90,38 @@ export function decidePermission(view: ChatView, id: string, verdict: "allow" | 
   if (verdict === "allow") decision.allow();
   else decision.deny();
   return true;
+}
+
+/**
+ * Mark chats read: the Inbox's "Mark read" and "Dismiss" on a chat. Writes the
+ * read watermark (`seenAt`), the one field `isUnseen` reads besides a visit, so
+ * the tab dot, the sidebar row and the Inbox item all clear together.
+ */
+export function markSeen(view: ChatView, ids: readonly string[]): void {
+  const now = Date.now();
+  let changed = false;
+  for (const id of ids) {
+    const c = find(view, id);
+    if (!c) continue;
+    c.seenAt = now;
+    changed = true;
+  }
+  if (!changed) return;
+  view.persist();
+  view.renderTabs();
+}
+
+/** What the open chat runs with, for the Capabilities Overview: effort as the
+ *  session resolves it for the chat's model, not the raw setting. */
+export function sessionSnapshot(view: ChatView): ChatSession {
+  const c = view.active;
+  return {
+    provider: c.provider,
+    model: c.model,
+    effort: effortFor(c.provider, c.model, view.plugin.settings.effort),
+    allowed: c.allow.size,
+    mcp: c.caps?.mcpServers ?? null,
+  };
 }
 
 /**

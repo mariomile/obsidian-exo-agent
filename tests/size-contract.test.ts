@@ -61,7 +61,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (review Release 1): la coda vive sopra il composer,
   // un solo TurnOpts per invio e drain, steer in un solo punto. 6007 -> 5959
   // righe reali, tetto 5964.
-  "src/view.ts": 5964,
+  // Abbassato il 2026-10-24 (Release 2, seen watermark): `Convo.unread` e
+  // `convoAttention` cancellati, il non letto e' `isUnseen` (core/inbox).
+  // 5959 -> 5942 righe reali, tetto 5947.
+  "src/view.ts": 5947,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -94,7 +97,18 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): wiring del
   // ledger, del driver e della board cancellato. 3036 -> 2828 righe reali,
   // tetto 2833.
-  "src/main.ts": 2833,
+  // Abbassato il 2026-10-24 (Release 2, rinomine): l'alias
+  // `activateConnections` e' cancellato, si usa `activateHub()`. 2828 -> 2823
+  // righe reali, tetto 2828.
+  // Abbassato il 2026-10-24 (Release 2, seen watermark): `liveAttention`
+  // cancellato. 2823 -> 2819 righe reali, tetto 2824.
+  // Il pannello Inbox (Release 2) ha poi aggiunto il wiring di `inbox`:
+  // 2819 -> 2823 righe reali, dentro il tetto 2824.
+  // Abbassato il 2026-10-24 (Release 2, Cockpit): `openConvo` cancellato con
+  // il riquadro Resume che lo usava. 2823 -> 2815 righe reali, tetto 2820.
+  // La review di Release 2 aggiunge `listAutomations` alle fonti del Daily
+  // Pulse: 2815 -> 2816 righe reali, tetto invariato a 2820.
+  "src/main.ts": 2820,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza
@@ -155,7 +169,10 @@ const CEILINGS: Record<string, number> = {
   // pass e del defrag sono cancellati. 945 -> 898 righe reali. Tetto 905.
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): 904 -> 882 righe
   // reali, tetto 887.
-  "src/settings.ts": 887,
+  // Abbassato il 2026-10-24 (Release 2, MCP in un posto solo): l'editor raw di
+  // `.mcp.json` e l'avviso Fast startup escono dai settings (l'avviso va nel
+  // tab MCP). 882 -> 806 righe reali, tetto 811.
+  "src/settings.ts": 811,
   // Aggiunto il 2026-08-12. Questo file era l'UNICO pannello del repo senza
   // tetto, e nell'ondata chat+cosmos e' passato da 859 a 1020 righe senza che
   // niente lo fermasse — mentre lo stesso commit ABBASSAVA quello di main.ts.
@@ -171,7 +188,9 @@ const CEILINGS: Record<string, number> = {
   // solo lo stato vero (query, cursore, ordine, collapse).
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): annidamento dei
   // figli cancellato. 870 -> 738 righe reali, tetto 743.
-  "src/ui/chat-list-view.ts": 743,
+  // Abbassato il 2026-10-24 (Release 2, Inbox): la striscia needs-you e' sostituita
+  // dal pannello Inbox (ui/inbox-panel). 738 -> 696 righe reali, tetto 701.
+  "src/ui/chat-list-view.ts": 701,
   // Aggiunto il 2026-08-12. `styles.css` e' il file piu' grande del repo (6994
   // righe, davanti a view.ts) ed era l'ultimo grande senza tetto: l'ondata
   // chat+cosmos gli ha aggiunto 361 righe e niente l'ha notato.
@@ -190,7 +209,11 @@ const CEILINGS: Record<string, number> = {
   // tetto 6512.
   // Abbassato il 2026-10-24 (review Release 1): stili morti dei chip della
   // vecchia coda. 6507 -> 6502 righe reali, tetto 6507.
-  "styles.css": 6507,
+  // Abbassato il 2026-10-24 (Release 2, Inbox): la striscia needs-you lascia il
+  // posto alle regole compatte `.mva-inbox-*`. 6502 -> 6487 righe reali, tetto 6492.
+  // Abbassato il 2026-10-24 (Release 2, Cockpit): la striscia attention del
+  // Cockpit lascia il posto al pannello Inbox. 6487 -> 6478 righe reali, tetto 6483.
+  "styles.css": 6483,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

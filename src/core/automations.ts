@@ -76,16 +76,34 @@ function claimsRunName(automationName: string, recordName: string): boolean {
   return recordName === automationName || recordName.startsWith(`${automationName} (`);
 }
 
-/** Pre-v2 records no automation claims — shown once, collapsed. */
-export function legacyRuns(records: AutomationRunRecord[], claimedNames: string[] = []): AutomationRunRecord[] {
+/** What run ownership needs to know about an automation. */
+export interface AutomationRef {
+  slug: string;
+  name: string;
+}
+
+/**
+ * The automation a run belongs to, the way the Automations tab files it: its
+ * slug while that automation exists, else (pre-v2) the automation that claims
+ * its name, else null (the collapsed "Older runs" bucket, which also holds the
+ * runs of a deleted or archived automation).
+ */
+export function runOwner(r: AutomationRunRecord, automations: readonly AutomationRef[]): string | null {
+  if (r.slug) return automations.some((a) => a.slug === r.slug) ? r.slug : null;
+  return automations.find((a) => claimsRunName(a.name, r.name))?.slug ?? null;
+}
+
+/** Runs no current automation owns (`runOwner`): shown once, collapsed. */
+export function legacyRuns(records: AutomationRunRecord[], automations: readonly AutomationRef[] = []): AutomationRunRecord[] {
   return records
-    .filter((r) => !r.slug && !claimedNames.some((name) => claimsRunName(name, r.name)))
+    .filter((r) => runOwner(r, automations) === null)
     .sort((a, b) => b.startedAt - a.startedAt);
 }
 
-/** Write runs still waiting for review — the Cockpit attention pool. */
-export function unreviewedWriteRuns(records: AutomationRunRecord[]): AutomationRunRecord[] {
-  return records.filter((r) => r.writes.length > 0 && !r.reviewedAt && !r.restoredAt);
+/** The one "unreviewed write run" rule: it wrote, and nobody reviewed or
+ *  restored it yet. The Inbox groups these (core/inbox `groupUnreviewedRuns`). */
+export function awaitsReview(r: AutomationRunRecord): boolean {
+  return r.writes.length > 0 && !r.reviewedAt && !r.restoredAt;
 }
 
 /** Validate loose cadence input (agent tools) into a Cadence. Day accepts 0–6
@@ -231,7 +249,7 @@ export function migrateScheduledRuns(raw: string): AutomationConfig[] {
  */
 export function pruneRuns(records: AutomationRunRecord[], max: number): AutomationRunRecord[] {
   const newestFirst = [...records].sort((a, b) => b.startedAt - a.startedAt);
-  const pending = newestFirst.filter((r) => r.writes.length > 0 && !r.reviewedAt && !r.restoredAt);
+  const pending = newestFirst.filter(awaitsReview);
   const rest = newestFirst.filter((r) => !pending.includes(r));
   return [...pending, ...rest.slice(0, Math.max(0, max - pending.length))].sort(
     (a, b) => b.startedAt - a.startedAt

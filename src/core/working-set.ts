@@ -61,15 +61,16 @@ export interface WorkingSetPlan {
  * the strip simply grows; that is correct, and preferable to tearing away live
  * work to satisfy a number.
  *
- * KNOWN COST — `unread` is deliberately NOT an exemption. `lastActiveAt` moves
+ * KNOWN COST: `unread` is deliberately NOT an exemption. `lastActiveAt` moves
  * only on focus, never on turn activity, so a background chat that just finished
  * carries an old LRU key and is a prime retire candidate: it can leave the strip
- * before the user ever sees its mark, and `unread` is runtime-only so reopening
- * it from the history does not bring the mark back. The alternative is worse —
- * twenty background chats finishing would exempt all twenty and make the cap
- * inert, which is the failure this file exists to prevent. The counter is that
- * the chat itself is untouched and one click from the history. Recorded here so
- * the trade-off is a decision on the record, not a bug rediscovered later.
+ * before the user ever sees its mark. The mark itself is not lost: it is derived
+ * from persisted fields (`updatedAt` against `lastActiveAt`/`seenAt`, core/inbox
+ * `isUnseen`), so the chat stays in the Inbox and the sidebar until it is read.
+ * The alternative is worse: twenty background chats finishing would exempt all
+ * twenty and make the cap inert, which is the failure this file exists to
+ * prevent. Recorded here so the trade-off is a decision on the record, not a bug
+ * rediscovered later.
  */
 export function planWorkingSet(
   tabs: TabCandidate[],

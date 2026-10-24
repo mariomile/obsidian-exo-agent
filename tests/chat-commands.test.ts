@@ -138,7 +138,7 @@ describe("the next-chat-needing-you key", () => {
 
   it("moves to the next blocked chat and wraps around", () => {
     const rows = [blocked("new", 3), blocked("mid", 2), blocked("old", 1)];
-    // Newest first, same order the needs-you strip paints.
+    // Newest first, the blocked queue's order.
     expect(cycle(rows, "new")).toEqual(["mid"]);
     expect(cycle(rows, "mid")).toEqual(["old"]);
     expect(cycle(rows, "old")).toEqual(["new"]);

@@ -1,33 +1,21 @@
 /**
  * Exo Cockpit — the control-center home surface (spec 2026-07-13). A main-pane
- * ItemView: attention strip (what waits for YOU), command bar (type → chat),
- * and five action-first tiles (Loops, Autonomy, System, Resume, Health).
+ * ItemView: the Inbox (the same panel and data as the Chats sidebar), command
+ * bar (type → chat), and action-first tiles (Loops, Autonomy, System, Health).
  * One-way contract: this module imports from main/view; `view.ts` never
  * imports it.
  *
- * All gathering is tolerant — a missing file yields that tile's empty state,
- * never a blocked render. Refresh: on-open, manual button, and a plain 60s
- * interval (deliberately NOT rAF-gated — idle-pane starvation).
+ * All gathering is tolerant: a missing file yields no rows, and a tile with no
+ * rows is not drawn, never a blocked render. Refresh: on-open, manual button,
+ * and a plain 60s interval (deliberately NOT rAF-gated: idle-pane starvation).
  */
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type ExoPlugin from "../main";
 import { clickable } from "./dom";
-import {
-  buildAttention,
-  loopRows,
-  resumeRows,
-  previewFromMessages,
-  healthRows,
-  quotaValue,
-  parseAnsweredStamp,
-  type AttentionItem,
-  type CockpitRow,
-  type StateNote,
-} from "../core/cockpit";
+import { mountInbox } from "./inbox-panel";
+import { loopRows, healthRows, quotaValue, type CockpitRow, type StateNote } from "../core/cockpit";
 import { blockPath } from "../obsidian/agent-folder";
 import { parseLoopsFile } from "../core/open-loops";
-import { unreviewedWriteRuns } from "../core/automations";
-import { dailyPulseNeedsReview } from "../core/daily-pulse";
 import {
   autonomyStatuses,
   autonomyActions,
@@ -40,19 +28,16 @@ export const COCKPIT_VIEW_TYPE = "exo-cockpit";
 export const COCKPIT_ICON = "hi-dashboard-speed";
 
 const INBOX_DIR = "_inbox";
-const ATTENTION_ICONS: Record<AttentionItem["kind"], string> = {
-  blocked: "shield-alert",
-  pulse: "sunrise",
-  streaming: "loader",
-  runs: "file-diff",
-  answer: "mail-check",
-};
+/** Chat state lives in memory and moves without a feed event: the Inbox panel
+ *  repaints on this tick (a no-op unless what it shows changed). */
+const INBOX_TICK_MS = 5000;
 
 export class CockpitView extends ItemView {
   private refreshedAt = 0;
   private rendering = false;
   private refreshRequested = false;
   private inputEl: HTMLInputElement | null = null;
+  private inboxHost: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -89,13 +74,22 @@ export class CockpitView extends ItemView {
         if (leaf === this.leaf) void this.refresh();
       })
     );
+    this.registerInterval(
+      window.setInterval(() => {
+        if (this.containerEl.isShown()) this.paintInbox();
+      }, INBOX_TICK_MS)
+    );
+    this.register(this.plugin.inbox.onChange(() => this.paintInbox()));
+  }
+
+  private paintInbox(): void {
+    if (this.inboxHost) mountInbox(this.inboxHost, this.plugin.inbox.current(), this.plugin.inbox.handlers);
   }
 
   /* ------------------------------ actions ------------------------------ */
 
   private act(a: CockpitRow["action"]): void {
     if (a.kind === "ask") void this.plugin.askExo(a.arg, false);
-    else if (a.kind === "convo") void this.plugin.openConvo(a.arg);
     else if (a.kind === "open") void this.app.workspace.openLinkText(a.arg, "", "tab");
     else if (a.kind === "command") this.runCommand(a.arg);
   }
@@ -119,22 +113,6 @@ export class CockpitView extends ItemView {
     } catch {
       return fallback;
     }
-  }
-
-  /** Queue notes answered recently (attention strip). Bounded scan. */
-  private async recentAnswers(_now: number): Promise<{ path: string; name: string; answeredAt: number }[]> {
-    const out: { path: string; name: string; answeredAt: number }[] = [];
-    try {
-      const res = await this.app.vault.adapter.list(this.plugin.settings.exoQueueFolder);
-      for (const f of res.files.slice(0, 20)) {
-        if (!f.endsWith(".md")) continue;
-        const t = parseAnsweredStamp(await this.readOr(f, ""));
-        if (t != null) out.push({ path: f, name: f.split("/").pop()!.replace(/\.md$/, ""), answeredAt: t });
-      }
-    } catch {
-      /* no queue folder */
-    }
-    return out.sort((a, b) => b.answeredAt - a.answeredAt);
   }
 
   private async inboxCount(): Promise<number> {
@@ -191,23 +169,13 @@ export class CockpitView extends ItemView {
     this.rendering = true;
     try {
       const now = Date.now();
-      const [loopsRaw, queuePending, answers, convos, inbox, stateNote, report, unreviewedRuns, proposalPending] =
-        await Promise.all([
-          this.readOr(this.plugin.paths.openLoops, ""),
-          this.plugin.countQueuePending().catch(() => null),
-          this.recentAnswers(now),
-          this.plugin.loadConversations().catch(() => []),
-          this.inboxCount(),
-          this.stateNote(now),
-          this.lastReport(),
-          this.plugin
-            .loadAutomationRuns()
-            .then((rs) => unreviewedWriteRuns(rs).length)
-            .catch(() => 0),
-          this.plugin.settings.proposalKernelEnabled
-            ? this.plugin.listPendingProposals().then(({ records }) => records.length).catch(() => 0)
-            : Promise.resolve(0),
-        ]);
+      const [loopsRaw, queuePending, inbox, stateNote, report] = await Promise.all([
+        this.readOr(this.plugin.paths.openLoops, ""),
+        this.plugin.countQueuePending().catch(() => null),
+        this.inboxCount(),
+        this.stateNote(now),
+        this.lastReport(),
+      ]);
 
       const el = this.contentEl;
       // Preserve the command-bar draft/focus across ANY rebuild (manual
@@ -228,16 +196,9 @@ export class CockpitView extends ItemView {
       setIcon(rbtn, "refresh-cw");
       clickable(rbtn, () => void this.refresh());
 
-      // Attention strip (only when non-empty)
-      const pulseState = this.plugin.settings.dailyPulseReviewState;
-      const attention = buildAttention({
-        convos: this.plugin.liveAttention(),
-        answers,
-        unreviewedRuns,
-        dailyPulseItems: dailyPulseNeedsReview(pulseState) ? pulseState.itemCount : 0,
-        now,
-      });
-      if (attention.length || proposalPending > 0) this.renderAttention(el, attention, proposalPending);
+      // The Inbox: absent when empty (CSS `:empty`).
+      this.inboxHost = el.createDiv({ cls: "mva-inbox mva-ck-inbox" });
+      this.paintInbox();
 
       // Command bar
       this.renderCommandBar(el);
@@ -250,24 +211,14 @@ export class CockpitView extends ItemView {
       const grid = el.createDiv({ cls: "mva-ck-grid" });
 
       const loops = loopRows(parseLoopsFile(loopsRaw), now);
-      this.tile(grid, "Loops", "target", loops, "No open loops.", {
+      this.tile(grid, "Loops", "target", loops, {
         label: "open-loops.md",
         onClick: () => void this.app.workspace.openLinkText(this.plugin.paths.openLoops, "", "tab"),
+        empty: "No open loops.",
       });
 
       this.renderAutonomy(grid, queuePending, now);
       this.renderSystem(grid);
-
-      const resume = resumeRows(
-        (convos as { id: string; title: string; updatedAt?: number; messages?: unknown[] }[]).map((c) => ({
-          id: c.id,
-          title: c.title,
-          updatedAt: c.updatedAt,
-          preview: previewFromMessages((c.messages ?? []) as Parameters<typeof previewFromMessages>[0]),
-        })),
-        now
-      );
-      this.tile(grid, "Resume", "history", resume, "No recent conversations.");
 
       const health = healthRows({
         inboxCount: inbox,
@@ -275,36 +226,13 @@ export class CockpitView extends ItemView {
         lastReport: report,
         now,
       });
-      this.tile(grid, "Health", "heart-pulse", health, "Vault is healthy.");
+      this.tile(grid, "Health", "heart-pulse", health);
     } finally {
       this.rendering = false;
       if (this.refreshRequested) {
         this.refreshRequested = false;
         void this.refresh();
       }
-    }
-  }
-
-  private renderAttention(parent: HTMLElement, items: AttentionItem[], proposalPending: number): void {
-    const strip = parent.createDiv({ cls: "mva-ck-attention" });
-    for (const it of items) {
-      const row = strip.createDiv({ cls: `mva-ck-att is-${it.kind}` });
-      setIcon(row.createSpan({ cls: "mva-ck-att-icon" }), ATTENTION_ICONS[it.kind]);
-      row.createSpan({ text: it.label });
-      clickable(row, () => {
-        if (it.kind === "pulse") void this.plugin.openDailyPulse();
-        else if (it.kind === "answer") void this.app.workspace.openLinkText(it.target, "", "tab");
-        else if (it.kind === "runs") void this.plugin.activateHub("automations");
-        else if (it.kind === "blocked" || it.kind === "streaming") {
-          void this.plugin.openConvo(it.target);
-        }
-      });
-    }
-    if (proposalPending > 0) {
-      const row = strip.createDiv({ cls: "mva-ck-att is-proposal" });
-      setIcon(row.createSpan({ cls: "mva-ck-att-icon" }), "lightbulb");
-      row.createSpan({ text: `${proposalPending} suggestion${proposalPending === 1 ? "" : "s"}` });
-      clickable(row, () => void this.plugin.openProposalsModal());
     }
   }
 
@@ -326,28 +254,28 @@ export class CockpitView extends ItemView {
     clickable(send, go);
   }
 
+  /** A tile of action rows, or nothing at all when there are no rows: an
+   *  empty tile is a column that says nothing. A tile with a footer link stays,
+   *  saying `footer.empty`: the link is the way in when nothing is listed. */
   private tile(
     grid: HTMLElement,
     title: string,
     icon: string,
     rows: CockpitRow[],
-    emptyText: string,
-    footer?: { label: string; onClick: () => void }
-  ): HTMLElement {
+    footer?: { label: string; onClick: () => void; empty: string }
+  ): HTMLElement | null {
+    if (!rows.length && !footer) return null;
     const card = grid.createDiv({ cls: "mva-ck-card" });
     const head = card.createDiv({ cls: "mva-ck-card-head" });
     setIcon(head.createSpan({ cls: "mva-ck-card-icon" }), icon);
     head.createSpan({ cls: "mva-ck-card-title", text: title });
-    if (!rows.length) {
-      card.createDiv({ cls: "mva-ck-empty", text: emptyText });
-    } else {
-      for (const r of rows) {
-        const row = card.createDiv({ cls: "mva-ck-row" });
-        row.createSpan({ cls: "mva-ck-row-label", text: r.label });
-        if (r.badge) row.createSpan({ cls: "mva-ck-badge", text: r.badge });
-        if (r.sub) row.createDiv({ cls: "mva-ck-row-sub", text: r.sub });
-        clickable(row, () => this.act(r.action));
-      }
+    if (!rows.length && footer) card.createDiv({ cls: "mva-ck-empty", text: footer.empty });
+    for (const r of rows) {
+      const row = card.createDiv({ cls: "mva-ck-row" });
+      row.createSpan({ cls: "mva-ck-row-label", text: r.label });
+      if (r.badge) row.createSpan({ cls: "mva-ck-badge", text: r.badge });
+      if (r.sub) row.createDiv({ cls: "mva-ck-row-sub", text: r.sub });
+      clickable(row, () => this.act(r.action));
     }
     if (footer) {
       const f = card.createDiv({ cls: "mva-ck-foot", text: footer.label });
@@ -379,7 +307,8 @@ export class CockpitView extends ItemView {
               : "exo-agent:run-playbook";
       rows.push({ label: a.label, ...(a.badge ? { badge: a.badge } : {}), action: { kind: "command", arg } });
     }
-    const card = this.tile(grid, "Autonomy", "bot", rows, "Queue off — enable it in settings.");
+    const card = this.tile(grid, "Autonomy", "bot", rows);
+    if (!card) return;
     // Status lines above the actions: queue · schedules · budget.
     const statusHost = card.createDiv({ cls: "mva-ck-status" });
     for (const st of autonomyStatuses(input)) {

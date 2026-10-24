@@ -187,6 +187,10 @@ export interface MVASettings {
   seededDailyPulse: boolean;
   /** Quiet persisted state consumed by the Phase 2 review UI and Retry action. */
   dailyPulseReviewState: DailyPulseReviewState;
+  /** Inbox read marks for Exo Queue answers, the one Inbox item with no source
+   *  field to write (core/inbox). Versioned id -> when it was read; pruned to a
+   *  week on every write. */
+  inboxSeen: Record<string, number>;
   /** Learning loop: propose saving a flow as a reusable playbook when the same
    *  KIND of task (by topic) recurs (free proposal; LLM distillation only on
    *  accept). Recurrence is tracked in the memory folder's playbook-signals.json. */
@@ -319,6 +323,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   seededDigest: false,
   seededDailyPulse: false,
   dailyPulseReviewState: initialDailyPulseReviewState(),
+  inboxSeen: {},
   learningLoop: true,
   playbookThreshold: 3,
   scheduledLastRun: {},

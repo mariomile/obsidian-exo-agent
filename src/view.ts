@@ -115,8 +115,8 @@ import {
   nextFocusAfterRemoval,
 } from "./core/working-set";
 import type { TabAgents, TabVM, TabFacts } from "./core/working-set";
-import { chooseDensity } from "./core/strip-density";
-import type { StripDensity } from "./core/strip-density";
+import { chooseDensity, type StripDensity } from "./core/strip-density";
+import { isUnseen } from "./core/inbox";
 import type { ChatRowSource } from "./core/chat-rows";
 import { planProgress } from "./core/thread-lifecycle";
 import { isAiTitleDue } from "./core/title";
@@ -802,6 +802,7 @@ export class ChatView extends ItemView {
     // and the Capabilities panel; older CLIs simply never fire this (no gate).
     session.onCaps = (caps) => {
       this.sessionCaps = caps;
+      c.caps = caps; // the Capabilities "This chat" rows read the chat's own
       // Settings MCP manager + cockpit read live status here; the persisted copy
       // seeds menus/panels on the next app run, before any session has spawned.
       this.plugin.lastSessionCaps = caps;
@@ -864,6 +865,7 @@ export class ChatView extends ItemView {
     c.session?.dispose(reason);
     c.session = null;
     c.sessionSig = "";
+    c.caps = undefined; // "This chat" shows the next session's servers, never the dropped one's
     // Abort any in-flight AI-title call for this conversation (dropSession is the
     // teardown path for close/delete/reset — the title becomes moot).
     c.titleAbort?.abort();
@@ -1046,6 +1048,7 @@ export class ChatView extends ItemView {
         pinned: d.pinned === true,
         retiredAt: d.retiredAt,
         lastActiveAt: d.lastActiveAt,
+        seenAt: d.seenAt,
         snoozedUntil: d.snoozedUntil,
         snoozedAt: d.snoozedAt,
         settledOverride: d.settledOverride,
@@ -1124,6 +1127,7 @@ export class ChatView extends ItemView {
       ...(c.pinned === true ? { pinned: true } : {}),
       ...(c.retiredAt ? { retiredAt: c.retiredAt } : {}),
       ...(c.lastActiveAt ? { lastActiveAt: c.lastActiveAt } : {}),
+      ...(c.seenAt ? { seenAt: c.seenAt } : {}),
       ...(c.snoozedUntil ? { snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt } : {}),
       ...(c.settledOverride ? { settledOverride: c.settledOverride, settledAt: c.settledAt } : {}),
       ...(c.unsettledAt ? { unsettledAt: c.unsettledAt } : {}),
@@ -1389,9 +1393,8 @@ export class ChatView extends ItemView {
     this.plugin.memoryHarvest.leaving(this.active.id); // switching away settles it for memory
     this.active.draft = this.composer.getDraft();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
+    this.active.seenAt = Date.now(); // leaving it: what it shows now has been read
     this.active = c;
-    // You are looking at it now.
-    c.unread = false;
     // The LRU key. Set before applyWorkingSet runs below, so the tab you just
     // opened is the freshest one and can never be the one that retires.
     c.lastActiveAt = Date.now();
@@ -1451,6 +1454,7 @@ export class ChatView extends ItemView {
     this.refreshAgentIndicators();
     this.renderAgentPopover();
     this.renderQueue(c);
+    this.plugin.refreshHub("overview"); // "This chat" follows the active chat
   }
 
   /* ----------------------------- tab bar ---------------------------- */
@@ -1528,11 +1532,10 @@ export class ChatView extends ItemView {
     for (const id of shown) {
       const c = this.convos.find((x) => x.id === id);
       if (!c) continue;
+      const live = { streaming: c.streaming, pendingPerm: c.pendingPerm != null, pendingAsk: c.pendingAsk != null };
       const vm = deriveTabState({
-        streaming: c.streaming,
-        pendingPerm: c.pendingPerm != null,
-        pendingAsk: c.pendingAsk != null,
-        unread: c.unread === true,
+        ...live,
+        unread: isUnseen({ ...c, ...live, focused: c === this.active }, Date.now()), // core/inbox: the one read rule
         stopped: c.stopped,
         poisoned: !!c.resumeRisky,
       });
@@ -2030,9 +2033,6 @@ export class ChatView extends ItemView {
       open: open.has(c.id),
       pinned: c.pinned === true,
       messageCount: c.messages.filter((m) => m.role === "user" && !m.auto).length,
-      // "Finished while you were elsewhere", with no new persisted state:
-      // lastActiveAt moves on focus, updatedAt on every turn. Active excluded.
-      unseen: c !== this.active && (c.updatedAt ?? 0) > (c.lastActiveAt ?? 0),
       streaming: c.streaming,
       pendingPerm: c.pendingPerm != null,
       pendingAsk: c.pendingAsk != null,
@@ -2047,7 +2047,7 @@ export class ChatView extends ItemView {
       // Lifecycle (core/thread-lifecycle). The chat in front of you is never
       // put away on a shelf; `focused` is what says which one that is.
       focused: c === this.active,
-      lastActiveAt: c.lastActiveAt,
+      lastActiveAt: c.lastActiveAt, seenAt: c.seenAt,
       planProgress: c.streaming ? (planProgress(c.messages) ?? undefined) : undefined,
       snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt,
       settledOverride: c.settledOverride, settledAt: c.settledAt, unsettledAt: c.unsettledAt,
@@ -2297,7 +2297,7 @@ export class ChatView extends ItemView {
     // so the bulk bar never announces more conversations than it can actually
     // delete.
     if (this.gallery.gallerySelection.delete(c.id)) this.gallery.renderBulkBar();
-    // ...and out of the retention proposal, which the banner's "Seleziona" reads
+    // ...and out of the retention proposal, which the banner's "Select" reads
     // straight into a selection. Left in, a dangling id would make the bar
     // over-report and the delete under-deliver.
     this.retentionCandidateIds = this.retentionCandidateIds.filter((x) => x !== c.id);
@@ -2311,11 +2311,8 @@ export class ChatView extends ItemView {
    *  hideGallery/switchTo reveals it correctly. */
   private setActiveSilently(next: Convo): void {
     this.active.draft = this.composer.getDraft();
+    this.active.seenAt = Date.now(); // same as switchTo: leaving it reads it
     this.active = next;
-    // Same as switchTo: this is the focused tab now. Needed here too, because a
-    // later switchTo to the SAME convo returns early on `c === this.active` and
-    // would never get the chance to clear it.
-    next.unread = false;
     // Same two facts switchTo records: this is now the focused tab (LRU key) and
     // it is back in the strip. The cap itself is left to the next switchTo —
     // retiring a tab out from under an open gallery overlay would be invisible.
@@ -3904,8 +3901,9 @@ export class ChatView extends ItemView {
         : WRITE_TOOLS.test(tool) && toolFilePath(tool, input)
           ? `edits to this file`
           : `this tool`;
-    alwaysBtn.setAttr("aria-label", `Always allow ${scope} in this conversation`);
-    alwaysBtn.setAttr("title", `Always allow ${scope} in this conversation`);
+    const where = this.plugin.settings.rememberAlwaysAllow ? "in every chat (saved to settings)" : "in this conversation";
+    alwaysBtn.setAttr("aria-label", `Always allow ${scope} ${where}`);
+    alwaysBtn.setAttr("title", `Always allow ${scope} ${where}`);
     alwaysBtn.onclick = () => {
       c.allow.add(allowKey(tool, input));
       // Durable across sessions when enabled: append the equivalent rule line.
@@ -5648,9 +5646,8 @@ export class ChatView extends ItemView {
         });
       }
       c.updatedAt = Date.now();
-      // Where this turn landed, in the two facts that depend on it: the unread
-      // dot on a chat you were not looking at, and the read position on the one
-      // you were — work watched live can never come back as "since you left".
+      // Where this turn landed: on the chat you were looking at, the read
+      // watermark and position move, so work watched live never comes back as news.
       noteTurnEnd(c, { active: c === this.active, visible: this.containerEl.isShown(), turnFrom });
       this.refreshTabs();
       // Two-stage session recovery (Claude-Code-style resume). The pure reducer
@@ -5929,20 +5926,7 @@ export class ChatView extends ItemView {
     });
   }
 
-  /** Live attention snapshot for the Cockpit: conversations blocked on a
-   *  permission/ask card, or currently streaming. Plain data — no DOM refs. */
-  convoAttention(): { id: string; title: string; blocked: boolean; streaming: boolean }[] {
-    return this.allConvos()
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        blocked: !!(c.pendingPerm || c.pendingAsk),
-        streaming: c.streaming,
-      }))
-      .filter((c) => c.blocked || c.streaming);
-  }
-
-  /** Open a conversation by id (Cockpit "Resume" rows). False when unknown. */
+  /** Open a conversation by id (fork link, plan handoff). False when unknown. */
   openConvoById(id: string): boolean {
     const c = this.convos.find((x) => x.id === id);
     if (!c) return false;

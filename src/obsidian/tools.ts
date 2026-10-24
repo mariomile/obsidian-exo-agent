@@ -18,7 +18,8 @@ import {
 import { WriteQueue } from "../core/write-queue";
 import { EXO_CALLER, type AgentCaller } from "../core/agent-runs";
 import { patchFrontmatter } from "../core/frontmatter-patch";
-import { unreviewedWriteRuns } from "../core/automations";
+import { groupUnreviewedRuns } from "../core/inbox";
+import { awaitsReview } from "../core/automations";
 import { parseDuration, formatDuration } from "../core/agents";
 import {
   automationRunKeysIn,
@@ -960,9 +961,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       lines.push("", `Playbooks (reusable prompts): ${exo.settings.customPrompts.map((p) => p.name).join(", ") || "(none)"}`);
       const runs = await exo.loadAutomationRuns();
       if (runs.length) {
-        lines.push("", "Recent write runs:");
+        lines.push("", "Recent runs:");
         for (const r of runs.slice(0, 6)) {
-          const state = r.restoredAt ? "restored" : r.reviewedAt ? "reviewed" : "TO REVIEW";
+          const state = r.restoredAt ? "restored" : r.reviewedAt ? "reviewed" : awaitsReview(r) ? "TO REVIEW" : r.ok ? "no writes" : "failed";
           lines.push(`- [${r.id}] ${r.name} · ${new Date(r.startedAt).toLocaleString()} · ${r.writes.length} notes · ${state}`);
         }
       }
@@ -1104,10 +1105,10 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       const exo = getExo(app);
       if (!exo) return ok("Exo plugin not reachable.");
       const runs = await exo.loadAutomationRuns();
-      const target = args.id ? runs.find((r) => r.id === args.id) : unreviewedWriteRuns(runs)[0];
+      const target = args.id ? runs.find((r) => r.id === args.id) : groupUnreviewedRuns(runs, exo.automationStore.list())[0]?.runs[0];
       if (!target) return ok(args.id ? `No run with id "${args.id}".` : "No unreviewed write runs.");
       if (args.action === "reviewed") {
-        await exo.markAutomationRunReviewed(target.id);
+        await exo.markAutomationRunsReviewed([target.id]);
         return ok(`Run "${target.name}" (${target.id}) marked as reviewed.`);
       }
       const restored = await exo.restoreAutomationRun(target.id);

@@ -5398,15 +5398,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-ck-refresh:hover { color: var(--text-normal); }
 .mva-ck-refresh svg { width: 14px; height: 14px; }
 
-.mva-ck-attention { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-.mva-ck-att { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-s);
-  border: 1px solid var(--background-modifier-border); cursor: pointer; font-size: var(--font-ui-small); }
-.mva-ck-att:hover { border-color: var(--background-modifier-border-hover); }
-.mva-ck-att-icon svg { width: 14px; height: 14px; }
-.mva-ck-att.is-blocked .mva-ck-att-icon { color: var(--mva-caution); }
-.mva-ck-att.is-pulse .mva-ck-att-icon { color: var(--text-accent); }
-.mva-ck-att.is-streaming .mva-ck-att-icon { color: var(--interactive-accent); }
-.mva-ck-att.is-answer .mva-ck-att-icon { color: var(--mva-ok); }
+.mva-ck-inbox { margin-bottom: 12px; }
 
 .mva-ck-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .mva-ck-input { flex: 1; background: transparent; border: 1px solid var(--background-modifier-border);
@@ -5660,7 +5652,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* The empty half of that pair whispers; the loading half keeps body weight. */
 .mva-proposals-empty { color: var(--text-faint); font-size: var(--font-ui-smaller, 12px); }
 .mva-proposals-empty-icon svg { width: 16px; height: 16px; }
-.mva-ck-att.is-proposal .mva-ck-att-icon { color: var(--text-accent); }
 
 @media (max-width: 600px) {
   .mva-proposals-layout { grid-template-columns: 1fr; max-height: 76vh; }
@@ -6006,45 +5997,30 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-chats-heading {
   flex: 1;
 }
-/* The needs-you strip — the mission deck's top band. Pinned above the search
-   field, one chip per chat that cannot move without you, and ABSENT when there
-   is nothing: `:empty` is the whole no-alarm-fatigue rule expressed in CSS. A
-   strip that were always on screen (an empty tray, a "0 waiting" badge) would
-   be a standing alert, which is exactly what the chip redesign cured.
-
-   Quiet by construction: no fill of its own, the kit hairline for an edge, the
-   pane's own text ladder for colour. What makes it urgent is that it EXISTS. */
-.mva-chats-needs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0 10px 6px;
-}
-.mva-chats-needs:empty { display: none; }
-.mva-chats-needs-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  max-width: 100%;
-  padding: 2px 7px;
-  border: 1px solid var(--mva-hairline);
-  border-radius: var(--mva-r-chip);
-  background: transparent;
-  cursor: pointer;
-  font-size: var(--font-ui-smaller);
-  transition: background var(--mva-t), border-color var(--mva-t);
-}
-.mva-chats-needs-chip:hover { background: var(--mva-card-bg-hover); }
-/* Top of the ladder: these are the rows that want a human. */
-.mva-chats-needs-name {
-  color: var(--text-normal);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* …and what it is waiting on sits a rung below, because it is the qualifier,
-   not the thing. */
-.mva-chats-needs-why { flex-shrink: 0; color: var(--text-faint); }
+/* The Inbox (ui/inbox-panel), in the Chats sidebar and the Cockpit. ABSENT when
+   empty: `:empty` is the no-alarm-fatigue rule. Quiet: the kit hairline for an
+   edge, the pane's text ladder for colour. Rows wrap instead of truncating. */
+.mva-inbox { display: flex; flex-direction: column; gap: 6px; }
+.mva-inbox:empty { display: none; }
+.mva-chats-inbox { margin: 0 10px 8px; }
+.mva-inbox-section, .mva-inbox-list { display: flex; flex-direction: column; gap: 2px; }
+.mva-inbox-section-head { display: flex; gap: 8px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.mva-inbox-section-label, .mva-inbox-body { flex: 1; min-width: 0; }
+.mva-inbox-bulk { cursor: pointer; color: var(--text-muted); }
+.mva-inbox-bulk:hover { color: var(--text-normal); }
+.mva-inbox-row { display: flex; align-items: flex-start; gap: 7px; padding: 5px 7px; cursor: pointer;
+  border: 1px solid var(--mva-hairline); border-radius: var(--mva-r-chip); font-size: var(--font-ui-smaller);
+  transition: background var(--mva-t); }
+.mva-inbox-row:hover { background: var(--mva-card-bg-hover); }
+.mva-inbox-icon { display: inline-flex; flex-shrink: 0; margin-top: 1px; color: var(--text-faint); }
+.mva-inbox-icon svg { width: 13px; height: 13px; }
+.mva-inbox-row.is-request .mva-inbox-icon { color: var(--mva-caution); }
+.mva-inbox-row.is-error .mva-inbox-icon { color: var(--text-error); }
+.mva-inbox-name, .mva-inbox-detail { white-space: normal; overflow-wrap: anywhere; }
+.mva-inbox-name { color: var(--text-normal); }
+.mva-inbox-detail { color: var(--text-faint); }
+.mva-inbox-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mva-inbox-act { display: inline-flex; padding: 1px 7px; font-size: var(--font-ui-smaller); }
 
 .mva-chats-search {
   margin: 0 10px 6px;

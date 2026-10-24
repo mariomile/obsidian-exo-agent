@@ -8,7 +8,13 @@
 export class TFile {
   path = "";
   basename = "";
+  extension = "";
   stat = { mtime: 0 };
+}
+
+export class TFolder {
+  path = "";
+  children: unknown[] = [];
 }
 
 /** Mutable so a test can assert the mobile branch of a desktop-only gate and

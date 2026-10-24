@@ -18,7 +18,7 @@
  */
 
 import type { Component } from "obsidian";
-import type { AgentSession, ContextUsage, ProviderId } from "../providers/types";
+import type { AgentSession, ContextUsage, ProviderId, SessionCaps } from "../providers/types";
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
 import type { QueuedContext, QueuedMessage } from "../core/queue";
@@ -66,6 +66,10 @@ export interface ConvoData {
    *  (`switchTo`, `setActiveSilently`) schedules a conversation-store write, not
    *  just the settings write that saves the tab set. */
   lastActiveAt?: number;
+  /** Read watermark (core/inbox `isUnseen`): stamped when you leave a chat you
+   *  were reading, when a turn ends in front of you, and by "Mark read" or
+   *  "Dismiss" in the Inbox. Persisted, so a new reply survives a reload. */
+  seenAt?: number;
   /** Lifecycle on the chats sidebar (core/thread-lifecycle, from T3 Code):
    *  snooze until a wake time, settle by hand or take back out. Each absent
    *  by default, so every existing conversations.json stays valid. */
@@ -140,6 +144,8 @@ export interface Convo {
    *  (`switchTo`, `setActiveSilently`) schedules a conversation-store write, not
    *  just the settings write that saves the tab set. */
   lastActiveAt?: number;
+  /** Read watermark, see `ConvoData`. Persisted. */
+  seenAt?: number;
   /** Lifecycle fields, see `ConvoData`. Persisted. */
   snoozedUntil?: number;
   snoozedAt?: number;
@@ -158,6 +164,9 @@ export interface Convo {
   messages: Message[];
   // Per-conversation runtime (enables parallel conversations).
   session: AgentSession | null;
+  /** What this chat's own session reported at init (MCP status, inventories):
+   *  the Capabilities "This chat" rows. Runtime only, never persisted. */
+  caps?: SessionCaps;
   sessionSig: string;
   streaming: boolean;
   /** Reservation flag ONLY, claimed synchronously the instant runTurn is
@@ -195,10 +204,6 @@ export interface Convo {
    *  for the active chat and by the chats sidebar for every running row.
    *  Runtime-only. */
   activity?: string;
-  /** A turn completed on this conversation while it was not the focused tab.
-   *  Runtime-only, never persisted (same discipline as `aiTitleAttempts`): after
-   *  a reload there is nothing you "have not seen". */
-  unread?: boolean;
   queue: QueuedMessage[];
   /** The in-flight assistant turn of THIS conversation (null when idle) — the
    *  target for its session's ask_user cards, so parallel conversations can't
@@ -250,8 +255,8 @@ export interface Convo {
    *  left" line is drawn at, and the one thing this phase persists. Moved by
    *  `ui/reentry.ts` `revealReentry` on every reveal, which is also what makes
    *  the line dissolve and never return for the same position. Absent = never
-   *  read. Deliberately NOT `unread`, a runtime-only boolean about the tab
-   *  strip: this one is a place in a transcript and has to survive a reload. */
+   *  read. Deliberately NOT `seenAt`, a timestamp about the whole chat: this
+   *  one is a place in a transcript. */
   readIndex?: number;
   /** Memory harvest watermark: how many of `messages` the harvest has already
    *  read. Persisted, so a harvest never re-reads a message across reloads and

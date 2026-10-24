@@ -8,7 +8,7 @@
  *
  *  - PINNED overrides everything: a pinned chat sits in the pinned block
  *    whatever else is true of it.
- *  - The INBOX is every chat that is not put away, newest RETURN first: the
+ *  - ACTIVE is every chat that is not put away, newest RETURN first: the
  *    last time it came back to you (a turn landed, or you un-settled it).
  *  - SNOOZED is "not now, bring it back": hidden until a wake time, or earlier
  *    when the chat raises its hand.
@@ -50,7 +50,7 @@ export interface LifecycleFields {
    *  also opts the chat out of auto-settle (T3: any override blocks it). */
   settledOverride?: "settled" | "active";
   settledAt?: number;
-  /** When the chat last re-entered the inbox by hand. An inbox anchor. */
+  /** When the chat last re-entered the Active shelf by hand. Its sort anchor. */
   unsettledAt?: number;
 }
 
@@ -71,7 +71,7 @@ export interface LifecycleShell extends LifecycleFields {
   focused: boolean;
 }
 
-export type Shelf = "pinned" | "inbox" | "snoozed" | "settled";
+export type Shelf = "pinned" | "active" | "snoozed" | "settled";
 
 const blockedOnUser = (s: Pick<LifecycleShell, "pendingPerm" | "pendingAsk">): boolean =>
   s.pendingPerm || s.pendingAsk;
@@ -174,7 +174,7 @@ export function snoozeWakeLabel(until: number, now: number): string {
 /* -------------------------------- settle -------------------------------- */
 
 /**
- * When the chat last came back to the user: the inbox sort key, and the clock
+ * When the chat last came back to the user: the Active sort key, and the clock
  * auto-settle measures quiet time from. A turn landing, an un-settle, or a
  * snooze timer running out all count; T3's inbox sorts on the same idea
  * ("newest first by when each last came back to the user").
@@ -218,12 +218,12 @@ export function canSettleThread(s: Pick<LifecycleShell, "streaming" | "pendingPe
 }
 
 /** Which shelf. Pinned first (it overrides everything), then the two ways a
- *  chat is put away, then the inbox. */
+ *  chat is put away, then Active. */
 export function shelfOf(s: LifecycleShell, now: number, quietMs: number | null = AUTO_SETTLE_AFTER_MS): Shelf {
   if (s.pinned) return "pinned";
   if (!s.focused && effectiveSnoozed(s, now)) return "snoozed";
   if (effectiveSettled(s, now, quietMs)) return "settled";
-  return "inbox";
+  return "active";
 }
 
 /** The field writes for each verb, so the view never restates the rules. */
@@ -236,7 +236,7 @@ export const lifecycleWrites = {
     settledOverride: "active", settledAt: undefined, unsettledAt: now,
   }),
   // A snooze replaces any settle: when it wakes, the chat comes back to the
-  // inbox, not to the shelf it was snoozed from.
+  // Active shelf, not to the shelf it was snoozed from.
   snooze: (until: number, now: number): LifecycleFields => ({
     snoozedUntil: until, snoozedAt: now, settledOverride: undefined, settledAt: undefined,
   }),

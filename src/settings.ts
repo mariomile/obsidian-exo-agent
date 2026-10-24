@@ -3,7 +3,6 @@ import type ExoPlugin from "./main";
 import type { PermissionMode, ProviderId } from "./providers/types";
 import { ADAPTERS } from "./providers/registry";
 import { providerModels, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
-import { parseMcpJson } from "./core/mcp-config";
 import { DEFAULT_MEMORY_ROOT, LEGACY_MEMORY_ROOT } from "./core/paths";
 import { renderCliDiagnostics } from "./ui/settings-cli";
 import { renderComposerModels } from "./ui/settings-composer-models";
@@ -224,8 +223,8 @@ export class MVASettingTab extends PluginSettingTab {
 
     this.toggleSetting(
       el,
-      "Generate chat titles with AI (Haiku)",
-      "After the first reply, rename the tab to a concise 3-6 word summary using Claude Haiku; off keeps the truncated first message.",
+      "Generate chat titles with AI",
+      "After the first reply, rename the tab to a concise 3-6 word summary using a fast model; off keeps the truncated first message.",
       "aiTitles"
     );
     this.toggleSetting(
@@ -253,7 +252,7 @@ export class MVASettingTab extends PluginSettingTab {
       "debugContext"
     );
     new Setting(el)
-      .setName("Connections")
+      .setName("Unlinked mentions")
       .setDesc(
         "Surfaces the other notes you mention in a note's text but haven't linked yet — the graph work Obsidian's native pane leaves to you — and lets you wire them with one click, right where you're reading."
       )
@@ -371,8 +370,8 @@ export class MVASettingTab extends PluginSettingTab {
     );
     this.toggleSetting(
       el,
-      "Remember 'Always allow' across sessions",
-      "When you pick 'Always allow' on a permission card, also save it as an allow rule below so it survives a reload.",
+      "Make 'Always allow' apply to every chat",
+      "When on, 'Always allow' saves an allow rule below, so it covers every chat and survives a reload.",
       "rememberAlwaysAllow"
     );
 
@@ -511,7 +510,7 @@ export class MVASettingTab extends PluginSettingTab {
 
     this.toggleSetting(
       el,
-      "Suggestion inbox",
+      "Suggestions",
       "Open loops and decisions are recorded directly and can be reviewed afterwards; tasks and playbooks wait in the inbox until you accept or dismiss them. Turning this off hides the inbox and stops all proposal routing without deleting retained suggestions.",
       "proposalKernelEnabled"
     );
@@ -551,7 +550,7 @@ export class MVASettingTab extends PluginSettingTab {
     new Setting(el)
       .setName("Background AI model")
       .setDesc(
-        "Model used by background LLM passes (automatic memory and the other background passes). Floor is Sonnet: Haiku is never offered here."
+        "Model used by background LLM passes (automatic memory and the other background passes). Floor is Sonnet."
       )
       .addDropdown((d) => {
         for (const o of BACKGROUND_MODEL_OPTIONS) d.addOption(o.id, o.label);
@@ -629,9 +628,9 @@ export class MVASettingTab extends PluginSettingTab {
       );
 
     new Setting(el)
-      .setName("Exo Queue — Exo in tasca")
+      .setName("Exo Queue")
       .setDesc(
-        "Il desktop evade le note-richiesta scritte (dal telefono, via Obsidian Sync) nella cartella coda: esegue il corpo della nota headless e READ-ONLY e appende la risposta nella stessa nota, che sincronizza indietro. Poll ogni 60s."
+        "Answers request notes synced from your phone into the queue folder. Runs each note read-only and appends the reply to the same note. Checks every 60s."
       )
       .addToggle((t) =>
         t.setValue(s.exoQueueEnabled).onChange(async (v) => {
@@ -785,98 +784,23 @@ export class MVASettingTab extends PluginSettingTab {
           this.plugin.settings.collaboApiKey = v.trim();
           await this.plugin.saveSettings();
         }));
-    void this.renderMcpSection(el);
+    this.renderMcpSection(el);
   }
 
-  /** MCP now has a dedicated control surface — the Connections pane — where you
-   *  add / edit / enable / disable / remove servers, reconnect failed ones, and
-   *  re-authenticate OAuth ones live. Settings keeps only the fast-startup gate
-   *  (which silences external MCP entirely), a link to the pane, and the raw
-   *  `.mcp.json` escape hatch for exotic configs or fixing an unparseable file. */
-  private async renderMcpSection(containerEl: HTMLElement): Promise<void> {
+  /** MCP lives in one place, the Capabilities hub's MCP tab: add, edit,
+   *  enable, reconnect, authenticate, and the fast-startup warning. Settings
+   *  keeps only the pointer. */
+  private renderMcpSection(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("MCP servers").setHeading();
-    const root = containerEl.createDiv();
-    await this.drawMcpManager(root);
-  }
-
-  private async drawMcpManager(root: HTMLElement): Promise<void> {
-    root.empty();
-    const redraw = () => void this.drawMcpManager(root);
-    const adapter = this.plugin.app.vault.adapter;
-    const path = ".mcp.json";
-    const s = this.plugin.settings;
-
-    // Primary path: manage MCP in the Connections pane.
-    new Setting(root)
-      .setName("Manage MCP servers in Connections")
-      .setDesc("Add, edit, enable/disable, remove, reconnect, and re-authenticate servers live — plus one-tap import of what other tools already have.")
+    new Setting(containerEl)
+      .setName("MCP servers live in Capabilities")
+      .setDesc("Add, edit, enable/disable, remove, reconnect, and re-authenticate servers live, plus one-tap import of what other tools already have.")
       .addButton((b) =>
         b
-          .setButtonText("Open Connections")
+          .setButtonText("Open Capabilities")
           .setCta()
-          .onClick(() => void this.plugin.activateConnections())
+          .onClick(() => void this.plugin.activateHub("mcp"))
       );
-
-    // Fast-startup gate: external MCP is skipped entirely while it's on. Say it
-    // loudly, with the fix one click away — the #1 "where are my MCPs?" confusion.
-    if (s.fastStartup) {
-      new Setting(root)
-        .setName("External MCP is OFF — Fast startup is on")
-        .setDesc("Fast startup spawns sessions with strict MCP (Obsidian-native tools only). Turn it off to load your servers.")
-        .addButton((b) =>
-          b.setButtonText("Turn off Fast startup").onClick(async () => {
-            s.fastStartup = false;
-            await this.plugin.saveSettings();
-            redraw();
-          })
-        );
-    }
-
-    let raw = '{\n  "mcpServers": {}\n}';
-    try {
-      if (await adapter.exists(path)) raw = await adapter.read(path);
-    } catch {
-      /* missing — use template */
-    }
-    const parsed = parseMcpJson(raw);
-    if (parsed.error) {
-      new Setting(root)
-        .setName("Couldn't parse .mcp.json")
-        .setDesc(`${parsed.error} — fix it in the raw editor below.`);
-    }
-
-    // Raw escape hatch, collapsed: the Connections pane covers the common cases;
-    // exotic configs (or a broken file) still have a direct path.
-    const details = root.createEl("details");
-    details.createEl("summary", { text: "Advanced: edit raw .mcp.json", cls: "setting-item-description" });
-    const status = details.createDiv({ cls: "setting-item-description" });
-    const area = new Setting(details).setName(".mcp.json").setDesc("Must be valid JSON with an mcpServers key.");
-    area.addTextArea((t) => {
-      t.setValue(raw);
-      t.inputEl.rows = 10;
-      t.inputEl.addClass("mva-mono-input", "mva-full-width");
-      area.addButton((b) =>
-        b
-          .setButtonText("Save")
-          .setCta()
-          .onClick(async () => {
-            const next = t.getValue();
-            const check = parseMcpJson(next);
-            if (check.error) {
-              status.setText(check.error);
-              status.addClass("mod-error");
-              return;
-            }
-            await adapter.write(path, next);
-            redraw();
-          })
-      );
-    });
-
-    root.createEl("p", {
-      cls: "setting-item-description",
-      text: "Changes made here apply to NEW sessions — use Connections to reconnect the current one.",
-    });
   }
 
 }

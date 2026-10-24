@@ -34,6 +34,7 @@ function run(
 ): AutomationRunRecord {
   return {
     id,
+    slug: id,
     name: `Run ${id}`,
     startedAt: NOW - 30_000,
     ok: true,
@@ -53,6 +54,10 @@ function sources(
       listPending: async () => ({ records: [], warnings: [] }),
     },
     loadAutomationRuns: async () => [],
+    listAutomations: () => [
+      ...["pending", "reviewed", "restored", "read-only"].map((slug) => ({ slug, name: `Run ${slug}` })),
+      { slug: "digest", name: "Digest" },
+    ],
     listRecentNotes: async () => [],
     loadBackgroundBudget: async () => ({
       enabled: true,
@@ -127,6 +132,19 @@ describe("collectDailyPulseInput", () => {
       budget: { remaining: 6_750, enabled: true },
     });
     expect(result.warnings).toEqual([]);
+  });
+
+  it("lists unreviewed runs once per automation, newest run first", async () => {
+    const result = await collectDailyPulseInput(sources({
+      loadAutomationRuns: async () => [
+        run("old", { slug: "digest", name: "Digest", startedAt: NOW - 60_000, writes: ["a.md", "b.md"] }),
+        run("new", { slug: "digest", name: "Digest", startedAt: NOW - 10_000, writes: ["b.md"] }),
+      ],
+    }), { now: NOW, lastPulseAt: LAST_PULSE_AT });
+
+    expect(result.input.automationRuns).toEqual([
+      { id: "new", name: "Digest", startedAt: NOW - 10_000, writes: ["b.md", "a.md"] },
+    ]);
   });
 
   it("keeps successful source data when other sources fail and identifies each warning", async () => {
