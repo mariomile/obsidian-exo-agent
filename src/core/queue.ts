@@ -69,14 +69,16 @@ export function serializeQueue(queue: readonly QueuedMessage[]): PersistedQueued
 export function restoreQueue(raw: unknown): QueuedMessage[] {
   if (!Array.isArray(raw)) return [];
   const out: QueuedMessage[] = [];
-  for (const r of raw) {
-    if (!r || typeof r !== "object" || typeof r.text !== "string" || !r.text.trim()) continue;
+  for (const entry of raw as unknown[]) {
+    if (!entry || typeof entry !== "object") continue;
+    const r = entry as Record<string, unknown>;
+    if (typeof r.text !== "string" || !r.text.trim()) continue;
     const q: QueuedMessage = { text: r.text, held: true };
-    const ctx = r.context;
+    const ctx = r.context as { paths?: unknown; selection?: { text?: unknown; path?: unknown } | null } | null | undefined;
     if (ctx && Array.isArray(ctx.paths)) {
       const sel = ctx.selection;
       q.context = {
-        paths: ctx.paths.filter((p: unknown): p is string => typeof p === "string"),
+        paths: (ctx.paths as unknown[]).filter((p): p is string => typeof p === "string"),
         selection: sel && typeof sel.text === "string" && typeof sel.path === "string" ? { text: sel.text, path: sel.path } : null,
       };
     }
