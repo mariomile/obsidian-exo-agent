@@ -33,8 +33,6 @@ export interface ExoPaths {
   /** Memory harvest transit: one `YYYY-MM-DD.md` per day for facts with no
    *  obvious home in the vault. The only file the harvest may create. */
   inbox: string;
-  orchestration: string;
-  tasks: string;
   queue: string;
   reports: string;
   review: string;
@@ -75,8 +73,6 @@ export function exoPaths(root: string): ExoPaths {
     root: r,
     memory,
     inbox: `${memory}/inbox`,
-    orchestration: `${r}/orchestration`,
-    tasks: `${r}/orchestration/tasks.md`,
     queue: `${r}/exo-queue`,
     reports: `${r}/reports`,
     review: `${r}/review.md`,

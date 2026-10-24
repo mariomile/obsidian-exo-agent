@@ -176,15 +176,6 @@ describe("a message reaching a chat that was never drawn keeps its history", () 
     expect(turns(c)).toEqual(["0", "1"]);
     expect(lastChild(c).cls).toContain("mva-queue");
   });
-
-  it("a delegated child's question card goes below the parent's history", async () => {
-    const { surfaceChildBlock } = await import("../src/ui/delegation");
-    const parent = convo("parent", [user("delegate this"), reply("on it")]);
-    const child = convo("child", [], { parentConvoId: "parent", pendingDecision: null } as Partial<Convo>);
-    surfaceChildBlock(viewWith([parent, child]), { convoId: "child", state: "needs-input", reason: "ask" } as never);
-    expect(turns(parent)).toEqual(["0", "1"]);
-    expect(lastChild(parent).cls).toContain("mva-perm");
-  });
 });
 
 describe("source contract: what view.ts itself guarantees", () => {

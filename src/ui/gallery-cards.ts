@@ -14,19 +14,17 @@ export function renderHistoryGroup(
   grid: HTMLElement,
   label: string,
   items: Convo[],
-  doneConvoIds: Set<string>,
   retiredContext = false,
 ): void {
   if (items.length === 0) return;
   grid.createDiv({ cls: "mva-gallery-group-header", text: label });
-  for (const c of items) renderCard(view, grid, c, doneConvoIds, retiredContext);
+  for (const c of items) renderCard(view, grid, c, retiredContext);
 }
 
 function renderCard(
   view: ChatView,
   grid: HTMLElement,
   c: Convo,
-  doneConvoIds: Set<string>,
   retiredContext = false,
 ): void {
   const card = grid.createDiv({ cls: "mva-card" });
@@ -58,12 +56,8 @@ function renderCard(
     titleEl.setText(c.title || "New chat");
   }
 
-  // Why this chat left the active board: a completed orchestration task
-  // ("Done") beats a plain manual archive ("Archived") when both are true.
   const badges = head.createDiv({ cls: "mva-card-badges" });
-  if (doneConvoIds.has(c.id)) {
-    badges.createSpan({ cls: "mva-card-status-badge is-done", text: "Done" });
-  } else if (c.archived) {
+  if (c.archived) {
     badges.createSpan({ cls: "mva-card-status-badge is-archived", text: "Archived" });
   }
   // Only the exception is drawn: a conversation that resumes with its full

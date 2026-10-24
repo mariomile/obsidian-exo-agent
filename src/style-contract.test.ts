@@ -236,8 +236,8 @@ describe('mv-kit style contract', () => {
 
   it('§6 drag/motion never animates layout properties (left/top/margin)', () => {
     // §6 drag-polish MUST: "drag positioning uses transform, never
-    // left/top/margin". The Orchestration Board uses native HTML5 drag (the
-    // browser composites the ghost), so no transition drives layout geometry —
+    // left/top/margin". Native HTML5 drag lets the
+    // browser composite the ghost, so no transition drives layout geometry,
     // but a future transition that animates left/top/margin would both thrash
     // layout and break the drag MUST. This scans transition SHORTHANDS for a
     // layout-triggering property. `.mva-inputwrap.is-anim .mva-input` (height)
@@ -365,7 +365,7 @@ describe('Cosmos bridge: Phase 1 token seam', () => {
     expect(body).toMatch(/--mva-heartbeat\s*:\s*[\d.]+m?s\s*;/);
 
     // Every animation on a pulse-family keyframe must spend the token.
-    const PULSE_KEYFRAMES = /mva-(pulse|blink|breathe|working-pulse|board-pulse|ll-pulse|chats-dot-pulse|chats-breathe)\b/;
+    const PULSE_KEYFRAMES = /mva-(pulse|blink|breathe|working-pulse|ll-pulse|chats-dot-pulse|chats-breathe)\b/;
     const offenders = stripComments(css)
       .split('\n')
       .map((line, idx) => ({ line: line.trim(), n: idx + 1 }))
@@ -419,7 +419,7 @@ describe('Cosmos bridge: Phase 2 type registers', () => {
     // design.md §3 + §7 anti-patterns: UPPERCASE eyebrows on form fields is the
     // single most-repeated register mistake in the suite. Form labels are
     // register C. Scanned in the TS that builds the DOM, not in the CSS.
-    const FORM_LABEL_CLASSES = ['mva-pv-label', 'mva-task-modal-label', 'mva-auto-label'];
+    const FORM_LABEL_CLASSES = ['mva-pv-label', 'mva-auto-label'];
     const files = ['./ui/chat-list-view.ts', './ui/composer.ts', './ui/steps.ts', './view.ts'];
     const offenders: string[] = [];
     for (const f of files) {

@@ -56,7 +56,9 @@ const CEILINGS: Record<string, number> = {
   // recall per turno vive in `obsidian/turn-recall.ts` + `ui/recall-row.ts`.
   // 6571 -> 6247 righe reali. Il tetto scende a 6260: 13 righe di margine,
   // come sugli altri file.
-  "src/view.ts": 6230,
+  // Abbassato il 2026-10-24 (rimozione Orchestration Board): board, task,
+  // figli e rapporti non esistono piu'. 6228 -> 6007 righe reali, tetto 6012.
+  "src/view.ts": 6012,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -86,7 +88,10 @@ const CEILINGS: Record<string, number> = {
   // wiring della memoria in `obsidian/memory-wiring.ts`. 3316 -> 3040 righe
   // reali. Il tetto scende a 3050.
   // Abbassato a 3040, il conteggio reale, dopo la review del memory gate.
-  "src/main.ts": 3040,
+  // Abbassato il 2026-10-24 (rimozione Orchestration Board): wiring del
+  // ledger, del driver e della board cancellato. 3036 -> 2828 righe reali,
+  // tetto 2833.
+  "src/main.ts": 2833,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza
@@ -145,7 +150,9 @@ const CEILINGS: Record<string, number> = {
   //
   // Abbassato il 2026-09-25 (memory v2): i toggle del vecchio store, del dream
   // pass e del defrag sono cancellati. 945 -> 898 righe reali. Tetto 905.
-  "src/settings.ts": 905,
+  // Abbassato il 2026-10-24 (rimozione Orchestration Board): 904 -> 882 righe
+  // reali, tetto 887.
+  "src/settings.ts": 887,
   // Aggiunto il 2026-08-12. Questo file era l'UNICO pannello del repo senza
   // tetto, e nell'ondata chat+cosmos e' passato da 859 a 1020 righe senza che
   // niente lo fermasse — mentre lo stesso commit ABBASSAVA quello di main.ts.
@@ -159,7 +166,9 @@ const CEILINGS: Record<string, number> = {
   // renderer della riga (`rowModel`, `buildRichRow`, `buildCompactRow` e i loro
   // helper): stessa proprieta', ~215 righe, e lascerebbe un guscio che possiede
   // solo lo stato vero (query, cursore, ordine, collapse).
-  "src/ui/chat-list-view.ts": 870,
+  // Abbassato il 2026-10-24 (rimozione Orchestration Board): annidamento dei
+  // figli cancellato. 870 -> 738 righe reali, tetto 743.
+  "src/ui/chat-list-view.ts": 743,
   // Aggiunto il 2026-08-12. `styles.css` e' il file piu' grande del repo (6994
   // righe, davanti a view.ts) ed era l'ultimo grande senza tetto: l'ondata
   // chat+cosmos gli ha aggiunto 361 righe e niente l'ha notato.
@@ -173,7 +182,10 @@ const CEILINGS: Record<string, number> = {
   // `src/styles/index.css` con gli @import in ordine di cascata). E' una
   // decisione di build, e questo tetto e' cio' che la mette sul tavolo quando
   // serve davvero invece che come refactor speculativo.
-  "styles.css": 6970,
+  // Abbassato il 2026-10-24 (rimozione Orchestration Board): stili di board,
+  // task modal e figli nella sidebar cancellati. 6951 -> 6507 righe reali,
+  // tetto 6512.
+  "styles.css": 6512,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

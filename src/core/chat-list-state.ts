@@ -114,9 +114,9 @@ export function rowPreview(
  * while the timestamp sits still, and a raw-ms signature would leave "now" on
  * screen for an hour while also churning on milliseconds nobody can see.
  *
- * Deliberately ABSENT: whether the row's children or its section are currently
- * collapsed. Both are applied as classes after reconciliation, so toggling one
- * never rebuilds the row the user just pressed Enter on.
+ * Deliberately ABSENT: whether the row's section is currently collapsed. It is
+ * applied as a class after reconciliation, so toggling it never rebuilds the
+ * row the user just pressed Enter on.
  */
 export function chatRowSig(r: ChatRow, o: { rich: boolean; age: string }): string {
   return [
@@ -125,11 +125,6 @@ export function chatRowSig(r: ChatRow, o: { rich: boolean; age: string }): strin
     // which is what makes it affordable here at all.
     r.activity ?? "", r.permRule ?? "", r.progress ? `${r.progress.done}/${r.progress.total}` : "",
     r.provider, r.model, r.messageCount, r.open, r.pinned, r.unseen, o.age,
-    // A row that gains or loses its parent changes shape, so it has to rebuild
-    // rather than be patched in place at the wrong indent. Gaining or losing
-    // CHILDREN is the same kind of change — it adds or removes the collapse
-    // control.
-    r.depth, r.hasChildren,
   ].join("|");
 }
 
@@ -149,10 +144,8 @@ export function needsStripSig(blocked: readonly Pick<ChatRow, "id" | "title" | "
 }
 
 /**
- * The one collapse rule, shared by the two things that collapse. Absent means
- * EXPANDED, which is what lets either feature ship without a migration: an
- * install that never toggled anything has an empty list and opens exactly as it
- * did before.
+ * The one collapse rule. Absent means EXPANDED: an install that never toggled
+ * anything has an empty list and opens exactly as it did before.
  */
 const isCollapsed = (collapsed: readonly string[] | undefined, key: string): boolean =>
   collapsed?.includes(key) === true;
@@ -207,75 +200,3 @@ export function toggleSectionCollapsed(
 
 /** Sections that are folded until opened (see `isSectionCollapsed`). */
 const SHELVES: ReadonlySet<string> = new Set(["snoozed", "settled"]);
-
-/**
- * Has the user folded away the fan-out children of THIS conversation? Same
- * contract as the section pair above, and deliberately a SEPARATE list
- * (`settings.chatsCollapsedParents`): the two are keyed in different
- * namespaces — a section key vs a conversation id — and merging them would let
- * a conversation whose id happened to read `settings` collapse the Settled
- * section, and would make "expand everything" ambiguous.
- *
- * A stale id — a conversation since deleted or archived — is simply never asked
- * about again, so the list needs no pruning pass and no migration.
- */
-export function isParentCollapsed(
-  collapsed: readonly string[] | undefined,
-  convoId: string,
-): boolean {
-  return isCollapsed(collapsed, convoId);
-}
-
-/** Flip one parent's children. See `flipCollapsed`. */
-export function toggleParentCollapsed(
-  collapsed: readonly string[] | undefined,
-  convoId: string,
-): string[] {
-  return flipCollapsed(collapsed, convoId);
-}
-
-/** What per-parent collapse means for one painted list. */
-export interface ChildCollapse {
-  /** Row ids that must not render: their parent is collapsed. */
-  hidden: ReadonlySet<string>;
-  /** Per parent id, how many rows are nested under it — the number a collapsed
-   *  parent shows, so putting children away can never be the same thing as
-   *  forgetting they exist. Present for every parent, collapsed or not. */
-  counts: ReadonlyMap<string, number>;
-}
-
-/**
- * Resolve per-parent collapse over the painted order.
- *
- * Read POSITIONALLY, not by walking `parentConvoId`, and that is the point: the
- * tree is already flattened to one indent level, so a grandchild's own parent
- * is a depth-1 row while the row it must disappear with is the depth-0 one
- * above them both. The rendered run — a depth-0 row followed by every depth-1
- * row until the next depth-0 row — IS the subtree, by construction in
- * `groupAcrossHomes`, so collapsing that run hides exactly the descendants and
- * nothing of the next parent's.
- *
- * Sections can be concatenated and passed in one call: a child is always
- * emitted into its parent's home, so every section begins at depth 0 and a new
- * section's first row closes the previous section's last run.
- */
-export function collapseChildren(
-  items: readonly { id: string; depth: 0 | 1 }[],
-  collapsed: readonly string[] | undefined,
-): ChildCollapse {
-  const hidden = new Set<string>();
-  const counts = new Map<string, number>();
-  let parent: string | null = null;
-  for (const row of items) {
-    if (row.depth === 0) {
-      parent = row.id;
-      continue;
-    }
-    // Unreachable given the invariant above; treated as a root rather than
-    // attributed to whatever parent happened to precede it in another section.
-    if (parent === null) continue;
-    counts.set(parent, (counts.get(parent) ?? 0) + 1);
-    if (isCollapsed(collapsed, parent)) hidden.add(row.id);
-  }
-  return { hidden, counts };
-}

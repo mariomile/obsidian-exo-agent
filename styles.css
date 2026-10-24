@@ -1071,7 +1071,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-radius: var(--mva-r3);
   border-bottom-right-radius: var(--mva-r1);
 }
-/* Exo's own line (a child's report waking its parent): a note, not your bubble. */
+/* Exo's own line (child reports in chats from the removed task engine): a note, not your bubble. */
 .mva-user.is-auto { align-items: center; }
 .mva-user.is-auto .mva-bubble { background: none; border: none; padding: 0; color: var(--text-faint); font-size: var(--font-ui-small); }
 .mva-assistant .mva-bubble {
@@ -3562,7 +3562,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-color: color-mix(in srgb, var(--mva-brand, var(--interactive-accent)) 55%, transparent);
   color: var(--mva-brand, var(--interactive-accent));
 }
-/* Why the chat left the active board: Done (task completed) vs Archiviata (manual). */
+/* Why the chat left the active list: archived (manual). */
 .mva-card-status-badge {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -3572,10 +3572,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   letter-spacing: 0.04em;
   text-transform: uppercase;
   line-height: 1;
-}
-.mva-card-status-badge.is-done {
-  border: 1px solid color-mix(in srgb, var(--mva-ok) 40%, transparent);
-  color: var(--mva-ok);
 }
 .mva-card-status-badge.is-archived {
   border: 1px solid var(--background-modifier-border);
@@ -5396,405 +5392,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   }
 }
 
-/* ============================ Orchestration Board ============================
-   Full-pane board surface (BoardView, src/ui/board-view.ts). Built on the same
-   mva- design tokens as the chat cards: --mva-r1/r2/r3 radii, --mva-t transition,
-   --mva-card-* rhythm, and Obsidian's native theme variables. Six columns of
-   draggable task cards; the Running card shows a pulsing status dot. */
-
-.mva-board-root {
-  overflow: hidden;
-}
-.mva-board {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  /* Vertical rhythm follows the theme's content margin (--file-margins, native
-     Obsidian var) so the board breathes like a note — including focus-view,
-     where themes inflate the top margin to make up for the hidden tab bar.
-     Horizontal stays tight: the board is full-bleed, not readable-line width. */
-  padding: var(--file-margins, 12px);
-  padding-inline: 12px;
-  gap: 10px;
-}
-
-/* Malformed-ledger banner — board-only; chat never shows this. */
-.mva-board-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: var(--mva-r2);
-  border: 1px solid var(--background-modifier-error-border, var(--text-error));
-  background: var(--background-modifier-error, rgba(255, 0, 0, 0.08));
-  color: var(--text-error);
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.mva-board-error-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-}
-.mva-board-error-icon .svg-icon {
-  width: 16px;
-  height: 16px;
-}
-
-/* Flag-off placeholder. */
-.mva-board-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 100%;
-  text-align: center;
-  color: var(--text-muted);
-  padding: 24px;
-}
-.mva-board-placeholder-icon .svg-icon {
-  width: 40px;
-  height: 40px;
-  color: var(--text-faint);
-}
-.mva-board-placeholder h3 {
-  margin: 0;
-}
-.mva-board-placeholder p {
-  margin: 0;
-  max-width: 42ch;
-  font-size: 13px;
-}
-
-/* Columns — horizontal scroll if they overflow; never scroll the page body. */
-.mva-board-cols {
-  display: flex;
-  gap: 12px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 4px;
-}
-.mva-board-col {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 260px;
-  min-width: 260px;
-  min-height: 0;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--mva-r3);
-  overflow: hidden;
-}
-.mva-board-col-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px 6px;
-  flex-shrink: 0;
-}
-.mva-board-col-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.mva-board-col-count {
-  font-size: 11px;
-  color: var(--text-faint);
-  background: var(--background-modifier-hover);
-  border-radius: 999px;
-  padding: 0 6px;
-  min-width: 18px;
-  text-align: center;
-}
-.mva-board-col-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 6px 8px 10px;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 40px;
-}
-.mva-board-col-list.is-drop-target {
-  background: var(--background-modifier-hover);
-  box-shadow: inset 0 0 0 2px var(--interactive-accent);
-  border-radius: var(--mva-r2);
-}
-
-/* Cards. */
-.mva-board-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: var(--mva-card-pad);
-  border-radius: var(--mva-card-radius);
-  border: var(--mva-card-border);
-  background: var(--background-primary);
-  cursor: grab;
-  transition: border-color var(--mva-t), box-shadow var(--mva-t), transform var(--mva-t);
-}
-.mva-board-card:hover {
-  border-color: var(--background-modifier-border-hover, var(--interactive-accent));
-}
-.mva-board-card.is-dragging {
-  opacity: 0.5;
-  cursor: grabbing;
-}
-.mva-board-card.is-drop-before {
-  box-shadow: inset 0 2px 0 0 var(--interactive-accent);
-}
-.mva-board-card.is-running {
-  border-color: var(--interactive-accent);
-}
-.mva-board-card.is-chat-missing {
-  border-color: var(--text-warning, var(--text-error));
-}
-.mva-board-card-head {
-  display: flex;
-  align-items: flex-start;
-}
-.mva-board-card-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.3;
-  color: var(--text-normal);
-}
-/* Session-card × (archive + close tab): reveal on card hover, top-right. */
-.mva-board-card-head {
-  gap: 6px;
-}
-.mva-board-card-head .mva-board-card-title {
-  flex: 1;
-  min-width: 0;
-}
-.mva-board-card-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 2px;
-  margin: -1px -2px 0 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  border-radius: var(--mva-r1);
-  color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--mva-t);
-}
-.mva-board-card:hover .mva-board-card-x {
-  opacity: 1;
-}
-.mva-board-card-x .svg-icon {
-  width: 13px;
-  height: 13px;
-}
-.mva-board-card-x:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-.mva-board-card-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-}
-/* Chrome, not prose: the chip's height is padding plus one line, stated as
-   such. It used to be spelled `line-height: 1.6` with zero vertical padding,
-   a reading rhythm doing a box's job, and the last one left in the file after
-   the §7 wave. Same 16px, said the way a chip means it. */
-.mva-board-chip {
-  font-size: 10px;
-  line-height: 1;
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: var(--background-modifier-hover);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.mva-board-chip-model {
-  font-family: var(--font-monospace);
-  font-size: 9.5px;
-}
-.mva-board-chip-reason {
-  background: var(--background-modifier-error, rgba(255, 0, 0, 0.1));
-  color: var(--text-error);
-}
-.mva-board-chip-missing {
-  background: var(--background-modifier-error, rgba(255, 0, 0, 0.1));
-  color: var(--text-error);
-}
-.mva-board-card-time {
-  font-size: 10px;
-  color: var(--text-faint);
-  margin-left: auto;
-}
-.mva-board-card-preview {
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* Pulsing live status dot — the streaming heartbeat on a Running card. */
-.mva-board-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--interactive-accent);
-  flex-shrink: 0;
-  animation: mva-board-pulse var(--mva-heartbeat) ease-in-out infinite;
-}
-@keyframes mva-board-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 0 0 var(--interactive-accent);
-  }
-  50% {
-    opacity: 0.55;
-    box-shadow: 0 0 0 4px transparent;
-  }
-}
-
-/* "+ New task" button (Backlog column header) — creation goes through the
-   TaskModal since 2026-07-08 (replaced the inline quick-add form). */
-.mva-board-col-add {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border-radius: var(--mva-r1);
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.mva-board-col-add:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
-}
-.mva-board-col-add .svg-icon {
-  width: 14px;
-  height: 14px;
-}
-
-/* Task modal (create/edit) — REUSES the canonical prompt-vars form recipe
-   (.mva-pv-row / .mva-pv-label / .mva-pv-input; see docs/design.md §5). Only
-   the genuinely modal-specific deltas live here. Like PromptVarsModal it lives
-   OUTSIDE .mva-root, so .mva-pv-input's own quiet-focus rule applies. */
-.mva-task-modal-window {
-  width: min(560px, 92vw);
-}
-/* .mva-pv-row anchors the field's autocomplete popup in this modal. */
-.mva-task-modal .mva-pv-row {
-  position: relative;
-}
-/* Shared textarea behavior layered on .mva-pv-input (prompt + context box). */
-.mva-task-modal textarea.mva-pv-input {
-  min-height: 96px;
-  resize: none;
-  overflow-y: auto;
-  font-family: inherit;
-  line-height: 1.45;
-}
-/* The context-note box is a one-line affordance, not a prose field. */
-.mva-task-modal .mva-task-modal-ctx-input {
-  min-height: 34px;
-  height: 34px;
-}
-/* Model row: label + chip on one line. */
-.mva-task-modal .mva-task-modal-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.mva-task-modal .mva-task-modal-row > .mva-pv-label {
-  margin-bottom: 0;
-}
-/* Model chip — toolbar .mva-sel-chip language, sized up a touch and uncapped
-   (the 120px toolbar cap would ellipsize model names for no reason here). */
-.mva-task-modal .mva-sel-chip.mva-task-modal-model {
-  font-size: 12.5px;
-  padding: 4px 9px;
-  max-width: none;
-}
-/* Context-note chips (removable → 999px per design.md). */
-.mva-task-modal .mva-task-modal-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-.mva-task-modal .mva-task-modal-chips.is-empty {
-  display: none;
-}
-.mva-task-modal .mva-task-modal-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
-  color: var(--text-normal);
-}
-.mva-task-modal .mva-task-modal-chip-x {
-  display: inline-flex;
-  cursor: pointer;
-  color: var(--text-faint);
-}
-.mva-task-modal .mva-task-modal-chip-x:hover {
-  color: var(--text-normal);
-}
-.mva-task-modal .mva-task-modal-chip-x .svg-icon {
-  width: 11px;
-  height: 11px;
-}
-/* Footer: run-immediately (create only) + submit. */
-.mva-task-modal .mva-task-modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 14px;
-}
-.mva-task-modal .mva-task-modal-run {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.mva-task-modal .mva-task-modal-run input[type="checkbox"] {
-  accent-color: var(--interactive-accent);
-  margin: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mva-board-dot {
-    animation: none;
-  }
-  .mva-board-card {
-    transition: none;
-  }
-}
-
 /* ---------------------------- Exo Cockpit ---------------------------- */
 .mva-ck { padding: 16px 20px 32px; overflow-y: auto; }
 .mva-ck-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -6035,7 +5632,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-proposals-field-label { margin-bottom: 4px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .mva-proposals-field-value { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Foundry playbook editor: textarea behavior layered on .mva-pv-input, mirroring
-   the task-modal recipe so the prompt reads as prose, not monospace. */
+   the prompt-vars recipe so the prompt reads as prose, not monospace. */
 .mva-proposals textarea.mva-pv-input {
   min-height: 120px;
   resize: vertical;
@@ -6623,9 +6220,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 @media (prefers-reduced-motion: reduce) {
   .mva-chats-dot.is-running::after { animation: none; }
   .mva-chats-group-chevron,
-  .mva-chats-group-label,
-  .mva-chats-kids,
-  .mva-chats-kids-chevron { transition: none; }
+  .mva-chats-group-label { transition: none; }
 }
 
 /* Rich rows — the working set and the pins. The 20px left padding IS the
@@ -6734,45 +6329,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-chats-row.is-active .mva-chats-name,
 .mva-chats-row.is-cursor .mva-chats-name { color: var(--text-normal); }
 .mva-chats-age { flex-shrink: 0; color: var(--text-faint); font-size: var(--font-ui-smaller); }
-
-/* Fan-out children — indented one step under the conversation that spawned
-   them. A margin, not padding: the row's own left inset IS the status gutter,
-   and padding would slide the dot away from the title it belongs to. One level
-   only, by construction (core/child-tree). */
-.mva-chats-row.is-child { margin-left: 12px; }
-/* A child folded away by its parent. `display: none` on the element that is
-   already there, rather than a shorter model list: expanding then costs nothing
-   and rebuilds nothing, and display:none takes the row out of the accessibility
-   tree too, so nothing is hidden from the eye and left in the reading order. */
-.mva-chats-row.is-kid-hidden { display: none; }
-
-/* Per-parent collapse — the section header's gesture, one rung down. Trailing,
-   like every other row marker: a leading chevron would shift the title right on
-   exactly the few rows that fanned out, and the column would break on the few
-   while holding for the many. Smaller and fainter than the section chevron on
-   purpose — a parent is one row among many, not a boundary between groups. */
-.mva-chats-kids {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  cursor: pointer;
-  color: var(--text-faint);
-  font-size: var(--font-ui-smaller);
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  transition: color var(--mva-t);
-}
-.mva-chats-kids:hover { color: var(--text-muted); }
-.mva-chats-kids-chevron { display: inline-flex; transition: transform var(--mva-t); }
-/* 10px against the section chevron's 12: subordinate at a glance, without
-   spending a second shape on saying so. */
-.mva-chats-kids-chevron svg { width: 10px; height: 10px; }
-.mva-chats-row:not(.is-kids-collapsed) .mva-chats-kids-chevron { transform: rotate(90deg); }
-/* The count exists only while collapsed — the same rule the section headers
-   follow, and for the same reason: a control that hides rows without saying how
-   many turns "put this away" into "forget it exists". */
-.mva-chats-kids-count:empty { display: none; }
 
 /* Inline decision — Allow / Deny on a row blocked on a permission, with the one
    line that says what a yes covers. Only ever on that row, so this is not a

@@ -10,7 +10,6 @@ import {
   countSurvivingRetirees,
   pinnedFirst,
   nextFocusAfterRemoval,
-  stripAfterChildSpawn,
 } from "../src/core/working-set";
 import type { TabFacts } from "../src/core/working-set";
 
@@ -543,37 +542,5 @@ describe("retiredFromStrip time window", () => {
     const c = { id: "mid", retiredAt: NOW - 20 * DAY, archived: false, messages: [{}] };
     expect(retiredFromStrip([c], [], NOW, 30 * DAY)).toEqual([c]);
     expect(retiredFromStrip([c], [], NOW, 10 * DAY)).toEqual([]);
-  });
-});
-
-describe("stripAfterChildSpawn", () => {
-  it("takes the freshly spawned child out of the strip, leaving every other tab alone", () => {
-    expect(stripAfterChildSpawn(["a", "child", "b"], "child", "a")).toEqual(["a", "b"]);
-  });
-
-  /** No prior conversation to switch back to: the child IS the active tab.
-   *  Removing it would leave the view focused on a chat the strip does not
-   *  contain — a visible child is the smaller problem. */
-  it("never removes the active tab", () => {
-    const tabs = ["child"];
-    expect(stripAfterChildSpawn(tabs, "child", "child")).toBe(tabs);
-  });
-
-  it("is a no-op for an id that is not in the strip, so calling it twice is safe", () => {
-    const tabs = ["a", "b"];
-    expect(stripAfterChildSpawn(tabs, "child", "a")).toBe(tabs);
-    const once = stripAfterChildSpawn(["a", "child"], "child", "a");
-    expect(stripAfterChildSpawn(once, "child", "a")).toBe(once);
-  });
-
-  it("returns the same instance when nothing changed, so the caller can skip the persist", () => {
-    const tabs = ["a", "b"];
-    expect(stripAfterChildSpawn(tabs, "missing", "a")).toBe(tabs);
-    expect(stripAfterChildSpawn(tabs, "a", "a")).toBe(tabs);
-  });
-
-  it("removes only the child, even when the strip repeats nothing else about it", () => {
-    // Order of the survivors is preserved: the strip is a user-arranged list.
-    expect(stripAfterChildSpawn(["p", "c1", "q", "c2"], "c1", "p")).toEqual(["p", "q", "c2"]);
   });
 });

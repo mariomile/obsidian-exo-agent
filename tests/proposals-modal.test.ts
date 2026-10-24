@@ -5,7 +5,6 @@ import { playbookMetadataDetails, proposalPayloadDetails, proposalTargetLabel } 
 
 describe("proposal inbox presentation", () => {
   it("describes every explicit acceptance target", () => {
-    expect(proposalTargetLabel({ kind: "task", title: "T", prompt: "P" })).toBe("Orchestration backlog");
     expect(proposalTargetLabel({ kind: "loop", title: "L", note: "N" })).toBe("Open Loops");
     expect(proposalTargetLabel({ kind: "decision", title: "D", context: "C", decision: "Yes" })).toBe("Decision record");
     expect(proposalTargetLabel({ kind: "playbook", name: "P", prompt: "Run" })).toBe("Custom prompts");
@@ -26,7 +25,7 @@ describe("proposal inbox presentation", () => {
   });
 
   it("does not invent empty optional fields", () => {
-    expect(proposalPayloadDetails({ kind: "task", title: "Ship", prompt: "Build it" }))
+    expect(proposalPayloadDetails({ kind: "playbook", name: "Ship", prompt: "Build it" }))
       .toEqual([{ label: "Prompt", value: "Build it" }]);
   });
 

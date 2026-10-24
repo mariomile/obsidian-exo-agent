@@ -17,7 +17,6 @@ import type {
 } from "./proposal-router";
 
 type OpenLoopTarget = ProposalAcceptanceDeps["loops"];
-type TaskTarget = ProposalAcceptanceDeps["tasks"];
 type DecisionTarget = ProposalAcceptanceDeps["decisions"];
 type PlaybookTarget = ProposalAcceptanceDeps["playbooks"];
 
@@ -32,24 +31,6 @@ export function proposalMarker(proposalId: string): string {
 
 function withMarker(content: string, proposalId: string): string {
   return `${content.trimEnd()}\n\n${proposalMarker(proposalId)}`;
-}
-
-/** Structural slice of TaskStore needed for atomic create-or-return. */
-export interface ProposalTaskStore {
-  createOnce(task: { title: string; prompt: string; model?: string }, marker: string): Promise<{ id: string }>;
-}
-
-export class TaskProposalTarget implements TaskTarget {
-  constructor(private readonly tasks: ProposalTaskStore) {}
-
-  create(input: Parameters<TaskTarget["create"]>[0]): Promise<{ id: string }> {
-    const marker = proposalMarker(input.proposalId);
-    return this.tasks.createOnce({
-      title: input.title,
-      prompt: withMarker(input.prompt, input.proposalId),
-      ...(input.model ? { model: input.model } : {}),
-    }, marker);
-  }
 }
 
 /** Minimal shared vault surface used by both file-backed proposal targets. */
@@ -212,8 +193,6 @@ export class PlaybookProposalTarget implements PlaybookTarget {
 }
 
 export interface ProposalAcceptanceTargetOptions {
-  /** The plugin's one shared TaskStore instance. */
-  tasks: ProposalTaskStore;
   vault: ProposalTargetVaultAdapter;
   /** The plugin's shared Open Loops queue. */
   loopsWriteQueue: WriteQueue;
@@ -235,7 +214,6 @@ export function createProposalAcceptanceDeps(
   options: ProposalAcceptanceTargetOptions
 ): ProposalAcceptanceDeps {
   return {
-    tasks: new TaskProposalTarget(options.tasks),
     loops: new OpenLoopProposalTarget(
       options.vault,
       options.loopsWriteQueue,

@@ -80,7 +80,7 @@ const MEMORY_SETUP_OPTIONS: { preset: MemorySetup; icon: string; title: string; 
     preset: "minimal",
     icon: "folder-plus",
     title: "Just the essentials",
-    desc: "Only what Exo's memory features need — task board, open loops, store, reports. No opinionated structure.",
+    desc: "Only what Exo's memory features need — open loops, store, reports. No opinionated structure.",
   },
   {
     preset: "none",

@@ -6,18 +6,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ChatView, VIEW_TYPE, EXO_ICON } from "./view";
 import { DiagLog } from "./core/diag";
-import type { SessionSnapshot, SessionLane } from "./core/session-cards";
 import { handoffPrefix } from "./core/handoff";
-import type { ChildReport } from "./core/child-reports";
-import { BOARD_VIEW_TYPE, BOARD_ICON } from "./ui/board-view";
-import { createOrchestration } from "./obsidian/orchestration-wiring";
 import { CockpitView, COCKPIT_VIEW_TYPE } from "./ui/cockpit-view";
 import { AgentsView, AGENTS_VIEW_TYPE } from "./ui/agents-view";
 import { HubView, HUB_VIEW_TYPE, type HubTab } from "./ui/hub/hub-view";
 import {
   registerExoViews,
   activateView as activateChatView,
-  activateBoard as activateBoardView,
   activateHub as activateHubView,
   activateConnections as activateConnectionsView,
   activateAgents as activateAgentsView,
@@ -69,15 +64,6 @@ import { WorkflowSignalStore } from "./obsidian/workflow-signal-store";
 import { registerCollaboCommands } from "./obsidian/collabo-commands";
 import { startCodexBridge, type CodexBridge } from "./obsidian/codex-bridge";
 import { CODEX_BRIDGE_SCRIPT } from "./obsidian/codex-bridge-script";
-import { promoteToTaskCommandVisible } from "./core/tasks";
-import {
-  ConvoStateChannel,
-  type ConvoState,
-  type ConvoStateReason,
-  type ConvoStateListener,
-  type Unsubscribe,
-} from "./core/convo-state";
-import { TaskStore, adaptAppToTaskVault } from "./obsidian/task-store";
 import { AgentStore, createAgentStore, readAgentBrainBody } from "./obsidian/agent-store";
 import type { AgentDef } from "./core/agents";
 import { AgentTriggerDriver, makeNoteReader, todayDailyNotePath } from "./obsidian/agent-triggers";
@@ -174,7 +160,7 @@ Raccogli dalle fonti in quest'ordine. Se una fonte non è disponibile (tool asse
 
 IMPORTANTE: non scrivere NULLA prima del digest — niente premesse, niente narrazione del processo. La tua risposta deve iniziare esattamente con "# ☀️ Morning Digest". Eventuali caveat sulle fonti vanno solo nella riga "Stato fonti" in fondo.
 
-1. VAULT — leggi: ${paths.openLoops} (loop attivi e scaduti), ${paths.tasks} (task running / needs-input / review), conteggio note in _inbox/, la daily note di ieri e di oggi in Journal/Daily/ se esistono.
+1. VAULT — leggi: ${paths.openLoops} (loop attivi e scaduti), conteggio note in _inbox/, la daily note di ieri e di oggi in Journal/Daily/ se esistono.
 2. CALENDAR — con i tool MCP di Google Calendar: gli eventi di oggi, con orari.
 3. GMAIL — con i tool MCP di Gmail: cerca i thread NON letti o importanti delle ultime 24 ore; riporta al massimo 5: mittente — oggetto — perché conta in una riga.
 4. SLACK — con i tool MCP di Slack: mention e messaggi rilevanti delle ultime 24 ore; al massimo 5 conversazioni: canale — sintesi in una riga.
@@ -188,7 +174,7 @@ Poi scrivi il digest ESATTAMENTE in questo formato:
 (agenda essenziale + le 3 priorità che proponi tu, ognuna con un perché di una riga)
 
 ## ✅ Da fare
-(loop scaduti, task fermi in needs-input/review, "N note in inbox da processare" se >0)
+(loop scaduti, chat ferme in needs-input/review, "N note in inbox da processare" se >0)
 
 ## 📧 Mail da guardare
 
@@ -258,16 +244,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *  checks and interactive settings changes cannot race saveData(). */
   private readonly settingsWriteQueue = new WriteQueue();
   private readonly sessionCapsWriteQueue = new WriteQueue();
-  /**
-   * THE ONE shared write path for every append to the Orchestration Board
-   * tasks ledger (`paths.tasks`). Both the `add_task` SDK
-   * tool (chat-driven) and the "Promote to task" command enqueue on this SAME
-   * queue — same contract as `memoryWriteQueue` above — so board and
-   * chat-driven task creation never interleave a read-modify-write cycle.
-   * Injected into `createObsidianToolServer` (src/view.ts) and used directly
-   * by `ChatView.cmdPromoteToTask`.
-   */
-  readonly tasksWriteQueue = new WriteQueue();
   /** Single mutation boundary for the plugin-dir proposal inbox. */
   private readonly proposalWriteQueue = new WriteQueue();
   /** Settings mutation + persistence boundary for accepted playbooks. */
@@ -279,15 +255,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /** Serialize collection, review-note write and settings persistence as one operation. */
   private readonly dailyPulseOperationQueue = new WriteQueue();
   private readonly dailyPulseSlotRunner = new DailyPulseSlotRunner();
-  /**
-   * THE ONE shared `TaskStore` instance — the typed load/create/update/move/
-   * archive API over the same ledger (`paths.tasks`),
-   * built on `tasksWriteQueue` above so it can never race a caller still
-   * using the lower-level `createBacklogTask` directly. Constructed in
-   * `onload()` (needs `this.app`); the future board view/driver should read
-   * and mutate tasks ONLY through this instance.
-   */
-  taskStore!: TaskStore;
   /** Serialized writes to the agent contract sidecars (`paths.agents`). */
   private readonly agentWriteQueue = new WriteQueue();
   private readonly automationRunsWriteQueue = new WriteQueue();
@@ -310,31 +277,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /** Signatures whose distillation is in flight; guards the record→append window. */
   private readonly distillingSignatures = new Set<string>();
   private static readonly PROPOSAL_TOKEN_ESTIMATE = 2500;
-
-  /**
-   * THE ONE plugin-level convo-state notification channel — how ChatView tells
-   * the (optional) Orchestration Board how each conversation's turn lifecycle is
-   * moving (turn-start / turn-end / needs-input / stopped / error). Synchronous,
-   * in-memory, one-way (board observes; chat never depends on it). Guarded on
-   * `orchestrationEnabled`: a strict no-op when the flag is off, so chat runtime
-   * behavior is identical to a build without the board. See
-   * src/core/convo-state.ts and the isolation contract in
-   * docs/superpowers/specs/2026-07-08-orchestration-board-design.md.
-   */
-  readonly convoState = new ConvoStateChannel(() => this.settings.orchestrationEnabled);
-
-  /** THE orchestration runtime — driver + ledger watch, owned by the PLUGIN so
-   *  delegated tasks run with every tab closed. The board renders it; it used to
-   *  own it, which made `spawn_task` a no-op whenever that tab wasn't open. */
-  readonly orchestration = createOrchestration(this);
-
-  /** Ribbon-icon handle for the Orchestration Board — created only while
-   *  `orchestrationEnabled` is on, removed when it's toggled off, so the entry
-   *  point disappears entirely (not just disabled) on hot-disable. */
-  private boardRibbonEl: HTMLElement | null = null;
-  /** Last-applied orchestration flag, so `saveSettings` can detect a toggle and
-   *  re-sync entry points + tear down the board on disable. */
-  private orchestrationApplied = false;
 
   /** Stable identity for this plugin instance in the cross-session write
    *  sentinel. Per-load, so a reload starts a fresh logical session and two
@@ -381,10 +323,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     // Own file (session-caps-cache.json), not settings — see saveSessionCapsCache.
     this.lastSessionCaps = await this.loadSessionCapsCache();
 
-    // ONE shared TaskStore for the whole plugin — built on `tasksWriteQueue` so
-    // it can never race the lower-level `createBacklogTask` call in
-    // `src/view.ts`/`src/obsidian/tools.ts`, which enqueues on the same queue.
-    this.taskStore = new TaskStore(adaptAppToTaskVault(this.app), this.tasksWriteQueue, this.paths.tasks);
     this.agentStore = createAgentStore(
       this.app,
       this.paths,
@@ -396,7 +334,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;
     // The route is lazy: the acceptance deps are built right after, and it writes
-    // loops and decisions on append, tasks and playbooks on accept.
+    // loops and decisions on append, playbooks on accept.
     this.proposalStore = new ProposalStore({
       read: async (relativePath) => {
         const path = `${proposalRoot}/${relativePath}`;
@@ -438,7 +376,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       ensureFolder: (path) => this.ensureParentFolders(path),
     };
     this.proposalAcceptanceDeps = createProposalAcceptanceDeps({
-      tasks: this.taskStore,
       vault: targetVault,
       loopsWriteQueue: this.loopsWriteQueue,
       playbooksWriteQueue: this.proposalPlaybookWriteQueue,
@@ -573,36 +510,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       callback: withView((v) => v.cmdTogglePlan()),
     });
 
-    // Orchestration Board — flag-gated the same way the setting says: OFF by
-    // default, and invisible (not just disabled) in the command palette when
-    // off, via checkCallback returning false. Never touches chat when off.
-    this.addCommand({
-      id: "promote-to-task",
-      name: "Promote to task (add to Orchestration Board backlog)",
-      checkCallback: (checking) => {
-        if (!promoteToTaskCommandVisible(this.settings)) return false;
-        if (!checking) withView((v) => void v.cmdPromoteToTask())();
-        return true;
-      },
-    });
-
-    // Orchestration Board open command — invisible in the palette when the flag
-    // is off (checkCallback returns false), mirroring "Promote to task".
-    this.addCommand({
-      id: "open-orchestration-board",
-      name: "Open orchestration board",
-      checkCallback: (checking) => {
-        if (!this.settings.orchestrationEnabled) return false;
-        if (!checking) void this.activateBoard();
-        return true;
-      },
-    });
-
-    // Ribbon icon (added/removed on flag toggle). Establishes the baseline for
-    // the current flag state so a later toggle in settings re-syncs correctly.
-    this.orchestrationApplied = this.settings.orchestrationEnabled;
-    this.syncBoardRibbon();
-
     this.addCommand({
       id: "open-cockpit",
       name: "Open Cockpit",
@@ -623,9 +530,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      // Orchestration starts HERE, not earlier: before layout-ready a spawn
-      // would race Obsidian's own workspace restore for the sidebar leaf.
-      this.orchestration.sync();
       if (this.settings.cockpitOnStartup && this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE).length === 0) {
         void this.openCockpit();
       }
@@ -819,10 +723,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     await activateChatView(this);
   }
 
-  async activateBoard(): Promise<void> {
-    await activateBoardView(this);
-  }
-
   async activateHub(tab?: HubTab): Promise<void> {
     await activateHubView(this, tab);
   }
@@ -847,32 +747,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       await leaf.setViewState({ type: COCKPIT_VIEW_TYPE, active: true });
     }
     await workspace.revealLeaf(leaf);
-  }
-
-  /** Add or remove the board ribbon icon so it matches the flag exactly. */
-  private syncBoardRibbon(): void {
-    if (this.settings.orchestrationEnabled) {
-      this.boardRibbonEl ??= this.addRibbonIcon(BOARD_ICON, "Open orchestration board", () => void this.activateBoard());
-    } else if (this.boardRibbonEl) {
-      this.boardRibbonEl.remove();
-      this.boardRibbonEl = null;
-    }
-  }
-
-  /**
-   * React to an `orchestrationEnabled` toggle (called from `saveSettings`), with
-   * no reload: `orchestration.sync()` starts or stops the runtime, the ribbon
-   * and the palette command follow the flag, and a hot-disable also detaches any
-   * open board leaf. Running conversations survive as normal chats; no markdown
-   * is touched either way.
-   */
-  private applyOrchestrationToggle(): void {
-    const now = this.settings.orchestrationEnabled;
-    if (now === this.orchestrationApplied) return;
-    this.orchestrationApplied = now;
-    this.syncBoardRibbon();
-    this.orchestration.sync();
-    if (!now) for (const leaf of this.app.workspace.getLeavesOfType(BOARD_VIEW_TYPE)) leaf.detach();
   }
 
   /**
@@ -952,59 +826,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   /**
-   * Convo-state notification — modeled on `noteVaultWrite()` above: synchronous,
-   * in-memory, and unable to block, delay, or throw back into a chat turn (the
-   * channel guards on `orchestrationEnabled` and try/catches every listener). The
-   * ChatView hook sites call THIS at the exact points they already flip
-   * `streaming` / open a pending card / stop, so a board crash is invisible to
-   * chat and toggling the flag off makes it a strict no-op.
-   */
-  emitConvoState(convoId: string, state: ConvoState, detail?: { reason?: ConvoStateReason }): void {
-    this.convoState.emit(convoId, state, detail);
-  }
-
-  /** Register a convo-state listener (the board driver). Returns an unsubscribe
-   *  handle. Listeners never influence chat — throwing is swallowed. */
-  onConvoState(listener: ConvoStateListener): Unsubscribe {
-    return this.convoState.subscribe(listener);
-  }
-
-  /**
-   * Read API for board reconciliation (workstream B5): given a convo id, report
-   * whether it still exists in the live view and whether it's mid-turn / waiting
-   * on input. Returns `{ exists: false }` when the view isn't open or the convo
-   * is gone. Pure read — never mutates chat state.
-   */
-  readConvoState(convoId: string): { exists: boolean; streaming: boolean; hasPending: boolean } {
-    return convoBridge.chatView(this.app)?.readConvoState(convoId) ?? { exists: false, streaming: false, hasPending: false };
-  }
-
-  /**
-   * Plugin-level wrapper around `ChatView.listSessionSnapshots` for the
-   * Orchestration Board's Session Cockpit: project the open ChatView's live
-   * conversations into UI-free snapshots. Returns `[]` when no ChatView leaf is
-   * open (the documented "leaf open" scope boundary). Pure read.
-   */
-  listSessionSnapshots(): SessionSnapshot[] {
-    return convoBridge.chatView(this.app)?.listSessionSnapshots() ?? [];
-  }
-
-  /**
    * Set/clear a conversation's archived flag (Session Cockpit U6). Returns false
    * when no ChatView leaf is open or the convo id is unknown.
    */
   setConvoArchived(convoId: string, archived: boolean): boolean {
     return convoBridge.chatView(this.app)?.setConvoArchived(convoId, archived) ?? false;
-  }
-
-  /** Set a conversation's manually-assigned board column (Session Cockpit drag). */
-  setConvoBoardStatus(convoId: string, status: SessionLane): boolean {
-    return convoBridge.chatView(this.app)?.setConvoBoardStatus(convoId, status) ?? false;
-  }
-
-  /** The board × action: archive a conversation and close its sidebar tab. */
-  archiveAndCloseTab(convoId: string): boolean {
-    return convoBridge.chatView(this.app)?.archiveAndCloseTab(convoId) ?? false;
   }
 
   /** Reconnect MCP servers on the active Exo session (Connections pane). Respawns
@@ -1023,7 +849,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /**
    * Make sure a ChatView leaf EXISTS without revealing or focusing anything —
    * the background counterpart to `activateView`. Spawning is a system action
-   * (the orchestrator consuming its queue), so it must never move the UI; only
+   * (a scheduled prompt starting), so it must never move the UI; only
    * an explicit user action (`revealConversation`) may reveal. The leaf is
    * created inactive in the right sidebar; the sidebar stays collapsed.
    */
@@ -1035,34 +861,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   /**
-   * Plugin-level wrapper around `ChatView.startTaskConversation` for callers that
-   * don't hold the view (e.g. the Orchestration Board driver). Spawns a fresh
-   * conversation seeded with `prompt` WITHOUT revealing Exo or stealing focus
-   * (2026-07-08: was `activateView`, which yanked the sidebar open on every
-   * queued-task start). The view is created hidden on demand; if it still can't
-   * be resolved it returns "".
-   */
-  async startTaskConversation(prompt: string, opts?: { model?: string; parent?: string }): Promise<string> {
-    await this.ensureChatView();
-    return convoBridge.chatView(this.app)?.startTaskConversation(prompt, opts) ?? "";
-  }
-
-  /** Child-reporting bridges for the Orchestration Board driver: read a child's
-   *  last answer for the excerpt, and hand a finished child's report to its
-   *  parent conversation. Both no-op when no ChatView is mounted — there is
-   *  then no conversation to read from or deliver to. */
-  lastAssistantTextOf(convoId: string): string {
-    return convoBridge.chatView(this.app)?.lastAssistantTextOf(convoId) ?? "";
-  }
-  deliverChildReport(report: ChildReport): void {
-    convoBridge.chatView(this.app)?.deliverChildReport(report);
-  }
-
-  /**
-   * Plugin-level wrapper around `ChatView.revealConversation` for the
-   * Orchestration Board: reveal Exo (in the sidebar) and focus the tab holding
-   * `convoId`, so clicking a board card jumps to that task's chat. Creates the
-   * view on demand. Returns false if the convo can't be found. Pure reveal —
+   * Plugin-level wrapper around `ChatView.revealConversation` for the Chats
+   * sidebar: reveal Exo (in the sidebar) and focus the tab holding `convoId`.
+   * Creates the view on demand. Returns false if the convo can't be found. Pure reveal —
    * never spawns a conversation.
    */
   async revealConversation(convoId: string): Promise<boolean> {
@@ -1872,9 +1673,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   async saveSettings(): Promise<void> {
     const snapshot = JSON.parse(JSON.stringify(this.settings)) as MVASettings;
     await this.settingsWriteQueue.enqueue(() => this.saveData(snapshot));
-    // React to an orchestration-flag toggle: add/remove the ribbon and tear the
-    // board down on hot-disable (safe — no markdown touched, chats survive).
-    this.applyOrchestrationToggle();
   }
 
   private convoFile(base = "conversations.json"): string {
@@ -2328,7 +2126,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   onunload(): void {
     this.unloaded = true;
-    this.orchestration.stop();
     this.proposalAbort.abort();
     const cancelIdle = (window as unknown as {
       cancelIdleCallback?: (h: number) => void;
@@ -2367,7 +2164,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }> {
     const pulseState = this.settings.dailyPulseReviewState;
     const generated = await generateAndWriteDailyPulse({
-      taskStore: this.taskStore,
       loadLoops: async () => {
         const file = this.app.vault.getAbstractFileByPath(this.paths.openLoops);
         if (!(file instanceof TFile)) return [];
@@ -2520,10 +2316,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
 
   private async openDailyPulseTarget(params: Record<string, string>): Promise<void> {
     switch (params.target) {
-      case "task":
-        if (this.settings.orchestrationEnabled) await this.activateBoard();
-        else await this.app.workspace.openLinkText(this.paths.tasks, "", "tab");
-        return;
       case "loop":
         await this.app.workspace.openLinkText(this.paths.openLoops, "", "tab");
         return;
@@ -2860,7 +2652,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *
    * This is what makes the `propose` tier worth having: instead of reading a
    * report and re-doing the work by hand, the run's conclusions land in the
-   * existing proposals inbox with one-click accept (tasks, playbooks), while
+   * existing proposals inbox with one-click accept (playbooks), while
    * loops and decisions are recorded directly, all through the same validated,
    * deduplicated channel as every other producer.
    *

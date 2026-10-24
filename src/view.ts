@@ -32,7 +32,6 @@ import {
   type ObsidianToolOpts,
   type RethinkRequest,
 } from "./obsidian/tools";
-import { adaptAppToTaskVault, createBacklogTask } from "./obsidian/task-store";
 import { browserBridgeFor } from "./obsidian/browser-controller";
 import { AgentFolder, type BlockWrite } from "./obsidian/agent-folder";
 import { BootPreambleCache } from "./obsidian/memory";
@@ -52,14 +51,12 @@ import { NoteDiffModal } from "./ui/note-diff";
 import { addTurnCheckpointActions, checkpointVaultFor, type TurnCheckpointHolder } from "./ui/turn-checkpoint-ui";
 import { forkMessages, renderForkedFrom } from "./ui/fork-link";
 import { retitleWithNotice } from "./ui/chat-commands";
-import { clearChildBlock, resetAgentChain, stopChildren, surfaceChildBlock, wakeParent } from "./ui/delegation";
-import { PARENT_STOPPED, spawnCancelledByStop } from "./core/delegation";
+import { resetAgentChain } from "./ui/delegation";
 import { addBuildInNewChat, renderImplementedLink } from "./ui/plan-handoff";
 import { captureTurnCheckpoint } from "./obsidian/turn-checkpoint";
 import { RecapPanel } from "./ui/recap";
 import { buildRecap as buildConvoRecap } from "./core/recap";
 import { assembleContext, formatContextDebug, selectUnchangedPaths } from "./core/context-assembly";
-import type { SessionSnapshot, SessionLane } from "./core/session-cards";
 import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
 import { clickable } from "./ui/dom";
@@ -116,20 +113,12 @@ import {
   countSurvivingRetirees,
   pinnedFirst,
   nextFocusAfterRemoval,
-  stripAfterChildSpawn,
 } from "./core/working-set";
 import type { TabAgents, TabVM, TabFacts } from "./core/working-set";
 import { chooseDensity } from "./core/strip-density";
 import type { StripDensity } from "./core/strip-density";
 import type { ChatRowSource } from "./core/chat-rows";
 import { planProgress } from "./core/thread-lifecycle";
-import {
-  drainReportsForParent,
-  lastAssistantText,
-  queueReportForParent,
-  reviveChildReports,
-  type ChildReport,
-} from "./core/child-reports";
 import { isAiTitleDue } from "./core/title";
 import { canAutoTitle, applyRename } from "./core/title-ownership";
 import { projectDirName, resumableFrom } from "./core/resume-status";
@@ -149,7 +138,6 @@ import {
 import { workingAffordance } from "./core/working-visibility";
 import { advanceBoundary } from "./core/stream-scan";
 import { mergeTouched, WRITE_TOOLS } from "./core/touched";
-import { terminalConvoState } from "./core/convo-state";
 import { allowKey, permArgText, permRuleLine, decidePermission } from "./core/permissions";
 import { describeCliFailure, isCliAuthFailure } from "./core/errors";
 import { isReadOnlyExternalTool } from "./core/headless-tools";
@@ -479,7 +467,6 @@ export class ChatView extends ItemView {
     }, 120, true);
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => refreshForLeafChange()));
     this.register(() => refreshForLeafChange.cancel());
-    this.register(this.plugin.onConvoState((e) => surfaceChildBlock(this, e)));
     // Resizing the pane can flip a short transcript into overflow (or back) without
     // any content change — keep the tail "Related" section in sync with that too.
     // Debounced: a drag emits a continuous stream of resize ticks, and each tail
@@ -743,13 +730,11 @@ export class ChatView extends ItemView {
       // always render into the conversation that owns this session.
       askBridge: (qs) => this.askBridge(c, qs),
       rethinkBridge: (req) => this.rethinkBridge(c, req),
-      // The plugin's ONE shared write-queues, so tool writes serialize against
-      // the board and the loops ledger (w1-1 contract).
-      tasksWriteQueue: this.plugin.tasksWriteQueue,
+      // The plugin's ONE shared write-queue, so tool writes serialize against
+      // the loops ledger (w1-1 contract).
       loopsWriteQueue: this.plugin.loopsWriteQueue,
-      orchestrationEnabled: s.orchestrationEnabled, // gates add_task
       paths: this.plugin.paths,
-      parentConvoId: c.id, // gates spawn_task
+      convoId: c.id, // gates the chat tools
       browserBridge: browserBridgeFor(this.plugin, c.id), // undefined when off/mobile
     };
     const obsidianServer = useObsidian ? createObsidianToolServer(this.app, toolOpts) : undefined;
@@ -776,7 +761,6 @@ export class ChatView extends ItemView {
         const all = buildObsidianTools(this.app, {
           ...toolOpts,
           memory: this.memoryCaps(readOnlySandbox),
-          orchestrationEnabled: s.orchestrationEnabled && !readOnlySandbox,
         });
         b.bridge.setTools(codexSessionToolset(all, readOnlySandbox, OBSIDIAN_READ_TOOLS));
         codexBridge = {
@@ -946,7 +930,7 @@ export class ChatView extends ItemView {
     header.createDiv({ cls: "mva-spacer" });
 
     // Apps menu — the single entry point for Exo's side surfaces (Cockpit,
-    // Connections, Board). These live here, not in the global Obsidian ribbon.
+    // Connections). These live here, not in the global Obsidian ribbon.
     const apps = header.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "Apps" } });
     setIcon(apps, "hi-puzzle");
     setTooltip(apps, "Apps");
@@ -955,9 +939,6 @@ export class ChatView extends ItemView {
       menu.addItem((i) => i.setTitle("Chats").setIcon("hi-messages").onClick(() => void this.plugin.activateChats()));
       menu.addItem((i) => i.setTitle("Cockpit").setIcon("hi-dashboard-speed").onClick(() => void this.plugin.openCockpit()));
       menu.addItem((i) => i.setTitle("Capabilities").setIcon("hi-puzzle").onClick(() => void this.plugin.activateHub()));
-      if (this.plugin.settings.orchestrationEnabled) {
-        menu.addItem((i) => i.setTitle("Orchestration board").setIcon("hi-workflow").onClick(() => void this.plugin.activateBoard()));
-      }
       menu.showAtMouseEvent(e);
     };
 
@@ -1027,8 +1008,8 @@ export class ChatView extends ItemView {
     const live = (await this.plugin.loadConversations()) as ConvoData[];
     const archivedRaw = (await this.plugin.loadArchivedConversations()) as ConvoData[];
     // Merge the live store with the separate, untrimmed archive store. Archived
-    // chats carry archived:true — present (retrievable) but hidden by the board
-    // from active lanes. A missing/corrupt archive file just yields no archives.
+    // chats carry archived:true — present (retrievable) but hidden from
+    // the active lists. A missing/corrupt archive file just yields no archives.
     const raw = [
       ...(Array.isArray(live) ? live : []),
       ...(Array.isArray(archivedRaw) ? archivedRaw : []),
@@ -1062,15 +1043,12 @@ export class ChatView extends ItemView {
         pinned: d.pinned === true,
         retiredAt: d.retiredAt,
         lastActiveAt: d.lastActiveAt,
-        boardStatus: d.boardStatus,
         snoozedUntil: d.snoozedUntil,
         snoozedAt: d.snoozedAt,
         settledOverride: d.settledOverride,
         settledAt: d.settledAt,
         unsettledAt: d.unsettledAt,
-        parentConvoId: d.parentConvoId,
         forkedFrom: d.forkedFrom,
-        pendingChildReports: reviveChildReports(d.pendingChildReports),
         titleLocked: d.titleLocked === true,
         readIndex: d.readIndex, // the read position: absent = never read (core/reentry)
         provider,
@@ -1144,16 +1122,10 @@ export class ChatView extends ItemView {
       ...(c.pinned === true ? { pinned: true } : {}),
       ...(c.retiredAt ? { retiredAt: c.retiredAt } : {}),
       ...(c.lastActiveAt ? { lastActiveAt: c.lastActiveAt } : {}),
-      ...(c.boardStatus ? { boardStatus: c.boardStatus } : {}),
       ...(c.snoozedUntil ? { snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt } : {}),
       ...(c.settledOverride ? { settledOverride: c.settledOverride, settledAt: c.settledAt } : {}),
       ...(c.unsettledAt ? { unsettledAt: c.unsettledAt } : {}),
-      ...(c.parentConvoId ? { parentConvoId: c.parentConvoId } : {}),
       ...(c.forkedFrom ? { forkedFrom: c.forkedFrom } : {}),
-      // Capped at the queue itself (core/child-reports), so this writes exactly
-      // what the parent is holding. An unread child report that did not survive
-      // the reload left the sidebar advertising news it could never deliver.
-      ...(c.pendingChildReports?.length ? { pendingChildReports: c.pendingChildReports } : {}),
       ...(c.titleLocked ? { titleLocked: true } : {}),
       ...(c.readIndex !== undefined ? { readIndex: c.readIndex } : {}), // 0 is a position, not an absence
       ...(c.harvestedIndex !== undefined ? { harvestedIndex: c.harvestedIndex } : {}), // memory harvest watermark
@@ -1968,34 +1940,6 @@ export class ChatView extends ItemView {
     this.compactActive();
   }
 
-  /** "Promote to task" (flag-gated in main.ts, only registered when
-   *  `orchestrationEnabled` is true): take the active conversation's last user
-   *  message and create a `backlog` task from it, through the SAME task-store
-   *  path (`createBacklogTask` + the plugin's shared `tasksWriteQueue`) the
-   *  `add_task` chat tool uses — never a direct vault write. Scope kept
-   *  minimal per the board design: no new UI, just the simplest reuse of the
-   *  existing quick-add/task-store path. */
-  async cmdPromoteToTask(): Promise<void> {
-    const lastUser = [...this.active.messages].reverse().find((m): m is Extract<Message, { role: "user" }> =>
-      m.role === "user" && !m.auto && m.text.trim().length > 0
-    );
-    if (!lastUser) {
-      new Notice("No user message in this conversation to promote yet.");
-      return;
-    }
-    const vault = adaptAppToTaskVault(this.app);
-    const title = lastUser.text.trim().split("\n")[0].slice(0, 80);
-    try {
-      const entry = await createBacklogTask(vault, this.plugin.tasksWriteQueue, {
-        title,
-        prompt: lastUser.text.trim(),
-      });
-      new Notice(`Added to Backlog: ${entry.title}`);
-    } catch (e) {
-      new Notice(`Couldn't create the task: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
   /**
    * Open a fresh conversation (new tab, current default provider/model) seeded
    * with `text`. When `autoSend` is true the query is dispatched immediately;
@@ -2019,7 +1963,7 @@ export class ChatView extends ItemView {
 
   /** An external prompt (askExo): fills the open chat while it is still
    *  untouched instead of leaving it behind as an empty tab, else opens a new
-   *  one. Task spawns keep `askInNewConversation`: they need a NEW chat back. */
+   *  one. */
   askInFreshChat(text: string, autoSend = true, sendPrefix?: string): string {
     const q = text.trim();
     if (!q) return "";
@@ -2047,118 +1991,26 @@ export class ChatView extends ItemView {
   }
 
   /**
-   * Additive public entry point for the Orchestration Board: spawn a new
-   * conversation seeded with `prompt`, send it immediately, honor an optional
-   * model override (falling back to the settings default), and return the new
-   * convo id. Chat-only — no board coupling.
+   * Spawn a new conversation seeded with `prompt`, send it immediately and
+   * return the new convo id (used by scheduled prompts).
    *
-   * Focus contract (2026-07-08): a task spawn is a background/system action, so
-   * it must not hijack the user's ACTIVE TAB either — `askInNewConversation`
-   * switches to the new convo to seed and send through the composer, so after
-   * the send we switch back to whatever was active before. Parallel
-   * conversations make this safe: the new convo's turn runs per-convo,
-   * independent of which tab is displayed. When there was no prior active
-   * convo (fresh view), the new one simply stays active.
-   *
-   * `opts.parent` marks this as a fan-out CHILD: it is stamped on the new convo
-   * (persisted, drives the sidebar indent) and takes the convo back out of the
-   * tab strip — see `stripAfterChildSpawn` for why the strip is the wrong home
-   * for delegated work. Nothing in the child's first turn reads the stamp, so
-   * writing it after the send is safe.
+   * Focus contract: this is a background action, so it must not hijack the
+   * user's ACTIVE TAB either. `askInNewConversation` switches to the new convo
+   * to seed and send through the composer, so after the send we switch back to
+   * whatever was active before. Parallel conversations make this safe: the new
+   * convo's turn runs per-convo, independent of which tab is displayed. When
+   * there was no prior active convo (fresh view), the new one simply stays active.
    */
-  startTaskConversation(prompt: string, opts?: { model?: string; parent?: string }): string {
-    if (opts?.parent && spawnCancelledByStop(this.allConvos().find((c) => c.id === opts.parent), Date.now())) throw new Error(PARENT_STOPPED);
+  startTaskConversation(prompt: string): string {
     const prev = this.active ?? null;
-    const id = this.askInNewConversation(prompt, true, opts);
+    const id = this.askInNewConversation(prompt, true);
     if (id && prev && prev.id !== id && this.convos.includes(prev)) this.switchTo(prev);
-    const child = id ? this.allConvos().find((c) => c.id === id) : undefined;
-    if (child && opts?.parent) {
-      child.parentConvoId = opts.parent;
-      const strip = stripAfterChildSpawn(this.openTabs, child.id, this.active.id);
-      if (strip !== this.openTabs) {
-        this.openTabs = [...strip];
-        this.renderTabs();
-        this.persistTabs();
-      }
-      this.persist();
-    }
     return id;
   }
 
   /**
-   * Read API for board reconciliation (workstream B5): report whether a convo
-   * still exists in this view and whether it's mid-turn / waiting on input.
-   * Pure read — never mutates chat state.
-   */
-  readConvoState(convoId: string): { exists: boolean; streaming: boolean; hasPending: boolean } {
-    const c = this.convos.find((x) => x.id === convoId) ?? (this.active?.id === convoId ? this.active : undefined);
-    if (!c) return { exists: false, streaming: false, hasPending: false };
-    return { exists: true, streaming: c.streaming, hasPending: !!(c.pendingPerm || c.pendingAsk) };
-  }
-
-  /** Last assistant text of a conversation, for a child report's excerpt.
-   *  Empty when the convo is gone or has said nothing yet. */
-  lastAssistantTextOf(convoId: string): string {
-    const c = this.allConvos().find((x) => x.id === convoId);
-    return c ? lastAssistantText(c.messages) : "";
-  }
-
-  /** Queue a finished child's report onto its parent and wake the parent: a
-   *  turn now, or right after the one in flight (whose outbound is already
-   *  built). A report whose parent no longer exists is dropped by
-   *  `queueReportForParent`, which is correct. */
-  deliverChildReport(report: ChildReport): void {
-    const parent = queueReportForParent(this.allConvos(), report);
-    if (!parent) return;
-    parent.unread = true;
-    this.refreshTabs();
-    this.persist();
-    wakeParent(this, parent, report.outcome); // T3: a child's report wakes its parent, no polling
-  }
-
-  /**
-   * Read API for the Session Cockpit (Session Cockpit plan, U2): project every
-   * live conversation into a UI-free `SessionSnapshot` the board turns into
-   * session-cards. The active convo isn't guaranteed to be in `convos` (it's
-   * pushed lazily in several paths), so it's folded in — mirroring the serialize
-   * idiom — else the chat most likely to be running would be silently dropped.
-   * Pure read; never mutates chat state. `poisoned` is best-effort from
-   * `resumeRisky` (the durable "last turn ended poisoned" hint; the transient
-   * in-turn `poisoned` local is not kept on the Convo). The lane derivation
-   * itself lives in the pure `deriveLane` (core/session-cards), not here.
-   */
-  listSessionSnapshots(): SessionSnapshot[] {
-    // Scope to the OPEN chats (tabs) + the active one + anything currently
-    // running or waiting on input — the "parallel chats I'm working with", NOT
-    // the whole persisted history (`this.convos` holds every stored conversation,
-    // dozens of them, which floods the board). Running/pending convos are shown
-    // even if their tab is closed, so a background turn is never invisible.
-    const openIds = new Set(this.openTabs);
-    if (this.active) openIds.add(this.active.id);
-    return this.convos
-      .filter(
-        (c) => openIds.has(c.id) || c.streaming || c.pendingPerm != null || c.pendingAsk != null,
-      )
-      .map((c) => ({
-      id: c.id,
-      title: c.title,
-      streaming: c.streaming,
-      pendingPerm: c.pendingPerm != null,
-      pendingAsk: c.pendingAsk != null,
-      poisoned: !!c.resumeRisky,
-      stopped: c.stopped,
-      hasMessages: c.messages.length > 0,
-      archived: !!c.archived,
-      boardStatus: c.boardStatus,
-      updatedAt: c.updatedAt,
-    }));
-  }
-
-  /**
-   * Every stored conversation, adapted for the chats sidebar. Deliberately NOT
-   * `listSessionSnapshots` above, which is scoped to open tabs plus whatever is
-   * running because the board would drown in the full history — the sidebar
-   * wants exactly the opposite. Filtering (archived, idle husks) belongs to
+   * Every stored conversation, adapted for the chats sidebar. Filtering
+   * (archived, idle husks) belongs to
    * `buildChatList` (core/chat-rows), not here: this reports facts, the pure
    * core decides what to show. `provider` carries the display name, not the
    * id, so the sidebar can render it as text without importing `ADAPTERS`.
@@ -2176,14 +2028,9 @@ export class ChatView extends ItemView {
       open: open.has(c.id),
       pinned: c.pinned === true,
       messageCount: c.messages.filter((m) => m.role === "user" && !m.auto).length,
-      parentConvoId: c.parentConvoId,
       // "Finished while you were elsewhere", with no new persisted state:
-      // lastActiveAt moves on focus, updatedAt on every turn. Active excluded —
-      // except for a parent holding an undelivered child report, which is news
-      // you have not read whether or not the tab is in front of you.
-      unseen:
-        (c.pendingChildReports?.length ?? 0) > 0 ||
-        (c !== this.active && (c.updatedAt ?? 0) > (c.lastActiveAt ?? 0)),
+      // lastActiveAt moves on focus, updatedAt on every turn. Active excluded.
+      unseen: c !== this.active && (c.updatedAt ?? 0) > (c.lastActiveAt ?? 0),
       streaming: c.streaming,
       pendingPerm: c.pendingPerm != null,
       pendingAsk: c.pendingAsk != null,
@@ -2199,7 +2046,6 @@ export class ChatView extends ItemView {
       // put away on a shelf; `focused` is what says which one that is.
       focused: c === this.active,
       lastActiveAt: c.lastActiveAt,
-      pendingReport: (c.pendingChildReports?.length ?? 0) > 0,
       planProgress: c.streaming ? (planProgress(c.messages) ?? undefined) : undefined,
       snoozedUntil: c.snoozedUntil, snoozedAt: c.snoozedAt,
       settledOverride: c.settledOverride, settledAt: c.settledAt, unsettledAt: c.unsettledAt,
@@ -2208,9 +2054,8 @@ export class ChatView extends ItemView {
   }
 
   /**
-   * Set or clear the archived flag on a conversation and persist. Used by the
-   * board's Session Cockpit archive / un-archive actions (U6). Archiving hides
-   * the chat from the board's active lanes and moves it to the separate
+   * Set or clear the archived flag on a conversation and persist. Archiving
+   * hides the chat from the active lists and moves it to the separate
    * untrimmed store; it stays open in the chat gallery. Returns false if the
    * convo id isn't found.
    */
@@ -2220,10 +2065,10 @@ export class ChatView extends ItemView {
       (this.active?.id === convoId ? this.active : undefined);
     if (!c) return false;
     // `setStreaming` un-archives on turn start under the rule "never leave a
-    // live, token-burning turn invisible on the board" — but it only enforced
+    // live, token-burning turn invisible" — but it only enforced
     // that on the way IN. Archiving mid-stream is the same violation from the
     // other side: this path never drops the session, so the turn keeps running
-    // and keeps spending while its card is filtered out of every board lane,
+    // and keeps spending while its chat is filtered out of every active list,
     // and `setStreaming(c, true)` will not fire again to bring it back. Refuse,
     // like the other conversation-mutating commands that decline mid-turn
     // (compactActive, rewindTo, handleGoalCommand, resumeGoalLoop,
@@ -2278,19 +2123,6 @@ export class ChatView extends ItemView {
     return true;
   }
 
-  /** Set the manually-assigned board column for a conversation (Session Cockpit
-   *  drag) and persist. Running/needs-input still auto-override at render time.
-   *  Returns false if the convo id isn't found. */
-  setConvoBoardStatus(convoId: string, status: SessionLane): boolean {
-    const c =
-      this.convos.find((x) => x.id === convoId) ??
-      (this.active?.id === convoId ? this.active : undefined);
-    if (!c) return false;
-    c.boardStatus = status;
-    this.persist();
-    return true;
-  }
-
   /** Rename a conversation; `applyRename` (core/title-ownership) owns the lookup-and-lock rule. */
   renameConversation(id: string, title: string): boolean {
     const c = applyRename(this.convos, this.active, id, title);
@@ -2301,41 +2133,13 @@ export class ChatView extends ItemView {
     return true;
   }
 
-  /** The board × action: archive a conversation AND close its sidebar tab. The
-   *  card leaves the board, the tab closes, and the chat is kept in the separate
-   *  archive store (retrievable via "Show archived"). Returns false if not found. */
-  archiveAndCloseTab(convoId: string): boolean {
-    const c =
-      this.convos.find((x) => x.id === convoId) ??
-      (this.active?.id === convoId ? this.active : undefined);
-    if (!c) return false;
-    c.archived = true;
-    // closeTab frees the session, switches active if needed, and persists (→ the
-    // archive store). For a convo that isn't an open tab, persist directly.
-    if (this.openTabs.includes(c.id)) {
-      // `closeTab` stamps `retiredAt` itself now, so this gesture and the board's
-      // archive toggle (setConvoArchived, which does not route through closeTab
-      // and keeps its own stamp) still agree on what "left the strip" means.
-      this.closeTab(c);
-    } else {
-      // Same obligation as setConvoArchived above: `archived` is a fact the
-      // strip now reads through the counter, even for a chat that has no tab,
-      // so this branch owes a repaint it never used to.
-      this.renderTabs();
-      this.persist();
-    }
-    return true;
-  }
-
   /**
-   * Additive public selector for the Orchestration Board (workstream B5): make
-   * the conversation with `convoId` the active tab, so clicking a board card
-   * focuses that task's chat. Returns true if the convo was found and revealed,
-   * false otherwise (e.g. the recorded convo no longer exists). Pure reveal —
-   * never spawns or mutates a conversation; it reuses the existing `switchTo`
-   * path (which lazily builds the transcript DOM and opens the tab). Kept
-   * additive: no existing caller relies on it, so ChatView's structure is
-   * untouched.
+   * Make the conversation with `convoId` the active tab, so clicking a row in
+   * the Chats sidebar focuses that chat. Returns true if the convo was found
+   * and revealed, false otherwise (e.g. the recorded convo no longer exists).
+   * Pure reveal — never spawns or mutates a conversation; it reuses the
+   * existing `switchTo` path (which lazily builds the transcript DOM and opens
+   * the tab).
    */
   revealConversation(convoId: string): boolean {
     if (this.active?.id === convoId) {
@@ -2453,7 +2257,7 @@ export class ChatView extends ItemView {
    * remain — exactly like the close-tab flow.
    */
   deleteConversation(id: string): boolean {
-    // Same active fallback as `setConvoArchived` / `archiveAndCloseTab` /
+    // Same active fallback as `setConvoArchived` /
     // `applyRename`: the active convo is not always in `convos` (several paths
     // push it lazily), and `listChatRows` reads `allConvos()`, so the sidebar
     // can offer a row this lookup would miss. Without it, deleting the active
@@ -4089,7 +3893,6 @@ export class ChatView extends ItemView {
       allow: () => settle({ behavior: "allow" }),
       deny: () => settle({ behavior: "deny", message: "Denied by user." }),
     };
-    this.plugin.emitConvoState(c.id, "needs-input", { reason: "perm" }); // fire-and-forget board hook (no-op when off; can't throw)
     actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Allow once" }).onclick = () =>
       settle({ behavior: "allow" });
     const alwaysBtn = actions.createEl("button", { cls: "mva-btn", text: "Always allow" });
@@ -4184,7 +3987,6 @@ export class ChatView extends ItemView {
 
     // Stop cancels the open card (provider side already unblocked via interrupt).
     this.setPendingCard(c, "perm", () => finish(false, { behavior: "deny", message: "Stopped." }));
-    this.plugin.emitConvoState(c.id, "needs-input", { reason: "perm" }); // fire-and-forget board hook (no-op when off; can't throw)
 
     const actions = card.createDiv({ cls: "mva-plan-actions" });
     // Restore the pre-plan permission mode so subsequent build actions are
@@ -4306,7 +4108,6 @@ export class ChatView extends ItemView {
       this.closeCard(ctx); // cancelled (Stop / teardown) → release the slot
       reject(new Error("cancelled"));
     });
-    this.plugin.emitConvoState(c.id, "needs-input", { reason: "ask" }); // fire-and-forget board hook (no-op when off; can't throw)
 
     const selections = questions.map(() => new Set<string>());
     const maybeSubmit = () => {
@@ -4613,9 +4414,8 @@ export class ChatView extends ItemView {
     c.streaming = on;
     if (on) {
       // A resumed turn on an archived chat auto-un-archives it (Session Cockpit
-      // R6): never leave a live, token-burning turn invisible on the board.
+      // R6): never leave a live, token-burning turn invisible.
       if (c.archived) c.archived = false;
-      this.plugin.emitConvoState(c.id, "turn-start"); // fire-and-forget board hook (no-op when off; can't throw)
     }
     if (c === this.active) this.syncSendButton();
     this.refreshAgentIndicators(); // per-tab streaming dot + agent counts + pinned chip
@@ -4646,12 +4446,9 @@ export class ChatView extends ItemView {
     // and this is the one place every close path goes through — a verdict, a
     // Stop, the turn teardown — so clearing it here is what stops a sidebar row
     // holding a live Allow button over a prompt that is already answered.
-    const wasOpen = kind === "perm" ? c.pendingPerm : c.pendingAsk;
     if (kind === "perm") c.pendingPerm = cancel;
     else c.pendingAsk = cancel;
     if (kind === "perm" && !cancel) c.pendingDecision = null;
-    if (!cancel) clearChildBlock(c.id); // its card in the parent, if it is a delegated child
-    if (!cancel && wasOpen && c.streaming && !c.stopped) this.plugin.emitConvoState(c.id, "turn-start"); // answered: the turn goes on, the board task with it
     this.refreshTabs();
   }
 
@@ -4763,19 +4560,6 @@ export class ChatView extends ItemView {
     if (e.key === "Escape") this.closeAgentPopover();
   };
 
-  /**
-   * Terminal convo-state hook, fired once from `runTurn`'s `finally`. Maps the
-   * turn's end state to the board vocabulary: user-stopped → `stopped`;
-   * errored/poisoned → `needs-input` (reason `error`); otherwise a clean
-   * `turn-end` (→ Review). A thin pass-through to the plugin channel, which is
-   * already flag-guarded and try/catches every listener — so this cannot throw,
-   * block, or slow the turn, and is a strict no-op when orchestration is off.
-   */
-  private emitTurnTerminal(c: Convo, poisoned: boolean): void {
-    const { state, reason } = terminalConvoState({ stopped: c.stopped, poisoned });
-    this.plugin.emitConvoState(c.id, state, reason ? { reason } : undefined);
-  }
-
   stop(source: "esc" | "button" = "button", c: Convo = this.active): void {
     // `stopped` resets at turn start, so true here means a PRIOR stop this turn
     // hasn't settled it YET. That alone isn't proof of a stuck session — a
@@ -4791,7 +4575,6 @@ export class ChatView extends ItemView {
     this.renderQueue(c);
     c.pendingPerm?.(); // cancel any open permission card
     c.pendingAsk?.(); // cancel any open ask card
-    stopChildren(this, c); // the stop reaches every chat this one delegated to
     if (action === "dispose") {
       this.dropSession(c, "stop-escalation");
       new Notice("Exo — session force-reset");
@@ -5229,7 +5012,7 @@ export class ChatView extends ItemView {
     // new turn's own row can legitimately exist from here.
     c.listEl.querySelectorAll(".mva-working").forEach((el) => el.remove());
     // Stopped while still preparing (recall, vault reads): no model call at all.
-    if (c.stopped) { c.updatedAt = Date.now(); this.refreshTabs(); return void this.plugin.emitConvoState(c.id, "stopped", { reason: "stopped" }); }
+    if (c.stopped) { c.updatedAt = Date.now(); this.refreshTabs(); return; }
     const ctx = this.addAssistantTurn(c, text);
     c.currentCtx = ctx; // target for this conversation's ask_user cards
     this.reconcileLiveTasks(c); // drop orphaned/faded entries before this turn adds new ones
@@ -5742,16 +5525,13 @@ export class ChatView extends ItemView {
       // turn once (the recap itself comes from coldRecap above).
       const compactPrefix = c.pendingSendPrefix;
       if (compactPrefix) c.pendingSendPrefix = undefined;
-      // Finished children report to their parent here, and only here: drained
-      // in the same step it is formatted, so a report rides exactly one turn.
-      const childReports = drainReportsForParent(c);
       const researchMessage = buildResearchOutbound(researchMode, message);
       // The agent binding wraps LAST so its instruction sits closest to the
       // user's text — and, like Research Mode, it never touches the visible or
       // persisted bubble.
       const agentMessage =
         boundAgent && c.provider === "claude" ? buildAgentBindingOutbound(boundAgent, researchMessage) : researchMessage;
-      const outbound = [opts?.sendPrefix, coldRecap, compactPrefix, childReports, recallBlock, agentMessage].filter(Boolean).join("\n\n");
+      const outbound = [opts?.sendPrefix, coldRecap, compactPrefix, recallBlock, agentMessage].filter(Boolean).join("\n\n");
       // A note body counts as
       // "already provided" only once the send that carried it is real.
       if (assembled.injectedContentPaths.length) {
@@ -5966,7 +5746,6 @@ export class ChatView extends ItemView {
           context: opts?.context,
         });
       }
-      this.emitTurnTerminal(c, poisoned); // fire-and-forget board hook (no-op when off; can't throw)
       this.setStreaming(c, false);
       this.persist();
       // Proposal producer: the main response is already rendered and persisted.

@@ -51,11 +51,11 @@ Each surface defines its own tokens, but they draw from one intended scale. The 
 
 Getting the register wrong is the single most common mistake (it's what made the Exo task modal look off-brand). There are exactly three:
 
-**A. Eyebrow — structural section headers.** UPPERCASE, `~11px` / `0.7rem`, weight `600`, `letter-spacing: 0.04–0.06em`, `color: var(--text-muted)`. Used for: board column titles, recap-rail title, tune-dialog section labels (Exo); rail header (TabX, `0.04em`); group headers and the file-type source badge (Sonar, `0.03em`); Bases card property labels (Cosmos, `0.05em`). **Never on a form field label.**
+**A. Eyebrow — structural section headers.** UPPERCASE, `~11px` / `0.7rem`, weight `600`, `letter-spacing: 0.04–0.06em`, `color: var(--text-muted)`. Used for: recap-rail title, tune-dialog section labels (Exo); rail header (TabX, `0.04em`); group headers and the file-type source badge (Sonar, `0.03em`); Bases card property labels (Cosmos, `0.05em`). **Never on a form field label.**
 
 **B. Title — card and heading text.** Weight `640–680`, `letter-spacing: -0.015em to -0.02em` (tight tracking for display). Used for card titles and group headings across Masonry / TabX / Cosmos, and Sonar's preview title (`--font-bold`).
 
-**C. Body & field labels.** Sentence case, native `--font-ui-*` sizes (smaller `~11px`, small `~12–13px`, medium `~14px`), normal weight. **Form-field labels use register C**, not A: `var(--font-ui-smaller)`, `var(--text-muted)`, `4px` bottom margin — this is the `.mva-pv-label` / `.mva-task-modal-label` pattern in Exo. Numbers that align in columns (scores, counts, dates) add `font-variant-numeric: tabular-nums`.
+**C. Body & field labels.** Sentence case, native `--font-ui-*` sizes (smaller `~11px`, small `~12–13px`, medium `~14px`), normal weight. **Form-field labels use register C**, not A: `var(--font-ui-smaller)`, `var(--text-muted)`, `4px` bottom margin — this is the `.mva-pv-label` pattern in Exo. Numbers that align in columns (scores, counts, dates) add `font-variant-numeric: tabular-nums`.
 
 ### The registers as tokens (Exo, 2026-08-11)
 

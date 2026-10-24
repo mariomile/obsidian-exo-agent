@@ -404,8 +404,8 @@ export interface TargetEnv {
  * Notes memory harvest must never write: every AGENTS.md / CLAUDE.md, the agent
  * kernel folder (SOUL/USER/NOW stay governed by `rethink_memory`), and Exo's
  * mechanism files: vault-context, rules, decisions (the user's own records),
- * tasks and orchestration, automations, agent contracts, reports, settled
- * chats, the queue, review and mentions. What stays writable: the user's own
+ * automations, agent contracts, reports, settled chats, the queue, review and
+ * mentions. What stays writable: the user's own
  * notes, preferences and mental model, the open-loops ledger, per-agent
  * memory (`memory/agents/`) and the inbox.
  */
@@ -414,7 +414,6 @@ export function harvestBlocklist(paths: ExoPaths): (path: string) => boolean {
     paths.agentDir,
     paths.rules,
     paths.decisions,
-    paths.orchestration,
     paths.automations,
     paths.agents,
     paths.reports,
@@ -422,7 +421,7 @@ export function harvestBlocklist(paths: ExoPaths): (path: string) => boolean {
     paths.queue,
     paths.mentions,
   ].map((d) => `${d.replace(/\/+$/, "")}/`);
-  const files = new Set([paths.vaultContext, paths.tasks, paths.review]);
+  const files = new Set([paths.vaultContext, paths.review]);
   return (path) => {
     const base = path.split("/").pop() ?? path;
     if (base === "AGENTS.md" || base === "CLAUDE.md") return true;

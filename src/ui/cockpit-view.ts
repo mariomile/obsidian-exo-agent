@@ -1,9 +1,9 @@
 /**
  * Exo Cockpit — the control-center home surface (spec 2026-07-13). A main-pane
  * ItemView: attention strip (what waits for YOU), command bar (type → chat),
- * and six action-first tiles (Loops, Tasks, Autonomy, System, Resume, Health).
- * Same one-way contract as the board: this module imports from main/view;
- * `view.ts` never imports it.
+ * and five action-first tiles (Loops, Autonomy, System, Resume, Health).
+ * One-way contract: this module imports from main/view; `view.ts` never
+ * imports it.
  *
  * All gathering is tolerant — a missing file yields that tile's empty state,
  * never a blocked render. Refresh: on-open, manual button, and a plain 60s
@@ -15,7 +15,6 @@ import { clickable } from "./dom";
 import {
   buildAttention,
   loopRows,
-  taskRows,
   resumeRows,
   previewFromMessages,
   healthRows,
@@ -29,7 +28,6 @@ import { blockPath } from "../obsidian/agent-folder";
 import { parseLoopsFile } from "../core/open-loops";
 import { unreviewedWriteRuns } from "../core/automations";
 import { dailyPulseNeedsReview } from "../core/daily-pulse";
-import { parseTasksFile } from "../core/tasks";
 import {
   autonomyStatuses,
   autonomyActions,
@@ -193,10 +191,9 @@ export class CockpitView extends ItemView {
     this.rendering = true;
     try {
       const now = Date.now();
-      const [loopsRaw, tasksRaw, queuePending, answers, convos, inbox, stateNote, report, unreviewedRuns, proposalPending] =
+      const [loopsRaw, queuePending, answers, convos, inbox, stateNote, report, unreviewedRuns, proposalPending] =
         await Promise.all([
           this.readOr(this.plugin.paths.openLoops, ""),
-          this.readOr(this.plugin.paths.tasks, ""),
           this.plugin.countQueuePending().catch(() => null),
           this.recentAnswers(now),
           this.plugin.loadConversations().catch(() => []),
@@ -256,12 +253,6 @@ export class CockpitView extends ItemView {
       this.tile(grid, "Loops", "target", loops, "No open loops.", {
         label: "open-loops.md",
         onClick: () => void this.app.workspace.openLinkText(this.plugin.paths.openLoops, "", "tab"),
-      });
-
-      const tasks = taskRows(parseTasksFile(tasksRaw));
-      this.tile(grid, "Tasks", "kanban", tasks, "Board is clear.", {
-        label: "open board",
-        onClick: () => this.runCommand("exo-agent:open-orchestration-board"),
       });
 
       this.renderAutonomy(grid, queuePending, now);

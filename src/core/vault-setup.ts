@@ -2,7 +2,7 @@
  * Vault Setup — pure logic (no Obsidian imports).
  *
  * Exo reads and writes a fixed set of paths under its memory root for its
- * memory features (open loops, task board, preferences, cockpit staleness). On a fresh vault none of that exists, so every one of those
+ * memory features (open loops, preferences, cockpit staleness). On a fresh vault none of that exists, so every one of those
  * features silently degrades to empty/inert with no signal to the user that
  * anything is missing. `scaffoldItems(paths)` is the create-only-if-absent
  * list that fixes that; `isVaultSetUp` is the single-file detection check used
@@ -32,7 +32,7 @@ export type ScaffoldKind = "folder" | "file";
  * What the user picks at onboarding (persisted as `settings.memorySetup`):
  *  - `none`    → create nothing; memory features stay inert until the user
  *                opts into setup later. Boot reads CLAUDE.md only.
- *  - `minimal` → the tool's own operational layer (task board, open loops,
+ *  - `minimal` → the tool's own operational layer (open loops,
  *                reports), no marioverse knowledge-OS.
  *  - `full`    → minimal + the marioverse content scaffold (preferences,
  *                vault-context, rules/decisions folders).
@@ -65,7 +65,6 @@ function allScaffoldItems(paths: ExoPaths): ScaffoldItem[] {
     { path: paths.queue, kind: "folder", tier: "mechanism" },
     { path: paths.reports, kind: "folder", tier: "mechanism" },
     { path: paths.openLoops, kind: "file", tier: "mechanism", content: heading("Open loops", "_Nothing tracked yet._") },
-    { path: paths.tasks, kind: "file", tier: "mechanism", content: heading("Tasks", "_Nothing tracked yet._") },
     // ── content (full only): guided templates + the knowledge-OS folders ────
     { path: `${paths.rules}/README.md`, kind: "file", tier: "content", content: FOLDER_README.rules },
     { path: `${paths.decisions}/README.md`, kind: "file", tier: "content", content: FOLDER_README.decisions },

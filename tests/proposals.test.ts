@@ -14,9 +14,9 @@ const DAY = 24 * 60 * 60 * 1000;
 
 function candidate(overrides: Partial<ProposalCandidate> = {}): ProposalCandidate {
   return {
-    kind: "task",
+    kind: "playbook",
     title: "Write release notes",
-    payload: { kind: "task", title: "Write release notes", prompt: "Summarize the shipped changes." },
+    payload: { kind: "playbook", name: "Write release notes", prompt: "Summarize the shipped changes." },
     rationale: "Mario committed to publishing them.",
     ...overrides,
   };
@@ -43,12 +43,12 @@ function record(
 }
 
 describe("parseProposalCandidates", () => {
-  it("parses all four kinds and discards unknown LLM fields", () => {
+  it("parses every kind and discards unknown LLM fields", () => {
     const result = parseProposalCandidates(JSON.stringify([
-      { kind: "task", title: "Task", prompt: "Do it", model: "sonnet", rationale: "Explicit action", ignored: true },
-      { kind: "loop", title: "Follow up", note: "Ask again", resurface: "2028-02-29", tags: ["work"], rationale: "Deferred" },
-      { kind: "decision", title: "Choose A", context: "Options", decision: "A", rationale: "Decided", extra: "drop" },
+      { kind: "loop", title: "Follow up", note: "Ask again", rationale: "Deferred" },
+      { kind: "decision", title: "Choose A", context: "Options", decision: "A", rationale: "Decided" },
       { kind: "playbook", name: "Weekly review", prompt: "Review the week", rationale: "Reusable" },
+      { kind: "playbook", name: "Monthly review", prompt: "Review the month", rationale: "Reusable" },
     ]));
 
     // The limit is intentionally exercised separately: this batch is invalid.
@@ -56,21 +56,14 @@ describe("parseProposalCandidates", () => {
     if (result.status === "invalid") expect(result.errors[0]).toMatchObject({ code: "too_many", path: "$" });
 
     const valid = parseProposalCandidates(JSON.stringify([
-      { kind: "task", title: "Task", prompt: "Do it", model: "sonnet", rationale: "Explicit action", ignored: true },
-      { kind: "loop", title: "Follow up", note: "Ask again", resurface: "2028-02-29", tags: ["work"], rationale: "Deferred" },
+      { kind: "loop", title: "Follow up", note: "Ask again", resurface: "2028-02-29", tags: ["work"], rationale: "Deferred", ignored: true },
       { kind: "decision", title: "Choose A", context: "Options", decision: "A", rationale: "Decided", extra: "drop" },
     ]));
     expect(valid.status).toBe("ok");
     if (valid.status !== "ok") return;
-    expect(valid.value).toHaveLength(3);
-    expect(valid.value[0]).toEqual({
-      kind: "task",
-      title: "Task",
-      payload: { kind: "task", title: "Task", prompt: "Do it", model: "sonnet" },
-      rationale: "Explicit action",
-    });
-    expect(valid.value[1].payload).toEqual({ kind: "loop", title: "Follow up", note: "Ask again", resurface: "2028-02-29", tags: ["work"] });
-    expect(valid.value[2].payload).toEqual({ kind: "decision", title: "Choose A", context: "Options", decision: "A", rationale: "Decided" });
+    expect(valid.value).toHaveLength(2);
+    expect(valid.value[0].payload).toEqual({ kind: "loop", title: "Follow up", note: "Ask again", resurface: "2028-02-29", tags: ["work"] });
+    expect(valid.value[1].payload).toEqual({ kind: "decision", title: "Choose A", context: "Options", decision: "A", rationale: "Decided" });
 
     const playbook = parseProposalCandidates(JSON.stringify([
       { kind: "playbook", name: "Weekly review", prompt: "Review the week", rationale: "Reusable", extra: 1 },
@@ -149,7 +142,7 @@ describe("parseProposalCandidates", () => {
   });
 
   it("accepts one optional markdown fence, but rejects prose or trailing text", () => {
-    const json = JSON.stringify([{ kind: "task", title: "T", prompt: "P", rationale: "R" }]);
+    const json = JSON.stringify([{ kind: "playbook", name: "T", prompt: "P", rationale: "R" }]);
     expect(parseProposalCandidates(`\n\`\`\`json\n${json}\n\`\`\`\n`).status).toBe("ok");
     expect(parseProposalCandidates(`Here you go:\n${json}`).status).toBe("invalid");
     expect(parseProposalCandidates(`${json}\nthanks`).status).toBe("invalid");
@@ -159,18 +152,18 @@ describe("parseProposalCandidates", () => {
     expect(parseProposalCandidates("[]")).toEqual({ status: "ok", value: [] });
     expect(() => parseProposalCandidates("[oops")).not.toThrow();
     expect(parseProposalCandidates("[oops")).toMatchObject({ status: "invalid" });
-    const four = Array.from({ length: 4 }, (_, index) => ({ kind: "task", title: `T${index}`, prompt: "P", rationale: "R" }));
+    const four = Array.from({ length: 4 }, (_, index) => ({ kind: "playbook", name: `T${index}`, prompt: "P", rationale: "R" }));
     expect(parseProposalCandidates(JSON.stringify(four))).toMatchObject({ status: "invalid", errors: [{ code: "too_many" }] });
   });
 
   it("returns typed validation errors for every kind and exact string limits", () => {
     const cases = [
-      { raw: [{ kind: "task", title: "x".repeat(121), prompt: "P", rationale: "R" }], code: "too_long", path: "$[0].title" },
-      { raw: [{ kind: "task", title: "T", prompt: "x".repeat(4001), rationale: "R" }], code: "too_long", path: "$[0].prompt" },
+      { raw: [{ kind: "loop", title: "x".repeat(121), note: "N", rationale: "R" }], code: "too_long", path: "$[0].title" },
+      { raw: [{ kind: "playbook", name: "T", prompt: "x".repeat(4001), rationale: "R" }], code: "too_long", path: "$[0].prompt" },
       { raw: [{ kind: "loop", title: "T", note: "", rationale: "R" }], code: "required", path: "$[0].note" },
       { raw: [{ kind: "decision", title: "T", context: 4, decision: "D", rationale: "R" }], code: "invalid_type", path: "$[0].context" },
       { raw: [{ kind: "playbook", name: "x".repeat(121), prompt: "P", rationale: "R" }], code: "too_long", path: "$[0].name" },
-      { raw: [{ kind: "task", title: "T", prompt: "P", rationale: "x".repeat(501) }], code: "too_long", path: "$[0].rationale" },
+      { raw: [{ kind: "playbook", name: "T", prompt: "P", rationale: "x".repeat(501) }], code: "too_long", path: "$[0].rationale" },
     ];
     for (const testCase of cases) {
       const result = parseProposalCandidates(JSON.stringify(testCase.raw));
@@ -193,8 +186,8 @@ describe("parseProposalCandidates", () => {
 
 describe("fingerprint and dedup", () => {
   it("is deterministic and case/whitespace insensitive across kind, target and content", () => {
-    const a = { kind: "task" as const, title: " Release   Notes ", prompt: "Summarize\n the CHANGES" };
-    const b = { kind: "task" as const, title: "release notes", prompt: " summarize the changes " };
+    const a = { kind: "playbook" as const, name: " Release   Notes ", prompt: "Summarize\n the CHANGES" };
+    const b = { kind: "playbook" as const, name: "release notes", prompt: " summarize the changes " };
     expect(fingerprintProposal(a)).toBe(fingerprintProposal(a));
     expect(fingerprintProposal(a)).toBe(fingerprintProposal(b));
     expect(fingerprintProposal({ ...b, prompt: "Different" })).not.toBe(fingerprintProposal(b));
@@ -225,7 +218,7 @@ describe("pruneProposalRecords", () => {
 describe("formatProposalPreview", () => {
   it("formats a compact, single-line, quiet preview", () => {
     expect(formatProposalPreview(candidate({ rationale: "Explicit\ncommitment   from Mario." }))).toBe(
-      "Task · Write release notes — Explicit commitment from Mario."
+      "Playbook · Write release notes — Explicit commitment from Mario."
     );
     const long = formatProposalPreview(candidate({ rationale: "x".repeat(500) }));
     expect(long).toHaveLength(180);

@@ -24,7 +24,6 @@ import {
 } from "../core/daily-pulse";
 import { dueLoops, type LoopEntry } from "../core/open-loops";
 import type { ProposalKind } from "../core/proposals";
-import type { TaskEntry } from "../core/tasks";
 import type { WriteQueue } from "../core/write-queue";
 import { exoPaths, LEGACY_MEMORY_ROOT, type ExoPaths } from "../core/paths";
 
@@ -43,7 +42,6 @@ export const DAILY_PULSE_RECENT_NOTE_LIMIT = 20;
 export const DAILY_PULSE_RECENT_NOTE_SCAN_LIMIT = 50;
 
 export type DailyPulseCollectionSource =
-  | "tasks"
   | "loops"
   | "proposals"
   | "automations"
@@ -73,11 +71,6 @@ export interface DailyPulseBudgetSnapshot {
   ledger: BudgetLedger;
 }
 
-interface LoadedTaskSource {
-  tasks: readonly TaskEntry[];
-  warnings: readonly string[];
-}
-
 interface PendingProposalSource {
   records: readonly {
     id: string;
@@ -88,12 +81,11 @@ interface PendingProposalSource {
 }
 
 /**
- * Structural slices implemented by TaskStore, ProposalStore and the eventual
+ * Structural slices implemented by ProposalStore and the eventual
  * Obsidian wiring. `listRecentNotes` receives both a boundary and a hard cap;
  * broad vault enumeration is deliberately outside this contract.
  */
 export interface DailyPulseCollectionSources {
-  taskStore: { load(): Promise<LoadedTaskSource> };
   loadLoops(): Promise<readonly LoopEntry[]>;
   proposalStore: { listPending(): Promise<PendingProposalSource> };
   loadAutomationRuns(): Promise<readonly AutomationRunRecord[]>;
@@ -244,12 +236,6 @@ function remainingBudget(snapshot: DailyPulseBudgetSnapshot, now: number): numbe
   return Math.max(0, snapshot.dailyBudget - used);
 }
 
-function needsPulseAttention(
-  task: TaskEntry
-): task is TaskEntry & { status: "needs-input" | "review" } {
-  return task.status === "needs-input" || task.status === "review";
-}
-
 /** Collect a DailyPulseInput while preserving partial success and warnings. */
 export async function collectDailyPulseInput(
   sources: DailyPulseCollectionSources,
@@ -258,8 +244,7 @@ export async function collectDailyPulseInput(
   const { now } = options;
   const reviewPath = options.reviewPath ?? DAILY_PULSE_TARGET_PATH;
   const modifiedAfter = recentBoundary(now, options.lastPulseAt);
-  const [tasks, loops, proposals, automations, notes, budget] = await Promise.all([
-    capture("tasks", () => sources.taskStore.load(), { tasks: [], warnings: [] }),
+  const [loops, proposals, automations, notes, budget] = await Promise.all([
     capture("loops", () => sources.loadLoops(), []),
     capture("proposals", () => sources.proposalStore.listPending(), { records: [], warnings: [] }),
     capture("automations", () => sources.loadAutomationRuns(), []),
@@ -275,8 +260,6 @@ export async function collectDailyPulseInput(
   ]);
 
   const warnings = [
-    ...tasks.warnings,
-    ...embeddedWarnings("tasks", tasks.value.warnings),
     ...loops.warnings,
     ...proposals.warnings,
     ...embeddedWarnings("proposals", proposals.value.warnings),
@@ -288,13 +271,6 @@ export async function collectDailyPulseInput(
   return {
     input: {
       now,
-      tasks: tasks.value.tasks
-        .filter(needsPulseAttention)
-        .map(({ id, title, status }) => ({
-          id,
-          title,
-          status,
-        })),
       dueLoops: dueLoops([...loops.value], now).map(({ id, title, resurface }) => ({
         id,
         title,
@@ -381,8 +357,6 @@ function wikiTarget(path: string): string {
 function itemLabel(item: DailyPulseItem, paths: ExoPaths): string {
   const alias = wikiAlias(item.title);
   switch (item.target.kind) {
-    case "task":
-      return `[[${wikiTarget(paths.tasks)}|${alias}]]`;
     case "loop":
       return `[[${wikiTarget(paths.openLoops)}|${alias}]]`;
     case "note":
@@ -408,7 +382,6 @@ export function dailyPulseActionHref(action: DailyPulseAction): string {
 function actionLabel(action: DailyPulseAction): string {
   if (action.kind === "open") return "Open note";
   switch (action.target) {
-    case "task": return "Review task";
     case "loop": return "Review loop";
     case "proposal": return "Review suggestion";
     case "automation": return "Review automation";
@@ -429,7 +402,6 @@ function actionMetadata(action: DailyPulseAction): string {
 
 function warningLabel(source: DailyPulseCollectionSource): string {
   switch (source) {
-    case "tasks": return "Tasks";
     case "loops": return "Loops";
     case "proposals": return "Suggestions";
     case "automations": return "Automations";

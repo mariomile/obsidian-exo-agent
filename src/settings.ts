@@ -730,28 +730,6 @@ export class MVASettingTab extends PluginSettingTab {
       }
     );
 
-    new Setting(el).setName("Orchestration Board").setHeading();
-    this.toggleSetting(
-      el,
-      "Enable orchestration",
-      "Turns on the Orchestration Board: the `add_task` chat tool, the \"Promote to task\" command, and the board itself, so work can be queued up and run as separate conversations instead of inline in this chat. Off by default. Turning it OFF never touches conversations already running — they keep going as normal chats; it only stops new tasks from being queued or started.",
-      "orchestrationEnabled"
-    );
-
-    new Setting(el)
-      .setName("Max concurrent tasks")
-      .setDesc("How many Orchestration Board tasks the driver runs at the same time. Extra queued tasks wait their turn.")
-      .addText((t) => {
-        const s = this.plugin.settings;
-        t.setPlaceholder("2")
-          .setValue(String(s.orchestrationMaxConcurrent))
-          .onChange(async (v) => {
-            const n = Number.parseInt(v, 10);
-            if (Number.isFinite(n) && n > 0) s.orchestrationMaxConcurrent = n;
-            await this.plugin.saveSettings();
-          });
-      });
-
     new Setting(el).setName("Agent browser").setHeading();
     this.toggleSetting(
       el,

@@ -7,8 +7,8 @@
  * the trigger list are as prominent as the name, and an agent that can write
  * says so before you have to open anything.
  *
- * Same one-way contract as the board and the cockpit: this module imports from
- * main/view; `view.ts` never imports it.
+ * Same one-way contract as the cockpit: this module imports from main/view;
+ * `view.ts` never imports it.
  */
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type ExoPlugin from "../main";

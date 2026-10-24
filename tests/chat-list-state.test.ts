@@ -5,13 +5,10 @@ import {
   blockedReason,
   chatDot,
   chatRowSig,
-  collapseChildren,
-  isParentCollapsed,
   isSectionCollapsed,
   needsStripSig,
   rowPreview,
   rowStatusText,
-  toggleParentCollapsed,
   toggleSectionCollapsed,
 } from "../src/core/chat-list-state";
 import type { ChatRow } from "../src/core/chat-rows";
@@ -134,141 +131,6 @@ describe("section collapse", () => {
   });
 });
 
-/**
- * Per-parent collapse. A second, independent axis on the same list: a section
- * hides a whole tier, a parent hides only its own fan-out. The tests that
- * matter are the ones that pin the two apart — the failure this feature can
- * actually produce is one collapse leaking into the other, or a parent hiding
- * a row that is not its child.
- */
-describe("parent collapse", () => {
-  it("treats absent state as expanded", () => {
-    // The no-migration guarantee, same as sections: an install that never
-    // touched a chevron opens exactly as it did before the feature landed.
-    expect(isParentCollapsed(undefined, "convo-1")).toBe(false);
-    expect(isParentCollapsed([], "convo-1")).toBe(false);
-  });
-
-  it("reads a collapsed conversation back", () => {
-    expect(isParentCollapsed(["convo-1"], "convo-1")).toBe(true);
-    expect(isParentCollapsed(["convo-1"], "convo-2")).toBe(false);
-  });
-
-  it("collapses by appending and expands by removing", () => {
-    expect(toggleParentCollapsed([], "convo-1")).toEqual(["convo-1"]);
-    expect(toggleParentCollapsed(["convo-1"], "convo-1")).toEqual([]);
-    expect(toggleParentCollapsed(undefined, "convo-1")).toEqual(["convo-1"]);
-  });
-
-  it("leaves the other parents alone", () => {
-    expect(toggleParentCollapsed(["a", "b"], "a")).toEqual(["b"]);
-    expect(toggleParentCollapsed(["a"], "b")).toEqual(["a", "b"]);
-  });
-
-  it("dedupes on expand rather than leaving a second copy behind", () => {
-    // A duplicate should never be written, but if one ever is, one click has to
-    // fully expand — a filter that removed a single match would need two.
-    expect(toggleParentCollapsed(["a", "a"], "a")).toEqual([]);
-  });
-
-  it("never mutates the list it was given", () => {
-    const before: string[] = ["a"];
-    toggleParentCollapsed(before, "b");
-    toggleParentCollapsed(before, "a");
-    expect(before).toEqual(["a"]);
-  });
-
-  it("is a SEPARATE store from the section collapse", () => {
-    // The two lists are keyed in different namespaces. A conversation whose id
-    // happens to read like a section key must not fold that section, and
-    // collapsing a section must not fold a conversation of the same name.
-    const parents = toggleParentCollapsed([], "inbox");
-    expect(isSectionCollapsed([], "inbox")).toBe(false);
-    expect(isParentCollapsed(parents, "inbox")).toBe(true);
-
-    const sections = toggleSectionCollapsed([], "inbox");
-    expect(isParentCollapsed([], "inbox")).toBe(false);
-    expect(isSectionCollapsed(sections, "inbox")).toBe(true);
-  });
-});
-
-describe("collapseChildren", () => {
-  /** The shape the renderer actually paints: depth-0 rows each followed by
-   *  their own depth-1 run. */
-  const list = [
-    { id: "p", depth: 0 as const },
-    { id: "p1", depth: 1 as const },
-    { id: "p2", depth: 1 as const },
-    { id: "q", depth: 0 as const },
-    { id: "q1", depth: 1 as const },
-    { id: "lonely", depth: 0 as const },
-  ];
-
-  it("hides nothing when no parent is collapsed", () => {
-    const out = collapseChildren(list, undefined);
-    expect([...out.hidden]).toEqual([]);
-  });
-
-  it("hides exactly the collapsed parent's own children", () => {
-    const out = collapseChildren(list, ["p"]);
-    expect([...out.hidden].sort()).toEqual(["p1", "p2"]);
-    // The sibling parent's child is untouched, and so is the parent row itself.
-    expect(out.hidden.has("q1")).toBe(false);
-    expect(out.hidden.has("p")).toBe(false);
-  });
-
-  it("hides two parents' children independently", () => {
-    const out = collapseChildren(list, ["p", "q"]);
-    expect([...out.hidden].sort()).toEqual(["p1", "p2", "q1"]);
-  });
-
-  it("counts children per parent, collapsed or not", () => {
-    const out = collapseChildren(list, ["p"]);
-    expect(out.counts.get("p")).toBe(2);
-    expect(out.counts.get("q")).toBe(1);
-    // A parent with no children is absent, never a zero: the renderer asks this
-    // map for a number to SHOW, and "0 hidden" is a thing that cannot happen.
-    expect(out.counts.has("lonely")).toBe(false);
-  });
-
-  it("folds a grandchild away with the depth-0 row, not with its own parent", () => {
-    // The tree is flattened: `g` names `c` as its parent but renders at depth 1
-    // beside it. Collapsing `p` must take both; there is no control on `c` to
-    // take `g` on its own.
-    const flattened = [
-      { id: "p", depth: 0 as const },
-      { id: "c", depth: 1 as const },
-      { id: "g", depth: 1 as const },
-    ];
-    const out = collapseChildren(flattened, ["p"]);
-    expect([...out.hidden].sort()).toEqual(["c", "g"]);
-    expect(out.counts.get("p")).toBe(2);
-    // And collapsing the middle row does nothing — it owns no run.
-    expect([...collapseChildren(flattened, ["c"]).hidden]).toEqual([]);
-  });
-
-  it("does not carry a run across a section boundary", () => {
-    // Sections are concatenated into one call; the next section's first row is
-    // depth 0 and closes the previous run. A collapsed parent at the end of one
-    // section must not swallow the start of the next.
-    const twoSections = [
-      { id: "p", depth: 0 as const },
-      { id: "p1", depth: 1 as const },
-      { id: "other", depth: 0 as const },
-      { id: "other1", depth: 1 as const },
-    ];
-    const out = collapseChildren(twoSections, ["p"]);
-    expect([...out.hidden]).toEqual(["p1"]);
-  });
-
-  it("ignores a collapsed id that is not on screen", () => {
-    // A stale entry — the conversation was deleted or archived since — is
-    // simply never consulted, which is why the list needs no pruning pass.
-    const out = collapseChildren(list, ["deleted-long-ago"]);
-    expect([...out.hidden]).toEqual([]);
-  });
-});
-
 /* ---------------------------------------------------------------------------
  * Phase 4/5 — what a row says, and when saying it costs a rebuild.
  * ------------------------------------------------------------------------ */
@@ -285,8 +147,6 @@ const row = (over: Partial<ChatRow> = {}): ChatRow => ({
   pinned: false,
   unseen: false,
   messageCount: 3,
-  depth: 0,
-  hasChildren: false,
   shelf: "settled",
   ...over,
 });

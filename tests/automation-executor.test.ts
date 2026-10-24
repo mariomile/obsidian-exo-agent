@@ -61,7 +61,7 @@ const automation = (over: Partial<Automation> = {}): Automation => ({
 });
 
 const fenced = (entries: unknown) => ["Found one.", "", "```exo-proposals", JSON.stringify(entries), "```"].join("\n");
-const TASK = { kind: "task", title: "Follow up", prompt: "Follow up on the call.", rationale: "It was promised." };
+const TASK = { kind: "playbook", name: "Follow up", prompt: "Follow up on the call.", rationale: "It was promised." };
 
 function fakePlugin(kernel: boolean) {
   const plugin = Object.create(ExoPlugin.prototype) as InstanceType<typeof ExoPlugin>;

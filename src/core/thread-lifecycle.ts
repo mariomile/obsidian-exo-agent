@@ -69,9 +69,6 @@ export interface LifecycleShell extends LifecycleFields {
   /** The chat in front of you. Never put away: the open thread does not
    *  disappear behind a collapsed shelf. */
   focused: boolean;
-  /** A finished child task has a report waiting for this chat: a delegated
-   *  result, which in T3 wakes a thread like a completed run. */
-  pendingReport?: boolean;
 }
 
 export type Shelf = "pinned" | "inbox" | "snoozed" | "settled";
@@ -83,18 +80,18 @@ const blockedOnUser = (s: Pick<LifecycleShell, "pendingPerm" | "pendingAsk">): b
 
 /**
  * The chat "raises its hand": something happened that is worth more than the
- * user's "not now". Blocked on a permission or a question, a child report
- * waiting, or a turn landed after the snooze was set. A chat snoozed while
+ * user's "not now". Blocked on a permission or a question, or a turn landed
+ * after the snooze was set. A chat snoozed while
  * already stopped or errored stays snoozed: that snooze was "I saw it, later".
  */
-export function raisedHand(s: Pick<LifecycleShell, "pendingPerm" | "pendingAsk" | "pendingReport" | "updatedAt" | "snoozedAt">): boolean {
-  if (blockedOnUser(s) || s.pendingReport) return true;
+export function raisedHand(s: Pick<LifecycleShell, "pendingPerm" | "pendingAsk" | "updatedAt" | "snoozedAt">): boolean {
+  if (blockedOnUser(s)) return true;
   return s.snoozedAt !== undefined && (s.updatedAt ?? 0) > s.snoozedAt;
 }
 
 /** Hidden right now? Malformed or elapsed wake times never hide a chat. */
 export function effectiveSnoozed(
-  s: Pick<LifecycleShell, "snoozedUntil" | "snoozedAt" | "pendingPerm" | "pendingAsk" | "pendingReport" | "updatedAt">,
+  s: Pick<LifecycleShell, "snoozedUntil" | "snoozedAt" | "pendingPerm" | "pendingAsk" | "updatedAt">,
   now: number,
 ): boolean {
   if (s.snoozedUntil === undefined || !Number.isFinite(s.snoozedUntil)) return false;
@@ -109,7 +106,7 @@ export function effectiveSnoozed(
  * raised hand reports the turn that raised it.
  */
 export function wokeAt(
-  s: Pick<LifecycleShell, "snoozedUntil" | "snoozedAt" | "pendingPerm" | "pendingAsk" | "pendingReport" | "updatedAt">,
+  s: Pick<LifecycleShell, "snoozedUntil" | "snoozedAt" | "pendingPerm" | "pendingAsk" | "updatedAt">,
   now: number,
 ): number | null {
   if (s.snoozedUntil === undefined || !Number.isFinite(s.snoozedUntil)) return null;
@@ -207,7 +204,7 @@ export function effectiveSettled(
     // Activity after the settle brought it back; from here it ages like any
     // other chat, which is what T3 does once the run clears the override.
   }
-  if (quietMs === null || s.open || s.pendingReport) return false;
+  if (quietMs === null || s.open) return false;
   return returnedAt(s, now) < now - quietMs;
 }
 

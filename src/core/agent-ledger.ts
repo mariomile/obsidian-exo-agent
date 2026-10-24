@@ -2,7 +2,7 @@
  * Agent run ledger — pure parser/serializer (no Obsidian imports).
  *
  * An append-only markdown record of every agent run, one file per month under
- * `paths.agentRuns`. Deliberately the same shape as the Orchestration ledger
+ * `paths.agentRuns`. Deliberately the same shape as the open-loops ledger
  * (`## id` + `- key: value` + free text): greppable, diffable, editable by a
  * human, and readable on a phone.
  *

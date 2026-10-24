@@ -22,13 +22,11 @@ import type { AgentSession, ContextUsage, ProviderId } from "../providers/types"
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
 import type { QueuedMessage } from "../core/queue";
-import type { SessionLane } from "../core/session-cards";
 import type { GoalState } from "../core/goal-loop";
 import type { LiveTask } from "../core/live-tasks";
 import type { TouchedNote } from "./graph-view";
 import type { ComposerDraft } from "./composer";
 import type { StepsRun } from "./steps";
-import type { ChildReport } from "../core/child-reports";
 
 export interface ToolCard {
   card: HTMLElement;
@@ -68,8 +66,6 @@ export interface ConvoData {
    *  (`switchTo`, `setActiveSilently`) schedules a conversation-store write, not
    *  just the settings write that saves the tab set. */
   lastActiveAt?: number;
-  /** Manually-assigned Session-Cockpit column (persisted). Absent = default. */
-  boardStatus?: SessionLane;
   /** Lifecycle on the chats sidebar (core/thread-lifecycle, from T3 Code):
    *  snooze until a wake time, settle by hand or take back out. Each absent
    *  by default, so every existing conversations.json stays valid. */
@@ -78,20 +74,8 @@ export interface ConvoData {
   settledOverride?: "settled" | "active";
   settledAt?: number;
   unsettledAt?: number;
-  /** Convo id of the conversation that spawned this one via `spawn_task`.
-   *  Denormalized from the ledger's `parent` (which stays the source of truth)
-   *  so the sidebar can group without reading tasks.md. Persisted: a child that
-   *  loses its parentage on reload would jump out from under its parent and
-   *  read as an unexplained chat nobody started. */
-  parentConvoId?: string;
   /** Convo id this chat was forked from (core/fork): the "Forked from" link. */
   forkedFrom?: string;
-  /** Reports from finished children this conversation has not yet handed to its
-   *  model. Persisted (capped, see `MAX_PENDING_CHILD_REPORTS`) because it is
-   *  the ONLY path by which a delegated conversation's output reaches the
-   *  conversation that delegated it: dropping it on reload left the parent
-   *  showing unread news it could never deliver. Written only when non-empty. */
-  pendingChildReports?: ChildReport[];
   /** The user named this conversation by hand. Both auto-title paths must
    *  respect it. Written only when true; absent reads as false, so every
    *  existing conversations.json stays valid unchanged. Deliberately NOT
@@ -140,8 +124,8 @@ export interface Convo {
   drawn: boolean;
   title: string;
   sessionId?: string;
-  /** True when the user archived this chat: hidden from the board's active
-   *  Session-Cockpit lanes and moved to a separate untrimmed store (never
+  /** True when the user archived this chat: hidden from the active
+   *  chat lists and moved to a separate untrimmed store (never
    *  evicted). Persisted. */
   archived?: boolean;
   /** Explicit user protection: never a retention cleanup candidate, never
@@ -156,26 +140,13 @@ export interface Convo {
    *  (`switchTo`, `setActiveSilently`) schedules a conversation-store write, not
    *  just the settings write that saves the tab set. */
   lastActiveAt?: number;
-  /** Manually-assigned Session-Cockpit column (persisted). When set and the chat
-   *  is idle, its card sits here instead of the default review lane; running /
-   *  needs-input still auto-override. */
-  boardStatus?: SessionLane;
   /** Lifecycle fields, see `ConvoData`. Persisted. */
   snoozedUntil?: number;
   snoozedAt?: number;
   settledOverride?: "settled" | "active";
   settledAt?: number;
   unsettledAt?: number;
-  /** Convo id of the conversation that spawned this one via `spawn_task`.
-   *  Denormalized from the ledger's `parent` (the source of truth) so the chats
-   *  sidebar can indent without reading tasks.md. Persisted. */
-  parentConvoId?: string;
   forkedFrom?: string;
-  /** Reports from finished child tasks, waiting to be handed to this
-   *  conversation's model on its NEXT turn. Persisted (capped): the next turn
-   *  can happen after a restart just as easily as before one, and this queue is
-   *  the only route a child's output has back to the parent's model. */
-  pendingChildReports?: ChildReport[];
   provider: ProviderId;
   model: string;
   allow: Set<string>;

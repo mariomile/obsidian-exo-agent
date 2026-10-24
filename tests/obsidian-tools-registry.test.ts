@@ -83,9 +83,16 @@ describe("buildObsidianTools", () => {
     expect(names({ memory: memory({ memoryReadEnabled: false }) })).not.toContain("recent_chats");
   });
 
-  it("orchestrationEnabled gates add_task", () => {
-    expect(names({ orchestrationEnabled: false })).not.toContain("add_task");
-    expect(names({ orchestrationEnabled: true })).toContain("add_task");
+  it("the chat tools need a convoId, and the board task tools are gone", () => {
+    const without = names({});
+    const withConvo = names({ convoId: "convo-test" });
+    for (const t of ["read_chat", "send_to_chat", "update_chat"]) {
+      expect(without, t).not.toContain(t);
+      expect(withConvo, t).toContain(t);
+    }
+    for (const t of ["add_task", "list_tasks", "spawn_task", "task_status", "task_cancel"]) {
+      expect(withConvo, t).not.toContain(t);
+    }
   });
 
   it("rethink_memory needs memory write AND the agent folder AND a bridge", () => {

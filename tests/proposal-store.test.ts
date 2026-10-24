@@ -9,11 +9,11 @@ import {
   type ProposalRouteResult,
 } from "../src/obsidian/proposal-store";
 
-function task(title: string, prompt = "Do it"): ProposalCandidate {
+function action(name: string, prompt = "Do it"): ProposalCandidate {
   return {
-    kind: "task",
-    title,
-    payload: { kind: "task", title, prompt },
+    kind: "playbook",
+    title: name,
+    payload: { kind: "playbook", name, prompt },
     rationale: "Explicit commitment",
   };
 }
@@ -93,17 +93,17 @@ describe("ProposalStore", () => {
     expect(snapshot.data.records).toEqual([]);
     expect(snapshot.warnings[0]).toMatch(/could not parse/i);
     expect(files.get(PROPOSALS_FILE)).toBe(raw);
-    await expect(store.append(task("No overwrite"), source())).rejects.toThrow(/corrupt/i);
+    await expect(store.append(action("No overwrite"), source())).rejects.toThrow(/corrupt/i);
     expect(files.get(PROPOSALS_FILE)).toBe(raw);
   });
 
   it("logically quarantines invalid records, preserves them on write, and keeps valid records", async () => {
     const { adapter, files } = fakeFiles();
     const seed = new ProposalStore(adapter, new WriteQueue(), idleRoute);
-    const appended = await seed.append(task("Valid"), source());
+    const appended = await seed.append(action("Valid"), source());
     expect(appended.status).toBe("appended");
     const parsed = JSON.parse(files.get(PROPOSALS_FILE)!) as { records: unknown[]; metrics: ProposalMetrics };
-    parsed.records.push({ id: "broken", kind: "task" });
+    parsed.records.push({ id: "broken", kind: "playbook" });
     files.set(PROPOSALS_FILE, JSON.stringify(parsed));
 
     const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
@@ -114,22 +114,22 @@ describe("ProposalStore", () => {
     await store.recordMetric("parseErrors");
     const rawAfter = JSON.parse(files.get(PROPOSALS_FILE)!) as { records: unknown[] };
     expect(rawAfter.records).toHaveLength(2);
-    expect(rawAfter.records).toContainEqual({ id: "broken", kind: "task" });
+    expect(rawAfter.records).toContainEqual({ id: "broken", kind: "playbook" });
     expect((await store.load()).data.metrics.parseErrors).toBe(1);
   });
 
   it("validates candidates, assigns stable collision-safe ids/source, and deduplicates", async () => {
     const { adapter } = fakeFiles();
     const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
-    const first = await store.append(task("Ship it"), source());
+    const first = await store.append(action("Ship it"), source());
     expect(first.status).toBe("appended");
     if (first.status !== "appended") throw new Error("expected append");
     expect(first.record.id).toMatch(/^proposal-/);
     expect(first.record.source).toEqual(source());
 
-    const duplicate = await store.append(task("  SHIP IT  ", " do   it "), source());
+    const duplicate = await store.append(action("  SHIP IT  ", " do   it "), source());
     expect(duplicate.status).toBe("duplicate");
-    const invalid = await store.append({ kind: "task", title: "", payload: { kind: "task", title: "", prompt: "" }, rationale: "" }, source());
+    const invalid = await store.append({ kind: "playbook", title: "", payload: { kind: "playbook", name: "", prompt: "" }, rationale: "" }, source());
     expect(invalid.status).toBe("invalid");
 
     const snapshot = await store.load();
@@ -141,8 +141,8 @@ describe("ProposalStore", () => {
     const { adapter } = fakeFiles();
     const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
     const old = Date.now() - 31 * 24 * 60 * 60 * 1000;
-    const current = await store.append(task("Current"), source(Date.now()));
-    const stale = await store.append(task("Stale"), { ...source(old), turnId: "old" });
+    const current = await store.append(action("Current"), source(Date.now()));
+    const stale = await store.append(action("Stale"), { ...source(old), turnId: "old" });
     if (current.status !== "appended" || stale.status !== "appended") throw new Error("expected append");
     await store.dismiss(stale.record.id, old);
 
@@ -155,7 +155,7 @@ describe("ProposalStore", () => {
     const { adapter } = fakeFiles();
     let outcome: ProposalRouteResult = { ok: false, error: "target unavailable" };
     const store = new ProposalStore(adapter, new WriteQueue(), async () => outcome);
-    const appended = await store.append(task("Route me"), source());
+    const appended = await store.append(action("Route me"), source());
     if (appended.status !== "appended") throw new Error("expected append");
 
     const failed = await store.accept(appended.record.id);
@@ -177,7 +177,7 @@ describe("ProposalStore", () => {
     const store = new ProposalStore(adapter, new WriteQueue(), async () => {
       throw new Error("boom");
     });
-    const appended = await store.append(task("Retry me"), source());
+    const appended = await store.append(action("Retry me"), source());
     if (appended.status !== "appended") throw new Error("expected append");
     const result = await store.accept(appended.record.id);
     expect(result).toMatchObject({ ok: false, error: "boom" });
@@ -188,7 +188,7 @@ describe("ProposalStore", () => {
     const { adapter } = fakeFiles();
     const route = vi.fn(async () => ({ ok: true as const, target: "task-once" }));
     const store = new ProposalStore(adapter, new WriteQueue(), route);
-    const appended = await store.append(task("Once"), source());
+    const appended = await store.append(action("Once"), source());
     if (appended.status !== "appended") throw new Error("expected append");
     const [first, second] = await Promise.all([
       store.accept(appended.record.id),
@@ -208,7 +208,7 @@ describe("ProposalStore", () => {
       return { ok: true as const, target };
     });
     const store = new ProposalStore(adapter, new WriteQueue(), route);
-    const appended = await store.append(task("Durable retry"), source());
+    const appended = await store.append(action("Durable retry"), source());
     if (appended.status !== "appended") throw new Error("expected append");
 
     const write = adapter.write.bind(adapter);
@@ -237,10 +237,10 @@ describe("ProposalStore", () => {
     const queue = new WriteQueue();
     const enqueue = vi.spyOn(queue, "enqueue");
     const store = new ProposalStore(adapter, queue, async () => ({ ok: true, target: "task-first" }));
-    const first = await store.append(task("First"), source());
+    const first = await store.append(action("First"), source());
     if (first.status !== "appended") throw new Error("expected append");
     await Promise.all([
-      store.append(task("Second"), { ...source(), turnId: "turn-2" }),
+      store.append(action("Second"), { ...source(), turnId: "turn-2" }),
       store.accept(first.record.id),
     ]);
     const snapshot = await store.load();
@@ -282,9 +282,9 @@ describe("ProposalStore", () => {
 
   it("refuses to edit a missing, non-pending, or non-playbook proposal and re-validates fields", async () => {
     const { adapter } = fakeFiles();
-    const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
+    const store = new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "held" }));
     const pbook = await store.append(playbook("Editable"), source());
-    const chore = await store.append(task("Not a playbook"), { ...source(), turnId: "turn-2" });
+    const chore = await store.append(loop("Not a playbook"), { ...source(), turnId: "turn-2" });
     if (pbook.status !== "appended" || chore.status !== "appended") throw new Error("expected append");
 
     await expect(store.updatePendingPlaybook("missing", { name: "X", prompt: "Y" })).rejects.toThrow(/not found/i);
@@ -303,7 +303,6 @@ describe("ProposalStore", () => {
     const toAccept = await store.append(playbook("Accepted", { workflowSignature: "write|vault.write|vault-write" }), { ...source(), turnId: "turn-2" });
     const toDismiss = await store.append(playbook("Dismissed", { workflowSignature: "plan|no-tools|message" }), { ...source(), turnId: "turn-3" });
     await store.append(playbook("No signature"), { ...source(), turnId: "turn-4" });
-    await store.append(task("Chore"), { ...source(), turnId: "turn-5" });
     if (pending.status !== "appended" || toAccept.status !== "appended" || toDismiss.status !== "appended") throw new Error("expected append");
 
     await store.accept(toAccept.record.id);
@@ -331,8 +330,8 @@ describe("ProposalStore", () => {
   it("dismisses idempotently and reload reconstructs pending records plus metrics", async () => {
     const { adapter } = fakeFiles();
     const firstStore = new ProposalStore(adapter, new WriteQueue(), idleRoute);
-    const kept = await firstStore.append(task("Keep"), source());
-    const removed = await firstStore.append(task("Dismiss"), { ...source(), turnId: "turn-2" });
+    const kept = await firstStore.append(action("Keep"), source());
+    const removed = await firstStore.append(action("Dismiss"), { ...source(), turnId: "turn-2" });
     if (kept.status !== "appended" || removed.status !== "appended") throw new Error("expected append");
     await firstStore.dismiss(removed.record.id);
     await firstStore.dismiss(removed.record.id);
@@ -388,16 +387,15 @@ describe("ProposalStore", () => {
       expect(write).toHaveBeenCalledTimes(1);
     });
 
-    it("leaves tasks and playbooks pending and never routes them", async () => {
+    it("leaves a playbook pending and never routes it", async () => {
       const { adapter } = fakeFiles();
       const route = vi.fn(async () => ({ ok: true as const, target: "x" }));
       const store = new ProposalStore(adapter, new WriteQueue(), route);
 
-      await store.append(task("Ship it"), source());
       await store.append(playbook("Weekly review"), source());
 
       expect(route).not.toHaveBeenCalled();
-      expect((await store.listPending()).records.map((r) => r.kind).sort()).toEqual(["playbook", "task"]);
+      expect((await store.listPending()).records.map((r) => r.kind).sort()).toEqual(["playbook"]);
     });
 
     it("keeps a loop pending with its error and retryable when the route fails", async () => {

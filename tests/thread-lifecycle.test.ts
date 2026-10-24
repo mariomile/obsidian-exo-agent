@@ -150,10 +150,6 @@ describe("chats sidebar: the Snoozed shelf", () => {
     expect(buildChatList([seen], { query: "", now: NOON }).sections[0].items[0].unseen).toBe(false);
   });
 
-  it("wakes on a child report waiting for it", () => {
-    expect(keysOf([snoozed("x", NOON + HOUR, { pendingReport: true })])[0][0]).toBe("inbox");
-  });
-
   it("puts it back in the inbox once the wake time passes", () => {
     expect(keysOf([snoozed("x", NOON + HOUR)], NOON + 2 * HOUR)).toEqual([["inbox", ["x"]]]);
   });
@@ -197,9 +193,8 @@ describe("settle", () => {
     expect(effectiveSettled(thread({ updatedAt: NOON - 2 * DAY }), NOON)).toBe(false);
   });
 
-  it("never auto-settles an open tab, a chat with news, or one taken back out by hand", () => {
+  it("never auto-settles an open tab or one taken back out by hand", () => {
     expect(effectiveSettled(thread({ updatedAt: quiet, open: true }), NOON)).toBe(false);
-    expect(effectiveSettled(thread({ updatedAt: quiet, pendingReport: true }), NOON)).toBe(false);
     expect(effectiveSettled(thread({ updatedAt: quiet, settledOverride: "active" }), NOON)).toBe(false);
   });
 
@@ -280,11 +275,11 @@ describe("planProgress", () => {
   });
 });
 
-describe("chats sidebar: an errored child is never folded away", () => {
-  it("keeps an errored child in the inbox when its parent is settled", () => {
-    const parent = src({ id: "p", updatedAt: NOON - 4 * DAY });
-    const child = src({ id: "c", parentConvoId: "p", poisoned: true });
-    expect(keysOf([parent, child])).toEqual([
+describe("chats sidebar: an errored chat is never folded away", () => {
+  it("keeps an errored chat in the inbox beside a settled one", () => {
+    const quiet = src({ id: "p", updatedAt: NOON - 4 * DAY });
+    const errored = src({ id: "c", poisoned: true });
+    expect(keysOf([quiet, errored])).toEqual([
       ["inbox", ["c"]],
       ["settled", ["p"]],
     ]);

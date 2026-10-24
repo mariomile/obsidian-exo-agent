@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AutomationRunRecord } from "../src/core/automations";
 import type { LoopEntry } from "../src/core/open-loops";
-import type { TaskEntry } from "../src/core/tasks";
 import { WriteQueue } from "../src/core/write-queue";
 import {
   collectDailyPulseInput,
@@ -14,17 +13,6 @@ import {
 
 const NOW = Date.parse("2026-07-20T08:00:00.000Z");
 const LAST_PULSE_AT = NOW - 60_000;
-
-function task(id: string, status: TaskEntry["status"]): TaskEntry {
-  return {
-    id,
-    title: `Task ${id}`,
-    status,
-    created: "2026-07-20T07:00:00.000Z",
-    updated: "2026-07-20T07:30:00.000Z",
-    prompt: `Prompt ${id}`,
-  };
-}
 
 function loop(
   id: string,
@@ -60,9 +48,6 @@ function sources(
   overrides: Partial<DailyPulseCollectionSources> = {}
 ): DailyPulseCollectionSources {
   return {
-    taskStore: {
-      load: async () => ({ tasks: [], warnings: [] }),
-    },
     loadLoops: async () => [],
     proposalStore: {
       listPending: async () => ({ records: [], warnings: [] }),
@@ -91,12 +76,6 @@ describe("collectDailyPulseInput", () => {
       { path: "Active/not-a-note.pdf", mtime: NOW - 5_000 },
     ]);
     const result = await collectDailyPulseInput(sources({
-      taskStore: {
-        load: async () => ({
-          tasks: [task("input", "needs-input"), task("review", "review"), task("backlog", "backlog")],
-          warnings: [],
-        }),
-      },
       loadLoops: async () => [
         loop("immediate"),
         loop("today", { resurface: "2026-07-20" }),
@@ -131,10 +110,6 @@ describe("collectDailyPulseInput", () => {
     });
     expect(result.input).toEqual({
       now: NOW,
-      tasks: [
-        { id: "input", title: "Task input", status: "needs-input" },
-        { id: "review", title: "Task review", status: "review" },
-      ],
       dueLoops: [
         { id: "immediate", title: "Loop immediate" },
         { id: "today", title: "Loop today", resurface: "2026-07-20" },
@@ -156,9 +131,6 @@ describe("collectDailyPulseInput", () => {
 
   it("keeps successful source data when other sources fail and identifies each warning", async () => {
     const result = await collectDailyPulseInput(sources({
-      taskStore: {
-        load: async () => ({ tasks: [task("review", "review")], warnings: [] }),
-      },
       loadLoops: async () => { throw new Error("loops unavailable"); },
       proposalStore: {
         listPending: async () => { throw new Error("proposals unavailable"); },
@@ -168,9 +140,6 @@ describe("collectDailyPulseInput", () => {
       loadBackgroundBudget: async () => { throw new Error("budget unavailable"); },
     }), { now: NOW, lastPulseAt: LAST_PULSE_AT });
 
-    expect(result.input.tasks).toEqual([
-      { id: "review", title: "Task review", status: "review" },
-    ]);
     expect(result.input.dueLoops).toEqual([]);
     expect(result.input.pendingProposals).toEqual([]);
     expect(result.input.automationRuns).toEqual([]);
@@ -185,26 +154,18 @@ describe("collectDailyPulseInput", () => {
     ]);
   });
 
-  it("preserves TaskStore and ProposalStore warnings alongside valid records", async () => {
+  it("preserves ProposalStore warnings alongside valid records", async () => {
     const result = await collectDailyPulseInput(sources({
-      taskStore: {
-        load: async () => ({
-          tasks: [task("input", "needs-input")],
-          warnings: ["Malformed task block task-bad."],
-        }),
-      },
       proposalStore: {
         listPending: async () => ({
-          records: [{ id: "proposal-1", kind: "task", title: "Draft task" }],
+          records: [{ id: "proposal-1", kind: "playbook", title: "Draft playbook" }],
           warnings: ["Proposal record 2 was quarantined."],
         }),
       },
     }), { now: NOW, lastPulseAt: LAST_PULSE_AT });
 
-    expect(result.input.tasks).toHaveLength(1);
     expect(result.input.pendingProposals).toHaveLength(1);
     expect(result.warnings).toEqual([
-      { source: "tasks", message: "Malformed task block task-bad." },
       { source: "proposals", message: "Proposal record 2 was quarantined." },
     ]);
   });
@@ -245,7 +206,6 @@ describe("collectDailyPulseInput", () => {
   });
 
   it("does not mutate arrays or records returned by any source", async () => {
-    const tasks = [task("input", "needs-input"), task("done", "done")];
     const loops = [loop("due"), loop("future", { resurface: "2026-07-21" })];
     const proposals = [{ id: "proposal-1", kind: "loop" as const, title: "Follow up" }];
     const runs = [run("pending")];
@@ -255,10 +215,9 @@ describe("collectDailyPulseInput", () => {
       dailyBudget: 1_000,
       ledger: { dateUTC: "2026-07-19", tokensUsed: 900 },
     };
-    const snapshot = structuredClone({ tasks, loops, proposals, runs, notes, budget });
+    const snapshot = structuredClone({ loops, proposals, runs, notes, budget });
 
     const result = await collectDailyPulseInput(sources({
-      taskStore: { load: async () => ({ tasks, warnings: [] }) },
       loadLoops: async () => loops,
       proposalStore: { listPending: async () => ({ records: proposals, warnings: [] }) },
       loadAutomationRuns: async () => runs,
@@ -266,7 +225,7 @@ describe("collectDailyPulseInput", () => {
       loadBackgroundBudget: async () => budget,
     }), { now: NOW, lastPulseAt: LAST_PULSE_AT });
 
-    expect({ tasks, loops, proposals, runs, notes, budget }).toEqual(snapshot);
+    expect({ loops, proposals, runs, notes, budget }).toEqual(snapshot);
     expect(result.input.automationRuns[0].writes).not.toBe(runs[0].writes);
     expect(result.input.budget).toEqual({ remaining: 1_000, enabled: true });
   });
@@ -295,9 +254,7 @@ describe("collectDailyPulseInput", () => {
   it("still writes the deterministic pulse with paused background AI and an independent-source warning", async () => {
     let content: string | null = null;
     const result = await generateAndWriteDailyPulse(sources({
-      taskStore: {
-        load: async () => ({ tasks: [task("review", "review")], warnings: [] }),
-      },
+      loadAutomationRuns: async () => [run("pending")],
       loadLoops: async () => { throw new Error("loop ledger unavailable"); },
       loadBackgroundBudget: async () => ({
         enabled: false,
@@ -313,8 +270,8 @@ describe("collectDailyPulseInput", () => {
       { source: "loops", message: "loop ledger unavailable" },
     ]);
     expect(result.pulse.sections.flatMap(({ items }) => items).map(({ id }) => id))
-      .toEqual(["task:review", "system:budget"]);
-    expect(content).toContain("Task review");
+      .toEqual(["automation:pending", "system:budget"]);
+    expect(content).toContain("Run pending");
     expect(content).toContain("Background AI paused");
     expect(content).toContain("Loops: loop ledger unavailable");
   });

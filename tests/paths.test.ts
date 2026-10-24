@@ -12,7 +12,6 @@ describe("exoPaths", () => {
     expect(p.root).toBe("_exo");
     expect(p.memory).toBe("_exo/memory");
     expect(p.inbox).toBe("_exo/memory/inbox");
-    expect(p.tasks).toBe("_exo/orchestration/tasks.md");
     expect(p.queue).toBe("_exo/exo-queue");
     expect(p.vaultContext).toBe("_exo/vault-context.md");
     expect(p.preferences).toBe("_exo/memory/preferences/preferences.md");
@@ -31,7 +30,6 @@ describe("exoPaths", () => {
     const p = exoPaths(LEGACY_MEMORY_ROOT);
     expect(p.vaultContext).toBe("_system/vault-context.md");
     expect(p.inbox).toBe("_system/memory/inbox");
-    expect(p.tasks).toBe("_system/orchestration/tasks.md");
     expect(p.queue).toBe("_system/exo-queue");
     expect(p.review).toBe("_system/review.md");
     expect(p.rules).toBe("_system/memory/rules");

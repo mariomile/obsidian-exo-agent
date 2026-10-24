@@ -177,13 +177,6 @@ export class GalleryView {
       return;
     }
 
-    // Which convos belong to a "done" orchestration task, for the gallery's
-    // Done/Archiviata chip. taskStore exists even with Orchestration off, so
-    // this is always safe — it just resolves empty in that case.
-    const { tasks } = await this.view.plugin.taskStore.load();
-    if (this.galleryEl !== wrap) return; // gallery was closed while we awaited
-    const doneConvoIds = new Set(tasks.filter((t) => t.status === "done" && t.convo).map((t) => t.convo!));
-
     // Which chats still have a CLI session behind them. Read once per open, not
     // per card: the answer is the same for the whole grid, and the search box
     // re-runs renderGrid on every keystroke.
@@ -278,10 +271,10 @@ export class GalleryView {
       const rest = filtered.filter((c) => !retiredIds.has(c.id));
 
       if (retiredGroup.length > 0) {
-        renderHistoryGroup(this.view, grid, "Recently retired", retiredGroup, doneConvoIds, true);
+        renderHistoryGroup(this.view, grid, "Recently retired", retiredGroup, true);
       }
       for (const g of groupByTime(rest, now)) {
-        renderHistoryGroup(this.view, grid, g.label, g.items, doneConvoIds);
+        renderHistoryGroup(this.view, grid, g.label, g.items);
       }
 
       if (filtered.length === 0) {
