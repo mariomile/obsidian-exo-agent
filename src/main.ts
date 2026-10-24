@@ -2118,7 +2118,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   readConversationStore(): Promise<ChatRecord[]> { return convoBridge.readConversationStore(this); }
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }> { return undoMemoryWrite(this, this.harvestLog, sha); }
 
-  /** Re-render an open Capabilities hub — called when a new SessionCaps
+  /** Re-render an open Capabilities hub, called when a new SessionCaps
    *  snapshot arrives, so the pane's live statuses (MCP health, skill/tool
    *  inventories) match the session without a manual refresh. Cheap: the
    *  row-based tabs reconcile by key, so unchanged rows aren't rebuilt. */
