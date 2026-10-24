@@ -58,7 +58,10 @@ const CEILINGS: Record<string, number> = {
   // come sugli altri file.
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): board, task,
   // figli e rapporti non esistono piu'. 6228 -> 6007 righe reali, tetto 6012.
-  "src/view.ts": 6012,
+  // Abbassato il 2026-10-24 (review Release 1): la coda vive sopra il composer,
+  // un solo TurnOpts per invio e drain, steer in un solo punto. 6007 -> 5959
+  // righe reali, tetto 5964.
+  "src/view.ts": 5964,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -185,7 +188,9 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): stili di board,
   // task modal e figli nella sidebar cancellati. 6951 -> 6507 righe reali,
   // tetto 6512.
-  "styles.css": 6512,
+  // Abbassato il 2026-10-24 (review Release 1): stili morti dei chip della
+  // vecchia coda. 6507 -> 6502 righe reali, tetto 6507.
+  "styles.css": 6507,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel

@@ -8,6 +8,7 @@ import type ExoPlugin from "../main";
 import type { Convo } from "./convo-types";
 import { MAX_AGENT_HOPS, nextHop, planSend, type SendMode, type SendOutcome } from "../core/delegation";
 import { chatView } from "./convo-bridge";
+import { trySteer } from "./queue-view";
 
 const byId = (view: ChatView, id: string): Convo | undefined => view.allConvos().find((c) => c.id === id);
 
@@ -30,17 +31,7 @@ export function sendToConvo(view: ChatView, id: string, text: string, mode: Send
   const canSteer = !c.researchMode.enabled && !!c.session?.steer;
   let outcome = planSend(mode, c.streaming, canSteer, !!c.turnClaimed);
   if (outcome === "steered") {
-    let steered = false;
-    try {
-      steered = c.session?.steer?.(view.hoistOutbound(text)) ?? false;
-    } catch {
-      steered = false;
-    }
-    if (steered) {
-      view.addUserTurn(c, text);
-      view.persist();
-      return outcome;
-    }
+    if (trySteer(view, c, { text })) return outcome;
     outcome = "queued";
   }
   if (outcome === "queued") {

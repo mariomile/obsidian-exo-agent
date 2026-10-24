@@ -2,10 +2,8 @@
  * The per-chat message queue (pure). Messages typed while a turn runs wait here
  * and start as the next turn. Two rules keep queued work from being lost:
  *
- * - Stop and a broken session HOLD the user's queued messages instead of
- *   clearing them. A held message stays on screen and runs only when the user
- *   asks for it; Exo-generated items (`auto`) are dropped, they belonged to the
- *   turn that was stopped.
+ * - Stop and a broken session HOLD the queued messages instead of clearing
+ *   them. A held message stays on screen and runs only when the user asks.
  * - The context a message was written against (attached notes, selection) is
  *   frozen when it is queued, so it reaches the model even if the user switches
  *   chat or note before the turn starts.
@@ -21,30 +19,32 @@ export interface QueuedContext {
   selection: ContextSelection | null;
 }
 
-export interface QueuedMessage {
-  text: string;
-  images?: ImageAttachment[];
+/** What a message carries into its turn besides text and images. A queued
+ *  message IS its own turn options: the drain hands it to `runTurn` as is. */
+export interface TurnOpts {
+  /** Hidden text sent ahead of the message (a handoff, a recovery recap). */
   sendPrefix?: string;
   isRecoveryRetry?: boolean;
   researchMode?: ResearchModeState;
-  /** Agent slug bound to this queued message (`@agent` picked before send). */
+  /** Agent slug bound to this message (`@agent` picked before send). */
   agent?: string;
-  /** Written by Exo, not the user (core/model.ts `Message.auto`). */
-  auto?: true;
   /** Context frozen at enqueue; absent = read the composer when the turn runs. */
   context?: QueuedContext;
+}
+
+export interface QueuedMessage extends TurnOpts {
+  text: string;
+  images?: ImageAttachment[];
   /** Kept after a Stop or a failed turn: never drained, runs only on request. */
   held?: true;
   /** Open in the pill editor: never drained or steered until the edit is saved. */
   editing?: true;
 }
 
-/** Stop / non-recoverable error: drop Exo's own items, hold the user's. The
- *  kept items are the same objects, so a pill open in the editor keeps its edit. */
-export function holdQueue(queue: readonly QueuedMessage[]): QueuedMessage[] {
-  const kept = queue.filter((q) => !q.auto);
-  for (const q of kept) q.held = true;
-  return kept;
+/** Stop / non-recoverable error: pause every queued message, in place, so a
+ *  pill open in the editor keeps its edit. */
+export function holdQueue(queue: readonly QueuedMessage[]): void {
+  for (const q of queue) q.held = true;
 }
 
 /** Index of the next message the turn-end drain may run, or -1. */
@@ -64,25 +64,24 @@ export function takeAt(queue: QueuedMessage[], i: number): QueuedMessage | undef
   return queue.splice(i, 1)[0];
 }
 
-/** Turn options a queued message carries into `runTurn`, or undefined when it
- *  carries none (a plain follow-up). */
-export function turnOptsFor(q: QueuedMessage):
-  | Pick<QueuedMessage, "sendPrefix" | "isRecoveryRetry" | "researchMode" | "agent" | "auto" | "context">
-  | undefined {
-  if (!q.isRecoveryRetry && !q.sendPrefix && !q.researchMode && !q.agent && !q.auto && !q.context) return undefined;
-  return {
-    sendPrefix: q.sendPrefix,
-    isRecoveryRetry: q.isRecoveryRetry,
-    researchMode: q.researchMode,
-    agent: q.agent,
-    auto: q.auto,
-    context: q.context,
-  };
+/** A message can be injected into the live turn only as plain text: steer
+ *  carries no images (both providers refuse them), no hidden prefix, no agent,
+ *  no research run, and no context beyond what the turn already carries, so a
+ *  message with any of those waits for its own turn. Never outside a turn, in
+ *  Research Mode, held, or open in the editor. */
+export function canSteer(
+  q: QueuedMessage,
+  opts: { streaming: boolean; researchOn: boolean; hasSteer: boolean; turnContext?: QueuedContext }
+): boolean {
+  const plain = !q.images?.length && !q.sendPrefix && !q.isRecoveryRetry && !q.agent && !q.researchMode;
+  return opts.streaming && opts.hasSteer && !opts.researchOn && plain && contextSent(q.context, opts.turnContext) && !q.held && !q.editing;
 }
 
-/** A queued message can be injected into the live turn only without images
- *  (both providers refuse steer with attachments), outside Research Mode, and
- *  never while held (it belongs to no turn) or open in the editor. */
-export function canSteer(q: QueuedMessage, opts: { streaming: boolean; researchOn: boolean; hasSteer: boolean }): boolean {
-  return opts.streaming && opts.hasSteer && !opts.researchOn && !q.images?.length && !q.isRecoveryRetry && !q.held && !q.editing;
+/** Whether the running turn already carries everything `ctx` would add: a steer
+ *  sends only text, so a note or selection the turn never saw would be lost. */
+function contextSent(ctx: QueuedContext | undefined, turn: QueuedContext | undefined): boolean {
+  if (!ctx) return true;
+  const sel = ctx.selection;
+  if (sel && (sel.path !== turn?.selection?.path || sel.text !== turn.selection.text)) return false;
+  return ctx.paths.every((p) => turn?.paths.includes(p));
 }

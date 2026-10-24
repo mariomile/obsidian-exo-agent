@@ -84,7 +84,7 @@ const user = (text: string) => ({ role: "user" as const, text, at: 1 });
 const reply = (md: string) => ({ role: "assistant" as const, segments: [{ t: "text" as const, md }] });
 
 const convo = (id: string, messages: unknown[] = [], over: Partial<Convo> = {}): Convo =>
-  ({ id, listEl: new El({ cls: "mva-list" }), drawn: false, title: "t", messages, queue: [], pendingEl: null, allow: new Set(), researchMode: { enabled: false, startedAt: 0 }, ...over }) as unknown as Convo;
+  ({ id, listEl: new El({ cls: "mva-list" }), drawn: false, title: "t", messages, queue: [], allow: new Set(), researchMode: { enabled: false, startedAt: 0 }, ...over }) as unknown as Convo;
 
 /** A ChatView without Obsidian: the real prototype, the collaborators stubbed. */
 const viewWith = (all: Convo[]): ChatView => {
@@ -170,11 +170,18 @@ describe("a message reaching a chat that was never drawn keeps its history", () 
     expect(ctx.el.querySelector(".streamed-text")).not.toBeNull();
   });
 
-  it("queued messages go below the history, not into an empty list", () => {
-    const c = convo("bg", [user("one"), reply("two")], { queue: [{ text: "later" }] } as Partial<Convo>);
-    viewWith([c]).renderQueue(c);
-    expect(turns(c)).toEqual(["0", "1"]);
-    expect(lastChild(c).cls).toContain("mva-queue");
+  it("queued messages never enter a chat's list: the active chat's go above the composer", () => {
+    const bg = convo("bg", [user("one"), reply("two")], { queue: [{ text: "later" }] } as Partial<Convo>);
+    const view = viewWith([bg]);
+    const queueEl = new El({ cls: "mva-queue" });
+    Object.assign(view, { queueEl });
+    view.renderQueue(bg);
+    expect(bg.listEl.childElementCount, "a background chat's queue drew into its list").toBe(0);
+    expect(queueEl.childElementCount, "a background chat's queue took the composer slot").toBe(0);
+    Object.assign(view, { active: bg });
+    view.renderQueue(bg);
+    expect(bg.drawn).toBe(false);
+    expect(queueEl.querySelectorAll(".mva-queued")).toHaveLength(1);
   });
 });
 

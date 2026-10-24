@@ -21,7 +21,7 @@ import type { Component } from "obsidian";
 import type { AgentSession, ContextUsage, ProviderId } from "../providers/types";
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
-import type { QueuedMessage } from "../core/queue";
+import type { QueuedContext, QueuedMessage } from "../core/queue";
 import type { GoalState } from "../core/goal-loop";
 import type { LiveTask } from "../core/live-tasks";
 import type { TouchedNote } from "./graph-view";
@@ -200,7 +200,6 @@ export interface Convo {
    *  a reload there is nothing you "have not seen". */
   unread?: boolean;
   queue: QueuedMessage[];
-  pendingEl: HTMLElement | null; // container for queued-message chips
   /** The in-flight assistant turn of THIS conversation (null when idle) — the
    *  target for its session's ask_user cards, so parallel conversations can't
    *  cross-render into each other's transcripts. */
@@ -266,6 +265,10 @@ export interface Convo {
    *  only after the send is committed, and runtime-only: a reload loses the
    *  cached history too, so re-inlining once is the correct restart. */
   inlinedNoteMtimes?: Map<string, number>;
+  /** The notes and selection the latest turn sent. A steer adds only text, so
+   *  it may join that turn only when it carries nothing beyond these (core/queue
+   *  canSteer). Runtime-only. */
+  turnContext?: QueuedContext;
   /** Controller for the in-flight AI-title call, so disposing the conversation
    *  (close/delete/reset) aborts it. Runtime-only. */
   titleAbort?: AbortController | null;

@@ -1,5 +1,5 @@
 /**
- * Queued-message pills under the transcript. Each pill shows what will be sent
+ * Queued-message pills, pinned above the composer. Each pill shows what will be sent
  * (text, images, the context frozen with it) and the actions on it: edit in
  * place, steer into the running turn, run a held message, remove. State lives
  * on the Convo (core/queue.ts); functions of the view rather than view methods,
@@ -9,57 +9,71 @@
 import { Notice, setIcon, setTooltip } from "obsidian";
 import type { ChatView } from "../view";
 import type { Convo } from "./convo-types";
-import { canSteer, nextRunnable, takeAt, turnOptsFor, type QueuedMessage } from "../core/queue";
+import { canSteer, nextRunnable, takeAt, type QueuedMessage } from "../core/queue";
 import { clickable } from "./dom";
 
 export interface QueueHandlers {
   /** The item changed (edited, un-held): repaint, and start it if the chat is idle. */
-  changed(q: QueuedMessage): void;
+  changed(): void;
   steer(q: QueuedMessage): void;
   remove(q: QueuedMessage): void;
   /** Whether `q` can be injected into the running turn right now. */
   canSteer(q: QueuedMessage): boolean;
 }
 
-/** Run the next runnable message if the chat is idle (a held item was released
- *  after the turn ended), then repaint. */
-export function kickQueue(view: ChatView, c: Convo): void {
-  if (!c.streaming && !c.turnClaimed) {
-    const q = takeAt(c.queue, nextRunnable(c.queue));
-    if (q) {
-      view.renderQueue(c);
-      void view.runTurn(c, q.text, q.images, turnOptsFor(q));
-      return;
-    }
-  }
+/** Take the next runnable message (held ones wait for Run), repaint, and start
+ *  it. The item is its own TurnOpts: a recovery retry's prefix and a queued
+ *  message's frozen context and agent ride along. False when nothing could run. */
+export function runNextQueued(view: ChatView, c: Convo): boolean {
+  const q = takeAt(c.queue, nextRunnable(c.queue));
   view.renderQueue(c);
+  if (q) void view.runTurn(c, q.text, q.images, q);
+  return !!q;
 }
+
+/** Run the next message if the chat is idle (a held item was released after
+ *  the turn ended), else just repaint. */
+export function kickQueue(view: ChatView, c: Convo): void {
+  if (!c.streaming && !c.turnClaimed) runNextQueued(view, c);
+  else view.renderQueue(c);
+}
+
+/** Inject `q` into the running turn and draw it as the user's turn. False, with
+ *  nothing changed, when it would lose something (core/queue canSteer) or the
+ *  provider refuses: the caller queues it instead. */
+export function trySteer(view: ChatView, c: Convo, q: QueuedMessage): boolean {
+  if (!steerable(c, q)) return false;
+  let ok = false;
+  try {
+    ok = c.session?.steer?.(view.hoistOutbound(q.text)) ?? false;
+  } catch {
+    ok = false;
+  }
+  if (!ok) return false;
+  view.addUserTurn(c, q.text);
+  view.persist();
+  return true;
+}
+
+const steerable = (c: Convo, q: QueuedMessage): boolean =>
+  canSteer(q, { streaming: c.streaming, researchOn: c.researchMode.enabled, hasSteer: !!c.session?.steer, turnContext: c.turnContext });
 
 export function queueHandlers(view: ChatView, c: Convo): QueueHandlers {
   return {
     changed: () => kickQueue(view, c),
     steer: (q) => {
-      let ok = false;
-      try {
-        ok = c.session?.steer?.(view.hoistOutbound(q.text)) ?? false;
-      } catch {
-        ok = false;
-      }
-      if (!ok) {
-        new Notice("Exo — the running turn can't take it now, it stays queued");
+      if (!trySteer(view, c, q)) {
+        new Notice("Exo: the running turn can't take it now, it stays queued");
         return;
       }
       takeAt(c.queue, c.queue.indexOf(q));
-      view.addUserTurn(c, q.text);
-      view.persist();
       view.renderQueue(c);
     },
     remove: (q) => {
       takeAt(c.queue, c.queue.indexOf(q));
       view.renderQueue(c);
     },
-    canSteer: (q) =>
-      canSteer(q, { streaming: c.streaming, researchOn: c.researchMode.enabled, hasSteer: !!c.session?.steer }),
+    canSteer: (q) => steerable(c, q),
   };
 }
 
@@ -102,7 +116,7 @@ function editInPlace(row: HTMLElement, textEl: HTMLElement, q: QueuedMessage, h:
     drafts.delete(q);
     if (save && !text) return h.remove(q);
     if (save) q.text = text;
-    h.changed(q);
+    h.changed();
   };
   input.addEventListener("input", () => drafts.set(q, input.value));
   input.addEventListener("keydown", (e) => {
@@ -126,7 +140,7 @@ function editInPlace(row: HTMLElement, textEl: HTMLElement, q: QueuedMessage, h:
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
-/** Rebuild the pills inside `el` (the convo's `.mva-queue` container). */
+/** Rebuild the pills inside `el` (the view's `.mva-queue` host above the composer). */
 export function renderQueueRows(el: HTMLElement, queue: readonly QueuedMessage[], h: QueueHandlers): void {
   el.empty();
   for (const q of queue) {
@@ -144,7 +158,7 @@ export function renderQueueRows(el: HTMLElement, queue: readonly QueuedMessage[]
     if (q.held) {
       action(row, "play", "Run", () => {
         delete q.held;
-        h.changed(q);
+        h.changed();
       });
     }
     action(row, "x", "Remove", () => h.remove(q));

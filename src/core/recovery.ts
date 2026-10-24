@@ -67,6 +67,8 @@ export type RecoveryInput = {
   resumeRisky: boolean;
   /** The turn failed because the CLI has no usable login (see `isCliAuthFailure`). */
   authFailed?: boolean;
+  /** The turn threw an error that is neither a stop nor a session death. */
+  failed?: boolean;
 };
 
 /**
@@ -79,13 +81,18 @@ export type RecoveryInput = {
  * message resumes the transcript), "drop-clear-id" (nuclear — drop everything,
  * next message is fresh). `nextResumeRisky` — the value to assign to the convo's
  * resumeRisky flag. `enqueueRecapRetry` — stage-2 only: auto-retry the same user
- * message once with a private recap threaded to the provider.
+ * message once with a private recap threaded to the provider. `holdQueue`:
+ * pause the queued messages (core/queue) instead of draining them into a chat
+ * that would fail them the same way; a Stop holds them itself. A poisoned turn
+ * never holds, even if it also threw: the ladder recovers the session, so the
+ * queue drains into the recovered one.
  */
 export type RecoveryPlan = {
   footer: string | null;
   session: "none" | "drop-keep-id" | "drop-clear-id";
   nextResumeRisky: boolean;
   enqueueRecapRetry: boolean;
+  holdQueue: boolean;
 };
 
 /**
@@ -104,13 +111,13 @@ export type RecoveryPlan = {
  *   in the original); resumeRisky is left as-is. No session action, no footer.
  */
 export function resolveRecovery(s: RecoveryInput): RecoveryPlan {
-  const { poisoned, stopped, isRecoveryRetry, resumeRisky, authFailed } = s;
+  const { poisoned, stopped, isRecoveryRetry, resumeRisky, authFailed, failed } = s;
   if (authFailed && !stopped) {
     // A dead login is not a crashed session: resuming, recapping or wiping the
     // id cannot heal it, and every attempt fails the same way. Drop the live
     // process so the next message spawns one that reads the new login, keep the
     // id so it resumes this conversation, and leave the ladder disarmed.
-    return { footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false };
+    return { footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false, holdQueue: true };
   }
   if (poisoned && !stopped) {
     if (isRecoveryRetry) {
@@ -120,6 +127,7 @@ export function resolveRecovery(s: RecoveryInput): RecoveryPlan {
         session: "drop-clear-id",
         nextResumeRisky: false,
         enqueueRecapRetry: false,
+        holdQueue: false,
       };
     }
     if (resumeRisky) {
@@ -129,6 +137,7 @@ export function resolveRecovery(s: RecoveryInput): RecoveryPlan {
         session: "drop-clear-id",
         nextResumeRisky: false,
         enqueueRecapRetry: true,
+        holdQueue: false,
       };
     }
     // Stage 1 (resume-first): drop the live object, keep the id, arm the ladder.
@@ -137,14 +146,15 @@ export function resolveRecovery(s: RecoveryInput): RecoveryPlan {
       session: "drop-keep-id",
       nextResumeRisky: true,
       enqueueRecapRetry: false,
+      holdQueue: false,
     };
   }
   if (!poisoned) {
     // Healthy (or user-stopped without a poison) — reset the recovery ladder.
-    return { footer: null, session: "none", nextResumeRisky: false, enqueueRecapRetry: false };
+    return { footer: null, session: "none", nextResumeRisky: false, enqueueRecapRetry: false, holdQueue: !!failed && !stopped };
   }
   // poisoned && stopped — ladder not entered; resumeRisky untouched.
-  return { footer: null, session: "none", nextResumeRisky: resumeRisky, enqueueRecapRetry: false };
+  return { footer: null, session: "none", nextResumeRisky: resumeRisky, enqueueRecapRetry: false, holdQueue: false };
 }
 
 /** Build a compact plaintext recap of the recent transcript, used to re-seed a

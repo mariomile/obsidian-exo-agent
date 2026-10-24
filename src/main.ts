@@ -174,7 +174,7 @@ Poi scrivi il digest ESATTAMENTE in questo formato:
 (agenda essenziale + le 3 priorità che proponi tu, ognuna con un perché di una riga)
 
 ## ✅ Da fare
-(loop scaduti, chat ferme in needs-input/review, "N note in inbox da processare" se >0)
+(loop scaduti, "N note in inbox da processare" se >0)
 
 ## 📧 Mail da guardare
 

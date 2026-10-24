@@ -89,6 +89,7 @@ export class GalleryView {
     // closed.
     this.sessionsOnDisk = null;
     this.view.listEl.show();
+    this.view.queueEl.show();
     this.view.composer.getComposerEl().show();
     this.view.rebuildOutline();
   }
@@ -143,6 +144,7 @@ export class GalleryView {
     if (preset) for (const f of typeof preset === "string" ? [preset] : preset) this.historyFilters.add(f);
     if (!this.view.convos.includes(this.view.active)) this.view.convos.push(this.view.active);
     this.view.listEl.hide();
+    this.view.queueEl.hide();
     this.view.composer.getComposerEl().hide();
     const wrap = this.view.listHost.createDiv({ cls: "mva-gallery-wrap" });
     this.galleryEl = wrap;
