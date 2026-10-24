@@ -329,7 +329,8 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   flex-shrink: 0;
   background: transparent;
 }
-.mva-tabstrip.is-hidden {
+.mva-tabstrip.is-hidden,
+.mva-tabstrip.is-main-area {
   display: none;
 }
 .mva-tabs {
@@ -4497,6 +4498,75 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.mva-queue:focus-within {
+  opacity: 1;
+}
+/* Held after a Stop or a failed turn: still there, visibly paused. */
+.mva-queued.is-held {
+  border-style: solid;
+}
+.mva-queued.is-editing {
+  flex-wrap: wrap;
+  width: 85%;
+}
+.mva-queued-input {
+  flex: 1 1 100%;
+  min-height: 0;
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  resize: none;
+}
+.mva-queued-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.mva-queued-meta-icon,
+.mva-queued-act {
+  display: inline-flex;
+}
+.mva-queued-meta-icon .svg-icon,
+.mva-queued-act .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+.mva-queued-act {
+  flex-shrink: 0;
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color var(--mva-t);
+}
+.mva-queued-act:hover {
+  color: var(--text-normal);
+}
+.mva-cli-missing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 10px 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border-radius: var(--mva-r3);
+}
+.mva-cli-missing .svg-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-warning);
+}
+.mva-cli-missing-act {
+  margin-left: auto;
+  cursor: pointer;
+  color: var(--text-accent);
 }
 
 /* ---------------------------- capabilities ---------------------------- */

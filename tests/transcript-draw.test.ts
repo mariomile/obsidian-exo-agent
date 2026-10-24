@@ -61,6 +61,8 @@ class El {
   show(): void { this.hidden = false; }
   addClass(c: string): void { this.cls.push(c); }
   setAttr(k: string, v: string): void { this.attrs[k] = v; }
+  setAttribute(k: string, v: string): void { this.attrs[k] = v; }
+  addEventListener(): void {}
   querySelectorAll(sel: string): El[] {
     const want = sel.replace(/^\./, "");
     const hits: El[] = [];
@@ -82,7 +84,7 @@ const user = (text: string) => ({ role: "user" as const, text, at: 1 });
 const reply = (md: string) => ({ role: "assistant" as const, segments: [{ t: "text" as const, md }] });
 
 const convo = (id: string, messages: unknown[] = [], over: Partial<Convo> = {}): Convo =>
-  ({ id, listEl: new El({ cls: "mva-list" }), drawn: false, title: "t", messages, queue: [], pendingEl: null, allow: new Set(), ...over }) as unknown as Convo;
+  ({ id, listEl: new El({ cls: "mva-list" }), drawn: false, title: "t", messages, queue: [], pendingEl: null, allow: new Set(), researchMode: { enabled: false, startedAt: 0 }, ...over }) as unknown as Convo;
 
 /** A ChatView without Obsidian: the real prototype, the collaborators stubbed. */
 const viewWith = (all: Convo[]): ChatView => {

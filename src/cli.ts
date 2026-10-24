@@ -285,7 +285,7 @@ export interface CliDiagnostics {
 const diagCache = new Map<string, Promise<CliDiagnostics>>();
 
 /** Resolve a CLI and read its `--version`, for the Settings diagnostics line.
- *  Cached per (name, configured); never blocks — the caller fills the UI async. */
+ *  Cached per (name, configured) once found; never blocks — the caller fills the UI async. */
 export function cliDiagnostics(name: string, configured: string): Promise<CliDiagnostics> {
   const key = `${name} ${configured.trim()}`;
   const cached = diagCache.get(key);
@@ -296,6 +296,10 @@ export function cliDiagnostics(name: string, configured: string): Promise<CliDia
     return { bin, version, found: version !== null || safeExists(bin) };
   })();
   diagCache.set(key, p);
+  // A miss is not cached: the user may install the CLI or log in and come back.
+  void p.then((d) => {
+    if (!d.found) diagCache.delete(key);
+  });
   return p;
 }
 
