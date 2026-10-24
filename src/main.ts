@@ -320,7 +320,6 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
 
     await this.loadSettings();
-    this.inbox.start();
     // Seed the capability snapshot from the last app run, so menus and panels
     // are rich before the first session's init arrives (refreshed on every init).
     // Own file (session-caps-cache.json), not settings — see saveSessionCapsCache.
@@ -333,6 +332,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       () => this.lastSessionCaps?.agents ?? []
     );
     this.automationStore = new AutomationStore(adaptAppToAutomationVault(this.app), this.paths);
+    // After the store: on a hot reload onLayoutReady fires at once, and the feed
+    // subscribes to the automation list there.
+    this.inbox.start();
 
     const proposalRoot = this.manifest.dir;
     const adapter = this.app.vault.adapter;

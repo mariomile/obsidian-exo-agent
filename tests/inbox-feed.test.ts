@@ -106,3 +106,25 @@ describe("InboxFeed queue answers", () => {
     expect(feed.current(NOW).items.map((i) => i.title)).toContain("fresh");
   });
 });
+
+describe("InboxFeed.start on a hot reload", () => {
+  it("onload starts the feed only once the automation store exists", async () => {
+    // A hot reload runs onLayoutReady at once, so start() touches the store
+    // synchronously: started before it, onload threw and the plugin failed.
+    const { readFileSync } = await import("node:fs");
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const store = main.indexOf("this.automationStore = new AutomationStore(");
+    const start = main.indexOf("this.inbox.start();");
+    expect(store, "automation store construction moved").toBeGreaterThan(-1);
+    expect(start, "inbox.start() runs before the automation store exists").toBeGreaterThan(store);
+  });
+
+  it("subscribes to the automation list when the layout is already ready", () => {
+    const listeners: (() => void)[] = [];
+    const plugin = fakePlugin();
+    Object.assign(plugin.app.workspace, { onLayoutReady: (cb: () => void) => cb() });
+    Object.assign(plugin.automationStore, { onChange: (cb: () => void) => listeners.push(cb) });
+    new InboxFeed(plugin).start();
+    expect(listeners).toHaveLength(1);
+  });
+});
