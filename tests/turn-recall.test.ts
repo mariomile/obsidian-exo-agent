@@ -63,7 +63,22 @@ const chats: ChatRecord[] = [
 describe("matchPastChats", () => {
   it("matches past chats in the last 60 days, never the current one, with title, date and snippet", () => {
     const out = matchPastChats(chats, ["pricing", "tiers", "launch"], { excludeId: "current", now: NOW });
-    expect(out).toEqual([{ title: "Pricing call", date: "2026-09-23", snippet: "Let's settle Exo pricing tiers today" }]);
+    expect(out).toEqual([
+      { id: "c1", title: "Pricing call", date: "2026-09-23", snippet: "Let's settle Exo pricing tiers today", msgIndex: 0 },
+    ]);
+  });
+  it("carries the index of the best matching message, counting messages recall skips", () => {
+    const chat: ChatRecord = {
+      id: "deep",
+      title: "Deep",
+      messages: [
+        { role: "user", text: "report from a child", at: NOW - DAY, auto: true },
+        { role: "user", text: "pricing first", at: NOW - DAY },
+        { role: "assistant", segments: [{ t: "text", md: "Pricing tiers: Free and Pro." }] },
+      ],
+    };
+    const [hit] = matchPastChats([chat], ["pricing", "tiers"], { excludeId: "x", now: NOW });
+    expect(hit).toMatchObject({ id: "deep", msgIndex: 2, snippet: "Pricing tiers: Free and Pro." });
   });
   it("needs two keyword hits: one shared word is noise", () => {
     expect(matchPastChats(chats, ["tiers", "wedding2"], { excludeId: "current", now: NOW }).map((c) => c.title)).toEqual([]);
@@ -105,7 +120,13 @@ describe("formatRecallBlock", () => {
   });
   it("keeps at most 5 notes and 2 chats, and the whole block within 2000 chars", () => {
     const notes = Array.from({ length: 8 }, (_, i) => ({ path: `N/${i}.md`, excerpt: "e".repeat(300) }));
-    const past = Array.from({ length: 4 }, (_, i) => ({ title: `T${i}`, date: "2026-09-20", snippet: "s".repeat(300) }));
+    const past = Array.from({ length: 4 }, (_, i) => ({
+      id: `t${i}`,
+      title: `T${i}`,
+      date: "2026-09-20",
+      snippet: "s".repeat(300),
+      msgIndex: 0,
+    }));
     const block = formatRecallBlock(notes, past);
     expect(block.length).toBeLessThanOrEqual(RECALL_MAX_CHARS);
     expect((block.match(/^- N\//gm) ?? []).length).toBeLessThanOrEqual(5);

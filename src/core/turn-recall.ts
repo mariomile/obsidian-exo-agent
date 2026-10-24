@@ -71,9 +71,13 @@ export interface NoteRecall {
 }
 
 export interface ChatRecall {
+  id: string;
   title: string;
   date: string;
   snippet: string;
+  /** The message the recall points at (`data-msg` in the transcript), or null
+   *  when only the chat as a whole is known. */
+  msgIndex: number | null;
 }
 
 const flat = (s: string, n: number): string => {
@@ -102,21 +106,27 @@ export function matchPastChats(
       chat,
       lines: chatLines(chat.messages)
         .filter((l) => l.at !== undefined && l.at >= since && l.text)
-        .map((l) => ({ text: l.text, at: l.at ?? 0, present: new Set(words(l.text)) })),
+        .map((l) => ({ text: l.text, at: l.at ?? 0, index: l.index, present: new Set(words(l.text)) })),
     }));
   const df = new Map(keywords.map((k) => [k, candidates.filter((c) => c.lines.some((l) => l.present.has(k))).length]));
   const rare = [...keywords].sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0)).slice(0, RECALL_CHAT_KEYWORDS);
   const need = Math.min(2, rare.length);
   const scored: { recall: ChatRecall; score: number; at: number }[] = [];
   for (const { chat, lines } of candidates) {
-    let best: { text: string; score: number; at: number } | null = null;
+    let best: { text: string; score: number; at: number; index: number } | null = null;
     for (const line of lines) {
       const score = rare.filter((k) => line.present.has(k)).length;
-      if (score >= need && (!best || score > best.score)) best = { text: line.text, score, at: line.at };
+      if (score >= need && (!best || score > best.score)) best = { text: line.text, score, at: line.at, index: line.index };
     }
     if (!best) continue;
     scored.push({
-      recall: { title: chat.title || "Untitled chat", date: localDate(best.at), snippet: flat(best.text, RECALL_EXCERPT_CHARS) },
+      recall: {
+        id: chat.id,
+        title: chat.title || "Untitled chat",
+        date: localDate(best.at),
+        snippet: flat(best.text, RECALL_EXCERPT_CHARS),
+        msgIndex: best.index,
+      },
       score: best.score,
       at: best.at,
     });

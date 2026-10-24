@@ -11,6 +11,7 @@
 import { Notice } from "obsidian";
 import type ExoPlugin from "../main";
 import { buildChatList, nextNeedsInput } from "../core/chat-rows";
+import { CHAT_LINK_ACTION, parseChatLink } from "../core/chat-link";
 
 export function registerChatCommands(plugin: ExoPlugin): void {
   plugin.addCommand({
@@ -67,6 +68,21 @@ export function registerChatCommands(plugin: ExoPlugin): void {
     name: "Settle this chat to a note",
     callback: () => void settleActive(plugin),
   });
+  // `obsidian://exo-chat?id=..&msg=..` (core/chat-link): the link a recalled
+  // chat or a saved note's provenance points at, from anywhere in the vault.
+  plugin.registerObsidianProtocolHandler(CHAT_LINK_ACTION, (params) => void openChatLink(plugin, params));
+}
+
+/** Reveal Exo and open the linked chat at its message; archived chats too.
+ *  Bridge loaded on call, like `settleActive`, to keep view.ts out of here. */
+async function openChatLink(plugin: ExoPlugin, params: Record<string, string>): Promise<void> {
+  const link = parseChatLink(params);
+  if (link) {
+    await plugin.activateView();
+    const { openChatAt } = await import("./convo-bridge");
+    if (openChatAt(plugin.app, link.convoId, link.msgIndex)) return;
+  }
+  new Notice("Chat not found. It may have been deleted.");
 }
 
 /** Mirror the conversation the user is standing in. The gate lives in

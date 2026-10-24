@@ -30,6 +30,7 @@ import {
   revealReentry,
   turnMessageIndex,
 } from "../src/ui/reentry";
+import { revealMessage } from "../src/ui/turn-jump";
 import type { Convo } from "../src/ui/convo-types";
 import type { Message } from "../src/core/model";
 import type { ComposerDraft } from "../src/ui/composer";
@@ -829,6 +830,23 @@ describe("the band's anchor element", () => {
 
   it("finds no element for a message the DOM does not carry", () => {
     expect(anchorTurn(fakeList([0, 1]), 5)).toBeNull();
+  });
+});
+
+describe("revealing a message (a recalled chat or an exo-chat link)", () => {
+  it("scrolls the turn rendering that message into view and flashes it", () => {
+    const dom = fakeList([0, null, 1, 2]);
+    expect(revealMessage(dom, 2)).toBe(true);
+    const turn = (dom as unknown as El).children[3];
+    expect(turn.scrolled).toBe(true);
+    expect(turn.classes.has("is-flash")).toBe(true);
+    expect((dom as unknown as El).children[2].scrolled).toBe(false);
+  });
+
+  it("does nothing for a message the DOM does not carry", () => {
+    const dom = fakeList([0, 1]);
+    expect(revealMessage(dom, 5)).toBe(false);
+    expect((dom as unknown as El).children.some((t) => t.scrolled || t.classes.has("is-flash"))).toBe(false);
   });
 });
 

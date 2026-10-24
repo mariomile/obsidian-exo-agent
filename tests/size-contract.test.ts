@@ -66,7 +66,10 @@ const CEILINGS: Record<string, number> = {
   // 5959 -> 5942 righe reali, tetto 5947.
   // Abbassato il 2026-10-24 (pulizia post Release 2): la coda persiste.
   // 5946 righe reali, tetto 5946.
-  "src/view.ts": 5946,
+  // Abbassato il 2026-10-24 (Release 3, S1 recall apribile): `jumpToTurn` vive
+  // ora in `ui/turn-jump.ts` insieme a `revealMessage`. 5938 righe reali,
+  // tetto 5938.
+  "src/view.ts": 5938,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
