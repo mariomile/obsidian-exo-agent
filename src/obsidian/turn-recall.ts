@@ -6,6 +6,7 @@ import {
   matchPastChats,
   rankRecall,
   recallKeywords,
+  semanticHits,
   shouldRecall,
   titleLane,
   RECALL_LANE_DEPTH,
@@ -13,9 +14,10 @@ import {
   RECALL_MAX_NOTES,
   type ChatRecall,
   type NoteRecall,
+  type TitleHit,
 } from "../core/turn-recall";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
-import { recallChats, recallHost } from "../ui/chat-recall";
+import { recallChatScores, recallHost } from "../ui/chat-recall";
 import type { PathFilter } from "../core/vault-exclusions";
 
 /** What recall found for one outbound message. */
@@ -74,24 +76,22 @@ export async function recallForTurn(
   const basePath = (app.vault.adapter as { basePath?: string } | undefined)?.basePath;
   const semantic =
     input.pluginDir && basePath
-      ? withinBudget(recallChats(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH), SEMANTIC_BUDGET_MS)
+      ? withinBudget(recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH), SEMANTIC_BUDGET_MS)
       : Promise.resolve(null);
   let sonar: NoteRecall[] = [];
-  let title: NoteRecall[] = [];
+  let title: TitleHit[] = [];
   try {
     const exclude = input.exclude ?? vaultExclusion(app);
-    title = titleLane(keywords, noteNames(app, exclude))
-      .slice(0, RECALL_LANE_DEPTH)
-      .map((path) => ({ path, excerpt: "" }));
+    title = titleLane(keywords, noteNames(app, exclude)).slice(0, RECALL_LANE_DEPTH);
     const { hits } = await searchVaultNotes(app, keywords.join(" "), RECALL_LANE_DEPTH, exclude);
     sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
   } catch {
     /* search failed: chats alone may still recall something */
   }
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
-  const ids = await semantic;
+  const scored = await semantic;
   const { notes, chats } = rankRecall(
-    { sonar, title, lexicalChats, semanticChats: ids && chatsFromIds(ids, input.chats, { excludeId: input.convoId }) },
+    { sonar, title, lexicalChats, semanticChats: scored && chatsFromIds(semanticHits(scored), input.chats, { excludeId: input.convoId }) },
     { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS },
   );
   const block = formatRecallBlock(notes, chats);

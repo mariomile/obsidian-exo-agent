@@ -130,14 +130,26 @@ export async function recallChats(
   query: string,
   limit = 12,
 ): Promise<string[] | null> {
+  const scored = await recallChatScores(host, query, limit);
+  return scored && scored.map((s) => s.id);
+}
+
+/** {@link recallChats} with each chat's similarity score, for callers that
+ *  must tell a match from the index's best guess. */
+export async function recallChatScores(
+  host: RecallHost,
+  query: string,
+  limit = 12,
+): Promise<{ id: string; score: number }[] | null> {
   const q = query.trim();
   if (!q) return null;
   const out = await run(host, ["query", host.pluginDir, q, String(limit)], QUERY_TIMEOUT_MS);
   if (out === null) return null;
   return out
     .split("\n")
-    .map((line) => line.split("\t")[1]?.trim())
-    .filter((id): id is string => !!id);
+    .map((line) => line.split("\t"))
+    .filter(([score, id]) => !!id?.trim() && !Number.isNaN(Number(score)))
+    .map(([score, id]) => ({ id: id.trim(), score: Number(score) }));
 }
 
 /** Bring the index up to date. Cheap and pipeline-free when nothing changed, so

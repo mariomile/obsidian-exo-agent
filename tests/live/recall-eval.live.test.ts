@@ -26,6 +26,7 @@ import {
   matchPastChats,
   rankRecall,
   recallKeywords,
+  semanticHits,
   titleLane,
   RECALL_LANE_DEPTH,
   RECALL_MAX_CHATS,
@@ -115,16 +116,21 @@ const INDEX_FILES = ["meta.json", "vectors.f32"].map((f) => join(PLUGIN_DIR, "ch
 const indexStamp = (): string => INDEX_FILES.map((f) => statSync(f).mtimeMs).join(",");
 
 /** The semantic chat lane exactly as the plugin spawns it (`query` mode, from
- *  the plugin folder), with its wall time. Null when the script fails. */
-function semanticIds(question: string): { ids: string[] | null; ms: number } {
+ *  the plugin folder): every scored id, best first, and its wall time. Null
+ *  when the script fails. */
+function semanticScores(question: string): { scored: { id: string; score: number }[] | null; ms: number } {
   const script = join(__dirname, "..", "..", "scripts", "chat-recall.mjs");
   const t0 = performance.now();
   try {
     const out = execFileSync("node", [script, "query", PLUGIN_DIR, question, "12"], { cwd: PLUGIN_DIR, encoding: "utf8", timeout: 30_000 });
-    const ids = out.split("\n").map((l) => l.split("\t")[1]?.trim()).filter((id): id is string => !!id);
-    return { ids, ms: Math.round(performance.now() - t0) };
+    const scored = out
+      .split("\n")
+      .map((l) => l.split("\t"))
+      .filter(([score, id]) => !!id?.trim() && !Number.isNaN(Number(score)))
+      .map(([score, id]) => ({ id: id.trim(), score: Number(score) }));
+    return { scored, ms: Math.round(performance.now() - t0) };
   } catch {
-    return { ids: null, ms: Math.round(performance.now() - t0) };
+    return { scored: null, ms: Math.round(performance.now() - t0) };
   }
 }
 
@@ -136,7 +142,7 @@ const pad = (s: string, n: number) => (s.length >= n ? s : s + " ".repeat(n - s.
 
 describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault", () => {
   it("serves the expected sources for the 10 questions", async () => {
-    const fixture = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "recall-eval.json"), "utf8")) as { cases: EvalCase[] };
+    const fixture = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "recall-eval.json"), "utf8")) as { cases: EvalCase[]; ordinary: string[] };
     const store = liveChats();
     const cases = fixture.cases.map((c) => resolveChats(c, store));
     const keywords = cases.map((c) => recallKeywords(c.question));
@@ -157,13 +163,14 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       const { hits } = await searchVaultNotes(sonarApp(vault.sonar[i]), keywords[i].join(" "), RECALL_LANE_DEPTH, exclude);
       const sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
       const t0 = performance.now();
-      const titlePaths = titleLane(keywords[i], names).slice(0, RECALL_LANE_DEPTH);
+      const title = titleLane(keywords[i], names).slice(0, RECALL_LANE_DEPTH);
       titleMs.push(Math.round(performance.now() - t0));
-      const title = titlePaths.map((path) => ({ path, excerpt: "" }));
+      const titlePaths = title.map((t) => t.path);
       const lexicalChats = matchPastChats(store, keywords[i], { excludeId: "", now });
-      const sem = semanticIds(c.question);
+      const sem = semanticScores(c.question);
       semanticMs.push(sem.ms);
-      const semanticChats = sem.ids && chatsFromIds(sem.ids, store, { excludeId: "" });
+      const semIds = sem.scored && sem.scored.map((x) => x.id);
+      const semanticChats = sem.scored && chatsFromIds(semanticHits(sem.scored), store, { excludeId: "" });
       const ranked = rankRecall({ sonar, title, lexicalChats, semanticChats }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS });
       const score = scoreCase(recallItems(ranked), c);
       scores.push(score);
@@ -177,12 +184,24 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       const lanes = c.expect.map((e) => {
         if ("note" in e) return `sonar ${at(probe, e.note)} title ${at(titlePaths, e.note)}`;
         const tag = e.chat.id ? "" : "unresolved ";
-        return `${tag}lexical ${at(lexicalChats.map((x) => x.id), e.chat.id)} semantic ${sem.ids ? at(sem.ids, e.chat.id) : "n/a"}`;
+        return `${tag}lexical ${at(lexicalChats.map((x) => x.id), e.chat.id)} semantic ${semIds ? at(semIds, e.chat.id) : "n/a"}`;
       });
       rows.push(
         `${c.id}  ${pad(score.hit ? (score.full ? "full" : "hit") : "MISS", 5)} ${pad(score.firstRank === null ? "-" : String(score.firstRank), 3)} ${pad(score.trapLeads ? "TRAP" : "", 5)} ${lanes.join(", ")}`,
       );
     }
+    // Ordinary editing prompts must not drag past chats into the turn: chats
+    // injected without the semantic floor, then with it.
+    const ordinary = fixture.ordinary.map((prompt) => {
+      const kw = recallKeywords(prompt);
+      const lexicalChats = matchPastChats(store, kw, { excludeId: "", now });
+      const { scored } = semanticScores(prompt);
+      const chats = (ids: string[] | null) =>
+        rankRecall({ sonar: [], title: [], lexicalChats, semanticChats: ids && chatsFromIds(ids, store, { excludeId: "" }) }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS }).chats.length;
+      return { before: chats(scored && scored.map((x) => x.id)), after: chats(scored && semanticHits(scored)) };
+    });
+    const total = (k: "before" | "after") => ordinary.reduce((n, o) => n + o[k], 0);
+
     expect(indexStamp(), "the semantic chat index changed during a read-only run").toBe(stampBefore);
     const summary = summarize(scores);
     const ms = (xs: number[]) => {
@@ -198,6 +217,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         `sonar lane: ${ms(vault.sonarMs)}`,
         `title lane (${names.length} notes): ${ms(titleMs)}`,
         `semantic lane (node spawn + embed): ${ms(semanticMs)}`,
+        `ordinary prompts (${ordinary.length}): ${total("before")} chats injected without the semantic floor, ${total("after")} with it (${ordinary.map((o) => `${o.before}>${o.after}`).join(" ")})`,
       ].join("\n"),
     );
 

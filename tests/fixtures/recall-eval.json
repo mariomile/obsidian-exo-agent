@@ -62,5 +62,17 @@
       "question": "Cosa ci eravamo detti sull'equity come vero moltiplicatore di ricchezza e Bending Spoons?",
       "expect": [{ "chat": { "title": "Equity il vero moltiplicatore di ricchezza", "date": "2026-10-07" } }]
     }
+  ],
+  "ordinary": [
+    "Rename this heading to something shorter please",
+    "Summarise this note in three bullet points",
+    "Fix the typo in the second paragraph",
+    "Translate the selected paragraph into English",
+    "Make this list alphabetical and remove duplicates",
+    "Riassumi questa nota in poche righe",
+    "Correggi la punteggiatura di questo paragrafo",
+    "Aggiungi un titolo e dei tag a questa nota",
+    "Convert this table into a bulleted list",
+    "Che ore sono adesso a New York?"
   ]
 }

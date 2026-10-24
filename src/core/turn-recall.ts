@@ -16,6 +16,11 @@ export const RECALL_MAX_CHATS = 2;
 /** How deep each note lane is read before fusion: a note Sonar ranks 13th can
  *  still lead when the title lane names it too. */
 export const RECALL_LANE_DEPTH = 20;
+/** How far a semantic chat's score must stand above the median of the index's
+ *  answer to count. Its raw cosine scores sit in a narrow 0.77 to 0.87 band
+ *  for every prompt, so a fixed floor cannot tell a match from noise.
+ *  Live 2026-10-24: expected chats lift 0.071 / 0.061 / 0.032, best noise 0.026 (eval questions) and 0.020 (ordinary prompts). */
+export const RECALL_CHAT_MIN_LIFT = 0.029;
 /** Reciprocal rank fusion constant, the same as Sonar's own `fuse`. */
 const RRF_K = 60;
 export const RECALL_EXCERPT_CHARS = 300;
@@ -149,7 +154,7 @@ export interface RecallLanes {
   /** Sonar (or the built-in scorer), best first, exclusions already applied. */
   sonar: NoteRecall[];
   /** Notes whose name the message mentions ({@link titleLane}). */
-  title: NoteRecall[];
+  title: TitleHit[];
   /** {@link matchPastChats}. */
   lexicalChats: ChatRecall[];
   /** The semantic chat index ({@link chatsFromIds}), best first; null when it
@@ -161,13 +166,21 @@ export interface RecallLanes {
  *  {@link recallKeywords}, minus dates and numbers. */
 const nameWords = (name: string): string[] => [...new Set(words(name).filter((w) => w.length >= 4 && !/^\d+$/.test(w)))];
 
+/** A note the message names: how many words of its name the message shares,
+ *  and `whole` when it shares every one. */
+export interface TitleHit {
+  path: string;
+  shared: number;
+  whole: boolean;
+}
+
 /**
  * Notes the message names: a basename or alias that shares two keywords with
  * it, or whose every word is a keyword ("Turno", "Alberto Aspese"). More shared
  * words first, then names covered more fully, then path. A name sharing a
  * single word with a longer title is noise, not a mention.
  */
-export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): string[] {
+export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): TitleHit[] {
   const asked = new Set(keywords);
   const hits: { path: string; shared: number; cover: number }[] = [];
   for (const note of notes) {
@@ -183,7 +196,17 @@ export function titleLane(keywords: readonly string[], notes: readonly { path: s
   }
   return hits
     .sort((a, b) => b.shared - a.shared || b.cover - a.cover || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-    .map((h) => h.path);
+    .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1 }));
+}
+
+/** The chats of a semantic answer (best first) that stand out from it by
+ *  {@link RECALL_CHAT_MIN_LIFT} over its median score. */
+export function semanticHits(scored: readonly { id: string; score: number }[]): string[] {
+  if (!scored.length) return [];
+  const sorted = scored.map((s) => s.score).sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return scored.filter((s) => s.score - median >= RECALL_CHAT_MIN_LIFT).map((s) => s.id);
 }
 
 /** Recalls for the chats the semantic index returned, in its order: the chat's
@@ -226,10 +249,20 @@ function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
     .map(([, v]) => v.item);
 }
 
-/** The notes and chats one turn injects, best first. */
+/** The notes and chats one turn injects, best first. A note named in full
+ *  comes in on its name alone. A note named only in part needs the vault
+ *  search to have found it too: three shared words lift it from anywhere in
+ *  that search ("turno open core" for turno-saas-open-core), two only reorder
+ *  the notes the search would inject anyway ("Orchestration Board" for
+ *  "Orchestration Board Ideas" must not push out the decision about it). */
 export function rankRecall(lanes: RecallLanes, opts: { maxNotes: number; maxChats: number }): { notes: NoteRecall[]; chats: ChatRecall[] } {
+  const found = new Set(lanes.sonar.map((n) => n.path));
+  const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
+  const title = lanes.title
+    .filter((t) => t.whole || (t.shared >= 3 ? found : injected).has(t.path))
+    .map((t) => ({ path: t.path, excerpt: "" }));
   return {
-    notes: fuse([lanes.sonar, lanes.title], (n) => n.path).slice(0, opts.maxNotes),
+    notes: fuse([lanes.sonar, title], (n) => n.path).slice(0, opts.maxNotes),
     chats: fuse([lanes.lexicalChats, lanes.semanticChats ?? []], (c) => c.id).slice(0, opts.maxChats),
   };
 }
