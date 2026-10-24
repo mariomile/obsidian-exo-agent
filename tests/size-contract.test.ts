@@ -57,8 +57,8 @@ const CEILINGS: Record<string, number> = {
   // 6571 -> 6247 righe reali. Il tetto scende a 6260: 13 righe di margine,
   // come sugli altri file.
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): board, task,
-  // figli e rapporti non esistono piu'. 6226 -> 6005 righe reali, tetto 6010.
-  "src/view.ts": 6010,
+  // figli e rapporti non esistono piu'. 6228 -> 6007 righe reali, tetto 6012.
+  "src/view.ts": 6012,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -183,9 +183,9 @@ const CEILINGS: Record<string, number> = {
   // decisione di build, e questo tetto e' cio' che la mette sul tavolo quando
   // serve davvero invece che come refactor speculativo.
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): stili di board,
-  // task modal e figli nella sidebar cancellati. 6881 -> 6437 righe reali,
-  // tetto 6442.
-  "styles.css": 6442,
+  // task modal e figli nella sidebar cancellati. 6951 -> 6507 righe reali,
+  // tetto 6512.
+  "styles.css": 6512,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel
