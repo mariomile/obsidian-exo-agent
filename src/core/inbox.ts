@@ -19,6 +19,7 @@
  */
 import { awaitsReview, runOwner, type AutomationRef, type AutomationRunRecord } from "./automations";
 import { dailyPulseNeedsReview, type DailyPulseReviewState } from "./daily-pulse";
+import { plural } from "./reentry";
 import { deriveLane, type SessionSnapshot } from "./session-cards";
 import { effectiveSnoozed, wokeAt } from "./thread-lifecycle";
 
@@ -90,11 +91,23 @@ export interface Inbox {
   byKind: Record<InboxKind, number>;
 }
 
+/** The verbs every Inbox panel is mounted with (`obsidian/inbox-feed` implements them). */
+export interface InboxHandlers {
+  /** Row click: resolve a request or an error, read a result. */
+  open(item: InboxItem): void;
+  /** Inline Allow / Deny on a chat blocked on a permission. */
+  decide(item: InboxItem, verdict: "allow" | "deny"): void;
+  /** Dismiss errors, mark results read. */
+  clear(items: readonly InboxItem[]): void;
+  /** "Mark N reviewed" on a group of automation runs. */
+  markReviewed(item: InboxItem): void;
+  /** Run a failed automation or Daily Pulse again. */
+  retry(item: InboxItem): void;
+}
+
 const DAY = 86_400_000;
 /** Queue answers stay in the Inbox this long after they land. */
 const ANSWER_WINDOW_MS = DAY;
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * The one visibility rule: a chat the sidebar lists, and so a chat the Inbox

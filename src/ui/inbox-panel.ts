@@ -14,21 +14,8 @@
  * tabbing through.
  */
 import { setIcon } from "obsidian";
-import { inboxSig, type Inbox, type InboxItem, type InboxKind } from "../core/inbox";
+import { inboxSig, type Inbox, type InboxHandlers, type InboxItem, type InboxKind } from "../core/inbox";
 import { clickable, isolateActivation } from "./dom";
-
-export interface InboxHandlers {
-  /** Row click: resolve a request or an error, read a result. */
-  open(item: InboxItem): void;
-  /** Inline Allow / Deny on a chat blocked on a permission. */
-  decide(item: InboxItem, verdict: "allow" | "deny"): void;
-  /** Dismiss errors, mark results read. */
-  clear(items: readonly InboxItem[]): void;
-  /** "Mark N reviewed" on a group of automation runs. */
-  markReviewed(item: InboxItem): void;
-  /** Run a failed automation or Daily Pulse again. */
-  retry(item: InboxItem): void;
-}
 
 const SECTIONS: readonly { kind: InboxKind; label: string; bulk?: string }[] = [
   { kind: "request", label: "Requests" },

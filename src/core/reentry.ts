@@ -95,7 +95,8 @@ export function hasReentryNews(work: ReentryWork): boolean {
   return work.steps > 0 || work.files > 0;
 }
 
-const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
+/** "1 file", "2 files": English count plus noun. */
+export const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** Every slot, always all of them, always in `REENTRY_SLOTS` order. */
 export function reentrySlots(work: ReentryWork): ReentrySlot[] {
