@@ -116,6 +116,18 @@ describe("buildInbox: chats", () => {
     expect(inbox.count).toBe(0);
   });
 
+  it("labels a chat that woke from a snooze with no new turn as Snooze ended, dated at the wake", () => {
+    const woke = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
+    const [it] = buildInbox(input({ chats: [woke] })).items;
+    expect(it).toMatchObject({ kind: "result", detail: "Snooze ended", at: NOW - HOUR, verbs: ["read"] });
+  });
+
+  it("keeps New reply, dated at the turn, when a reply landed while the chat was snoozed", () => {
+    const c = chat("a", { updatedAt: NOW - 90 * 60_000, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR / 2 });
+    const [it] = buildInbox(input({ chats: [c] })).items;
+    expect(it).toMatchObject({ detail: "New reply", at: NOW - 90 * 60_000 });
+  });
+
   it("lists an unseen finished chat as a new result", () => {
     const inbox = buildInbox(input({ chats: [chat("a")] }));
     expect(inbox.items[0]).toMatchObject({ id: "chat:a:reply", kind: "result", verbs: ["read"] });

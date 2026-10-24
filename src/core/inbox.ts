@@ -234,6 +234,13 @@ function chatItem(c: InboxChat, now: number): InboxItem | null {
       verbs: ["resolve", "archive"],
     };
   }
+  // Woke from a snooze with nothing new since: say so, dated at the wake. A turn
+  // that landed after the snooze began is still a reply, dated at that turn.
+  const woke = wokeAt(c, now) ?? 0;
+  const turnSinceSnooze = c.snoozedAt === undefined || (c.updatedAt ?? 0) > c.snoozedAt;
+  if (woke > (c.updatedAt ?? 0) && !turnSinceSnooze) {
+    return { ...base, id: `chat:${c.id}:woke`, at: woke, kind: "result", detail: "Snooze ended", verbs: ["read"] };
+  }
   return { ...base, id: `chat:${c.id}:reply`, kind: "result", detail: "New reply", verbs: ["read"] };
 }
 
