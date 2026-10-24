@@ -2113,15 +2113,15 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     return this.inbox.refresh();
   }
 
-  /** Re-render an open Capabilities hub — called when a new SessionCaps
-   *  snapshot arrives, so the pane's live statuses (MCP health, skill/tool
-   *  inventories) match the session without a manual refresh. Cheap: the
-   *  row-based tabs reconcile by key, so unchanged rows aren't rebuilt. */
   /** What memory may do on the plugin's own surfaces (see core/memory-caps). */
   memoryCaps(): MemoryCaps { return pluginMemoryCaps(this); }
   readConversationStore(): Promise<ChatRecord[]> { return convoBridge.readConversationStore(this); }
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }> { return undoMemoryWrite(this, this.harvestLog, sha); }
 
+  /** Re-render an open Capabilities hub — called when a new SessionCaps
+   *  snapshot arrives, so the pane's live statuses (MCP health, skill/tool
+   *  inventories) match the session without a manual refresh. Cheap: the
+   *  row-based tabs reconcile by key, so unchanged rows aren't rebuilt. */
   refreshHub(only?: HubTab): void {
     for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
       if (leaf.view instanceof HubView) leaf.view.refresh(only);
