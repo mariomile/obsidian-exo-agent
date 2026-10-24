@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeTouched, type TouchedNote } from "../src/core/touched";
+import { WRITE_TOOLS, mergeTouched, type TouchedNote } from "../src/core/touched";
 
 describe("mergeTouched", () => {
   it("dedupes repeated reads of the same note", () => {
@@ -44,5 +44,11 @@ describe("mergeTouched", () => {
     mergeTouched(list, "a.md", "read");
     mergeTouched(list, "b.md", "write");
     expect(list.map((t) => t.path)).toEqual(["a.md", "b.md"]);
+  });
+});
+
+describe("WRITE_TOOLS", () => {
+  it("save_to_note is a write, so the touched footer and headless runs count it", () => {
+    expect(WRITE_TOOLS.test("mcp__obsidian__save_to_note")).toBe(true);
   });
 });

@@ -59,7 +59,8 @@ import { buildRecap as buildConvoRecap } from "./core/recap";
 import { assembleContext, formatContextDebug, selectUnchangedPaths } from "./core/context-assembly";
 import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
-import { clickable } from "./ui/dom";
+import { clickable, flashIcon } from "./ui/dom";
+import { mountSaveReceipt } from "./ui/save-receipt";
 import { swapTailChild } from "./ui/tail-child";
 import { mountFileUiPreview, renderChatMarkdown, UI_PREVIEW_PROMPT } from "./obsidian/ui-previews";
 import { disposeTranscriptPreviews } from "./obsidian/preview-lifecycle";
@@ -739,6 +740,7 @@ export class ChatView extends ItemView {
       paths: this.plugin.paths,
       convoId: c.id, // gates the chat tools
       browserBridge: browserBridgeFor(this.plugin, c.id), // undefined when off/mobile
+      onSaved: (r) => c.currentCtx && mountSaveReceipt(this.app, this.plugin.noteSaves, c.currentCtx.el, r),
     };
     const obsidianServer = useObsidian ? createObsidianToolServer(this.app, toolOpts) : undefined;
 
@@ -3140,7 +3142,7 @@ export class ChatView extends ItemView {
     setIcon(copy, "copy");
     copy.onclick = () => {
       void navigator.clipboard.writeText(text);
-      this.flashIcon(copy, "check", "copy");
+      flashIcon(copy, "check", "copy");
     };
 
     const insert = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Insert into note" } });
@@ -3454,15 +3456,6 @@ export class ChatView extends ItemView {
     }
   }
 
-  private flashIcon(btn: HTMLElement, on: string, off: string): void {
-    btn.empty();
-    setIcon(btn, on);
-    window.setTimeout(() => {
-      btn.empty();
-      setIcon(btn, off);
-    }, 1200);
-  }
-
   private async insertIntoNote(text: string, btn: HTMLElement): Promise<void> {
     const f = this.app.workspace.getActiveFile();
     if (!f) {
@@ -3471,7 +3464,7 @@ export class ChatView extends ItemView {
     }
     await this.app.vault.append(f, `\n\n${text}\n`);
     new Notice(`Inserted into ${f.basename}`);
-    this.flashIcon(btn, "check", "file-down");
+    flashIcon(btn, "check", "file-down");
   }
 
   private openNote(path: string): void {

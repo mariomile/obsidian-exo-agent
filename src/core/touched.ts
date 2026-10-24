@@ -11,7 +11,7 @@ export type { TouchedNote };
  *  Single source of truth shared by `view.ts` (per-turn footer) and
  *  `core/recap.ts` (conversation rollup). */
 export const WRITE_TOOLS =
-  /Write|Edit|MultiEdit|NotebookEdit|append_to_note|update_frontmatter|create_note|add_links|edit_note|insert_at_cursor|rename_note/;
+  /Write|Edit|MultiEdit|NotebookEdit|save_to_note|update_frontmatter|create_note|add_links|edit_note|insert_at_cursor|rename_note/;
 
 /** Merge one tool-touched file into a touched list: reads dedupe; a write
  * upgrades a read entry and bumps the per-note edit count. */

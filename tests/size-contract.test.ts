@@ -66,7 +66,10 @@ const CEILINGS: Record<string, number> = {
   // 5959 -> 5942 righe reali, tetto 5947.
   // Abbassato il 2026-10-24 (pulizia post Release 2): la coda persiste.
   // 5946 righe reali, tetto 5946.
-  "src/view.ts": 5946,
+  // Abbassato il 2026-10-24 (Release 3, save_to_note): `flashIcon` vive in
+  // `ui/dom.ts`, la ricevuta del salvataggio in `ui/save-receipt.ts`.
+  // 5946 -> 5939 righe reali, tetto 5939.
+  "src/view.ts": 5939,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -110,7 +113,10 @@ const CEILINGS: Record<string, number> = {
   // il riquadro Resume che lo usava. 2823 -> 2815 righe reali, tetto 2820.
   // La review di Release 2 aggiunge `listAutomations` alle fonti del Daily
   // Pulse: 2815 -> 2816 righe reali, tetto invariato a 2820.
-  "src/main.ts": 2820,
+  // Abbassato il 2026-10-24 (Release 3, save_to_note): `createQueueRequest`
+  // vive in `queue.ts`; il log dei salvataggi entra in `obsidian/note-save.ts`.
+  // 2816 -> 2805 righe reali, tetto 2805.
+  "src/main.ts": 2805,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza

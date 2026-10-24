@@ -50,7 +50,7 @@ export function describeActivity(name: string, input: unknown): string {
     case "NotebookEdit":
     case "mcp__obsidian__create_note":
     case "mcp__obsidian__edit_note":
-    case "mcp__obsidian__append_to_note": {
+    case "mcp__obsidian__save_to_note": {
       const p = base(asStr(i.file_path || i.notebook_path || i.target || i.path));
       return p ? `Writing ${p}` : "Writing a note";
     }
