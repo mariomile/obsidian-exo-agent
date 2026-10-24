@@ -21,7 +21,7 @@ import type { Component } from "obsidian";
 import type { AgentSession, ContextUsage, ProviderId, SessionCaps } from "../providers/types";
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
-import type { QueuedContext, QueuedMessage } from "../core/queue";
+import type { PersistedQueuedMessage, QueuedContext, QueuedMessage } from "../core/queue";
 import type { GoalState } from "../core/goal-loop";
 import type { LiveTask } from "../core/live-tasks";
 import type { TouchedNote } from "./graph-view";
@@ -97,6 +97,8 @@ export interface ConvoData {
    *  catch-up after a closed Obsidian starts where it left off. Absent = none
    *  harvested yet (core/memory-harvest). */
   harvestedIndex?: number;
+  /** Messages queued behind a running turn (core/queue). Restored held, never auto-sent. */
+  queue?: PersistedQueuedMessage[];
   messages: PersistedMessage[];
 }
 
