@@ -6,7 +6,7 @@
  *
  * The default view is T3 Code's thread inbox (core/thread-lifecycle): what
  * you pinned, Active (everything not put away), then the Snoozed and
- * Settled shelves. What needs you also gets the needs-you strip. A date
+ * Settled shelves. What needs you also sits in the Inbox above it. A date
  * bucket answers "when did I touch this", which is a question you ask
  * occasionally; the sidebar's standing question is "what is my situation", and
  * only the state axis answers it. The date axis is still available whole, as
@@ -193,8 +193,8 @@ export interface ChatListVM {
    */
   sections: ChatSection[];
   /**
-   * Every conversation blocked on a human right now — a permission prompt or an
-   * open question — newest first. The needs-you strip's whole source.
+   * Every conversation blocked on a human right now (a permission prompt or an
+   * open question), newest first. The "next chat needing you" command's queue.
    *
    * Deliberately NOT a section: it is derived from the visible set BEFORE the
    * query filter and outside the section machinery entirely, because that is
@@ -202,8 +202,7 @@ export interface ChatListVM {
    * move without you must not be reachable only through a section the user put
    * away, or through a search they happen to be halfway through typing.
    *
-   * Empty when nothing is blocked, and the strip then renders nothing at all —
-   * no chrome, no placeholder, no standing alert surface.
+   * Empty when nothing is blocked.
    */
   blocked: ChatRow[];
   /** Rows before the query filter. Distinguishes "no chats yet" from "no chats
@@ -227,14 +226,13 @@ type ActivityKey = (typeof ACTIVITY_SECTIONS)[number][0];
 
 /**
  * The one definition of "this row wants a human": blocked on a permission or a
- * question right now (`lane`), or ended badly and still unacknowledged
- * (`badge`). Exported because the list is not the only reader — the rows paint
- * an attention state from it too, and when the view restated the rule it
- * restated it twice and got one of them wrong: the rich row asked for both
- * arms, the compact row asked only for `badge`, guarded by a comment asserting
- * the other arm could not reach it.
+ * question right now (`lane`), or ended in an error (`badge`). A STOPPED turn is
+ * not on the list: you stopped it, so it is not news (core/inbox counts it out
+ * the same way). Exported because the list is not the only reader: the rows
+ * paint an attention state from it too, and when the view restated the rule it
+ * restated it twice and got one of them wrong.
  */
-export const needsYou = (r: ChatRow): boolean => r.lane === "needs-input" || !!r.badge;
+export const needsYou = (r: ChatRow): boolean => r.lane === "needs-input" || r.badge === "error";
 
 const activityKey = (r: ChatRow): ActivityKey => r.shelf;
 
@@ -477,9 +475,9 @@ export function buildChatList(
     rows.push(row);
   }
 
-  // The needs-you strip, over `visible` rather than `matched` — see `blocked`
-  // on ChatListVM for why it is built here, off to the side, instead of being
-  // read back out of a section.
+  // The blocked queue, over `visible` rather than `matched`: see `blocked` on
+  // ChatListVM for why it is built here, off to the side, instead of being read
+  // back out of a section.
   const blocked: ChatRow[] = [];
   for (const s of visible) {
     const d = deriveLane(s);

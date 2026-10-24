@@ -1107,7 +1107,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
       const target = args.id ? runs.find((r) => r.id === args.id) : unreviewedWriteRuns(runs)[0];
       if (!target) return ok(args.id ? `No run with id "${args.id}".` : "No unreviewed write runs.");
       if (args.action === "reviewed") {
-        await exo.markAutomationRunReviewed(target.id);
+        await exo.markAutomationRunsReviewed([target.id]);
         return ok(`Run "${target.name}" (${target.id}) marked as reviewed.`);
       }
       const restored = await exo.restoreAutomationRun(target.id);

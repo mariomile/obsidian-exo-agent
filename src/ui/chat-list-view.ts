@@ -2,8 +2,8 @@
  * The `exo-chats` sidebar — every AI conversation in one left-hand list,
  * grouped by state (what needs you, what is running, what you have open) or,
  * in `days` mode, by the day it was last touched. It is also the mission deck:
- * a needs-you strip above the search field, and a decision you can take from
- * the row itself when a chat is blocked on a permission.
+ * the Inbox above the search field (ui/inbox-panel), and a decision you can
+ * take from the row itself when a chat is blocked on a permission.
  *
  * THE BOUNDARY. This pane owns no conversation. It reads them through
  * `plugin.listChatRows()` and it CHANGES them only through plugin wrappers —
@@ -41,9 +41,7 @@ import { addAutoSettleItems } from "./auto-settle-menu";
 import {
   chatDot,
   chatRowSig,
-  blockedReason,
   isSectionCollapsed,
-  needsStripSig,
   rowPreview,
   rowStatusText,
   toggleSectionCollapsed,
@@ -53,6 +51,7 @@ import { reconcileList, type CardModel } from "./keyed-reconcile";
 import { clickable, isolateActivation } from "./dom";
 import { recallChats, reindexChats, recallHost, isRecallUnavailable } from "./chat-recall";
 import { addScheduledButton } from "./scheduled-ui";
+import { mountInbox } from "./inbox-panel";
 
 export const CHATS_VIEW_TYPE = "exo-chats";
 export const CHATS_ICON = "hi-messages";
@@ -94,14 +93,10 @@ const DOT_LABEL: Record<ChatDot, string> = {
 export class ChatListView extends ItemView {
   private query = "";
   private listHost: HTMLElement | null = null;
-  /** The needs-you strip, pinned above the search field. Outside `listHost` on
-   *  purpose: that is what makes it immune to section collapse — no section owns
-   *  it, so no section can put it away. */
-  private needsHost: HTMLElement | null = null;
-  /** Signature of the painted strip, so the 5s backstop rebuilds it only when
-   *  what is blocked actually changed. Same discipline as `reconcileList`, which
-   *  the strip is too small to be worth. */
-  private needsSig = "";
+  /** The Inbox, pinned above the search field. Outside `listHost` on purpose:
+   *  no section owns it, so no collapsed section or half-typed search can put
+   *  away what waits for you. */
+  private inboxHost: HTMLElement | null = null;
   private emptyHost: HTMLElement | null = null;
   private searchEl: HTMLInputElement | null = null;
   /** Which empty state is currently painted, so the 5s backstop doesn't rebuild
@@ -152,6 +147,9 @@ export class ChatListView extends ItemView {
     // timer fires after onClose and paints into detached DOM. Timer ids are a
     // shared space, so registerInterval clears a setTimeout just as well.
     this.registerInterval(window.setTimeout(() => this.paint(), 800));
+    // Runs, suggestions and queue answers move on disk, not on this tick: the
+    // feed says when, so the Inbox does not wait five seconds to agree.
+    this.register(this.plugin.inbox.onChange(() => this.paintInbox()));
     this.paint();
     // Bring the semantic index up to date in the background. Incremental and
     // pipeline-free when nothing changed, so opening the pane costs ~50ms; the
@@ -178,7 +176,7 @@ export class ChatListView extends ItemView {
 
     // Above the search field: the one band no filter or collapsed section can
     // empty. Built once and left empty; `:empty` collapses it in CSS.
-    this.needsHost = root.createDiv({ cls: "mva-chats-needs" });
+    this.inboxHost = root.createDiv({ cls: "mva-inbox mva-chats-inbox" });
 
     const search = root.createEl("input", {
       cls: "mva-chats-search",
@@ -289,11 +287,11 @@ export class ChatListView extends ItemView {
 
   private paint(): void {
     if (!this.listHost) return;
+    // BEFORE the empty states, deliberately: the Inbox answers "what is waiting
+    // on me", and a search that matches nothing must not take that off screen.
+    this.paintInbox();
     const sources = this.plugin.listChatRows();
-    if (sources === null) {
-      this.renderNeedsStrip([]);
-      return this.renderEmpty("open-exo");
-    }
+    if (sources === null) return this.renderEmpty("open-exo");
     // One clock read per paint: grouping and the row labels must agree, and two
     // Date.now() calls a few lines apart can straddle a minute boundary.
     const now = Date.now();
@@ -305,10 +303,6 @@ export class ChatListView extends ItemView {
       // Only feed the ranking back in if it answered the query on screen.
       semanticIds: this.semanticFor === this.query.trim() ? this.semanticIds : [],
     });
-    // BEFORE the empty states, deliberately: the strip answers "what is waiting
-    // on me", and a search that matches nothing must not be able to take that
-    // answer off screen (core/chat-rows, `blocked`).
-    this.renderNeedsStrip(vm.blocked);
     if (vm.total === 0) return this.renderEmpty("no-chats");
     if (vm.matched === 0) return this.renderEmpty("no-matches");
     if (this.emptyKind !== null) {
@@ -334,45 +328,9 @@ export class ChatListView extends ItemView {
     this.paintCursor(false);
   }
 
-  /* ---------------------------- needs-you strip ------------------------- */
-
-  /**
-   * One quiet chip per blocked chat, or nothing at all.
-   *
-   * Three rules, and they are the whole feature:
-   *
-   *  1. ABSENT WHEN EMPTY. Not a "0 waiting" badge, not an empty tray: a strip
-   *     that is always on screen is an alert surface, and this pane already
-   *     cured its alarm fatigue once. At rest the band does not exist.
-   *  2. IMMUNE TO COLLAPSE. It renders outside `listHost`, from `vm.blocked`,
-   *     which is built before sectioning — so no collapsed section and no
-   *     half-typed search can hide a chat that cannot move without you.
-   *  3. QUIET. A chip is a title and what it is waiting on, in the pane's own
-   *     text ladder. The urgency is carried by the fact that the band exists,
-   *     not by colour.
-   *
-   * Rebuilt only when the set actually changes: the 5s backstop calls this on
-   * every tick, and a rebuild would drop the focus ring off a chip the user is
-   * tabbing through.
-   */
-  private renderNeedsStrip(blocked: readonly ChatRow[]): void {
-    const host = this.needsHost;
-    if (!host) return;
-    const sig = needsStripSig(blocked);
-    if (sig === this.needsSig) return;
-    this.needsSig = sig;
-    host.empty();
-    if (blocked.length === 0) return;
-    for (const r of blocked) {
-      const chip = host.createDiv({ cls: "mva-chats-needs-chip" });
-      chip.createSpan({ cls: "mva-chats-needs-name", text: r.title });
-      const why = blockedReason(r.reason);
-      chip.createSpan({ cls: "mva-chats-needs-why", text: why.short });
-      // The chip says what it wants; a screen reader gets the whole sentence,
-      // because "Alpha permission" out of context is not one.
-      chip.setAttribute("aria-label", `${r.title} — needs ${why.long}`);
-      clickable(chip, () => void this.plugin.revealConversation(r.id));
-    }
+  /** The Inbox (core/inbox, ui/inbox-panel): same model and panel as the Cockpit. */
+  private paintInbox(): void {
+    if (this.inboxHost) mountInbox(this.inboxHost, this.plugin.inbox.current(), this.plugin.inbox.handlers);
   }
 
   /* ------------------------------ keyboard ------------------------------ */

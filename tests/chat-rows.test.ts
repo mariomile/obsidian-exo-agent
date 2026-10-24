@@ -391,7 +391,7 @@ describe("buildChatList — pinned", () => {
     expect(ids(vm, "active")).toEqual([]);
   });
 
-  it("still lists a pinned blocked chat in the needs-you strip", () => {
+  it("still lists a pinned blocked chat in the blocked queue", () => {
     const vm = build([src({ id: "a", pinned: true, streaming: true, pendingPerm: true })]);
     expect(ids(vm, "pinned")).toEqual(["a"]);
     expect(vm.blocked.map((r) => r.id)).toEqual(["a"]);
@@ -758,11 +758,11 @@ describe("buildChatList — the live activity phrase", () => {
 });
 
 /* ---------------------------------------------------------------------------
- * Phase 5 — the mission deck: the needs-you strip and the cycle key.
+ * Phase 5: the blocked queue and the cycle key.
  * ------------------------------------------------------------------------ */
 
-describe("buildChatList — the needs-you strip", () => {
-  it("is empty when nothing is blocked, so the strip renders nothing at all", () => {
+describe("buildChatList: the blocked queue", () => {
+  it("is empty when nothing is blocked", () => {
     const vm = build([src({ id: "a", streaming: true }), src({ id: "b" })]);
     expect(vm.blocked).toEqual([]);
   });
@@ -847,9 +847,13 @@ describe("needsYou", () => {
   const row = (over: Partial<ChatRow> = {}): ChatRow =>
     ({ id: "a", lane: null, badge: null, ...over }) as ChatRow;
 
-  it("is true on both arms: blocked right now, or ended badly and unacknowledged", () => {
+  it("is true on both arms: blocked right now, or ended in an error", () => {
     expect(needsYou(row({ lane: "needs-input" }))).toBe(true);
     expect(needsYou(row({ badge: "error" }))).toBe(true);
+  });
+
+  it("is false for a turn the user stopped", () => {
+    expect(needsYou(row({ badge: "stopped" }))).toBe(false);
   });
 
   it("is false for a running or idle row", () => {

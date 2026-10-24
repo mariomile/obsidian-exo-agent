@@ -30,7 +30,7 @@ function fakeApp(autos: Automation[]) {
     saveSettings: vi.fn(async () => undefined),
     loadAutomationRuns: vi.fn(async () => []),
     restoreAutomationRun: vi.fn(async () => []),
-    markAutomationRunReviewed: vi.fn(async () => undefined),
+    markAutomationRunsReviewed: vi.fn(async () => undefined),
     runPlaybook: vi.fn(async () => true),
     runAutomationNow: vi.fn(async () => true),
     automationStore: {

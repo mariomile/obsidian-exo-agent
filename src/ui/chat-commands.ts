@@ -102,9 +102,9 @@ async function settleActive(plugin: ExoPlugin): Promise<void> {
 }
 
 /**
- * Cycle to the next blocked conversation, wrapping. The queue is the sidebar's
- * own needs-you strip — `buildChatList().blocked`, unfiltered and unsectioned —
- * so the key and the strip can never disagree about what is waiting.
+ * Cycle to the next blocked conversation, wrapping. The queue is
+ * `buildChatList().blocked`, unfiltered and unsectioned, so a search or a
+ * collapsed section can never hide a chat from the key.
  *
  * Says so out loud when nothing is waiting: a command that silently does
  * nothing is indistinguishable from one that is broken.

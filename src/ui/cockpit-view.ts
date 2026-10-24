@@ -89,6 +89,7 @@ export class CockpitView extends ItemView {
         if (leaf === this.leaf) void this.refresh();
       })
     );
+    this.register(this.plugin.inbox.onChange(() => void this.refresh()));
   }
 
   /* ------------------------------ actions ------------------------------ */

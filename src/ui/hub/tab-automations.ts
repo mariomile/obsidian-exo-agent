@@ -251,7 +251,7 @@ function renderRunRow(host: HTMLElement, r: AutomationRunRecord, ctx: HubTabCont
     const reviewed = row.createEl("button", { cls: "mva-btn", text: "Reviewed" });
     reviewed.onclick = () => {
       reviewed.setAttr("disabled", "true");
-      void ctx.plugin.markAutomationRunReviewed(r.id).finally(() => ctx.rerender());
+      void ctx.plugin.markAutomationRunsReviewed([r.id]).finally(() => ctx.rerender());
     };
   }
 

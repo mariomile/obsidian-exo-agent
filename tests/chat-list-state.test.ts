@@ -6,7 +6,6 @@ import {
   chatDot,
   chatRowSig,
   isSectionCollapsed,
-  needsStripSig,
   rowPreview,
   rowStatusText,
   toggleSectionCollapsed,
@@ -238,32 +237,6 @@ describe("chatRowSig", () => {
   });
 });
 
-describe("needsStripSig", () => {
-  const chip = (over: Partial<ChatRow> = {}): ChatRow =>
-    ({ id: "c1", title: "Alpha", reason: "perm", ...over }) as ChatRow;
-
-  it("is identical across a tick where nothing about the blocked set moved", () => {
-    // The strip is rebuilt whole, so an equal signature is what keeps the focus
-    // ring on a chip the user is tabbing through across a 5s tick.
-    expect(needsStripSig([chip()])).toBe(needsStripSig([chip()]));
-  });
-
-  it("moves when a blocked chat is retitled while its prompt is open", () => {
-    // The generated-title path renames chats unprompted, including blocked
-    // ones: a chip left on the old name points at a chat the user cannot find.
-    expect(needsStripSig([chip()])).not.toBe(needsStripSig([chip({ title: "Renamed" })]));
-  });
-
-  it("moves when what a chat is waiting on changes", () => {
-    expect(needsStripSig([chip()])).not.toBe(needsStripSig([chip({ reason: "ask" })]));
-  });
-
-  it("moves when the set itself changes", () => {
-    expect(needsStripSig([chip()])).not.toBe(needsStripSig([chip(), chip({ id: "c2" })]));
-    expect(needsStripSig([chip()])).not.toBe(needsStripSig([]));
-  });
-});
-
 describe("the chats pane's reader/owner boundary", () => {
   const source = readFileSync(join(__dirname, "..", "src/ui/chat-list-view.ts"), "utf8");
   /** The file's CODE. The header comment is allowed — required, even — to name
@@ -317,13 +290,13 @@ describe("the live phrase moves per tool call, never per token", () => {
 });
 
 describe("blockedReason", () => {
-  it("gives a bare noun for a chip and a noun phrase for a sentence", () => {
-    expect(blockedReason("perm")).toEqual({ short: "permission", long: "permission" });
-    expect(blockedReason("ask")).toEqual({ short: "answer", long: "an answer" });
+  it("gives a noun phrase that reads in a sentence", () => {
+    expect(blockedReason("perm")).toBe("permission");
+    expect(blockedReason("ask")).toBe("an answer");
   });
 
   it("is what the status line spends, so the two cannot drift", () => {
     const line = rowStatusText({ lane: "needs-input", reason: "ask", activity: null });
-    expect(line).toBe(`Needs ${blockedReason("ask").long}`);
+    expect(line).toBe(`Needs ${blockedReason("ask")}`);
   });
 });

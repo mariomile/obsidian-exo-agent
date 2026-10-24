@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { ChatView, VIEW_TYPE, EXO_ICON } from "./view";
 import { DiagLog } from "./core/diag";
 import { handoffPrefix } from "./core/handoff";
-import { CockpitView, COCKPIT_VIEW_TYPE } from "./ui/cockpit-view";
+import { COCKPIT_VIEW_TYPE } from "./ui/cockpit-view";
+import { InboxFeed } from "./obsidian/inbox-feed";
 import { AgentsView, AGENTS_VIEW_TYPE } from "./ui/agents-view";
 import { HubView, HUB_VIEW_TYPE, type HubTab } from "./ui/hub/hub-view";
 import {
@@ -270,6 +271,8 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /** Event-driven agent triggers. Disarmed until layout-ready. */
   private agentTriggers: AgentTriggerDriver | null = null;
   proposalStore!: ProposalStore;
+  /** What waits for you (core/inbox): the sidebar and the Cockpit paint from it. */
+  readonly inbox = new InboxFeed(this);
   workflowSignalStore!: WorkflowSignalStore;
   private proposalAcceptanceDeps!: ProposalAcceptanceDeps;
   private readonly proposalAbort = new AbortController();
@@ -317,6 +320,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
 
     await this.loadSettings();
+    this.inbox.start();
     // Seed the capability snapshot from the last app run, so menus and panels
     // are rich before the first session's init arrives (refreshed on every init).
     // Own file (session-caps-cache.json), not settings — see saveSessionCapsCache.
@@ -1966,14 +1970,14 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   async acceptProposal(id: string): Promise<ProposalAcceptResult> {
     if (!this.settings.proposalKernelEnabled) throw new Error("Suggestions are off.");
     const result = await this.proposalStore.accept(id);
-    void this.refreshCockpit();
+    void this.refreshInbox();
     return result;
   }
 
   async dismissProposal(id: string) {
     if (!this.settings.proposalKernelEnabled) throw new Error("Suggestions are off.");
     const record = await this.proposalStore.dismiss(id);
-    void this.refreshCockpit();
+    void this.refreshInbox();
     return record;
   }
 
@@ -2026,7 +2030,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         return output;
       },
     });
-    if (result.status === "generated" && result.appended + result.saved.length > 0) void this.refreshCockpit();
+    if (result.status === "generated" && result.appended + result.saved.length > 0) void this.refreshInbox();
     return result;
   }
 
@@ -2086,7 +2090,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       try {
         const appended = await this.proposalStore.append(parsed.candidate, input.source);
         if (appended.status === "appended") {
-          void this.refreshCockpit();
+          void this.refreshInbox();
           return { status: "appended", proposalId: appended.record.id };
         }
         if (appended.status === "duplicate") return { status: "duplicate" };
@@ -2100,9 +2104,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  private async refreshCockpit(): Promise<void> {
-    const view = this.app.workspace.getLeavesOfType(COCKPIT_VIEW_TYPE)[0]?.view;
-    if (view instanceof CockpitView) await view.refresh();
+  /** Reload the Inbox's on-disk sources; every surface repaints from `inbox.onChange`. */
+  private refreshInbox(): Promise<void> {
+    return this.inbox.refresh();
   }
 
   /** Re-render an open Capabilities hub — called when a new SessionCaps
@@ -2272,7 +2276,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   /** Explicit user-triggered refresh. It is allowed while the schedule is paused. */
   async runDailyPulseNow(now: number = Date.now()): Promise<boolean> {
     const ok = await this.generateAndPersistDailyPulse(now);
-    await this.refreshCockpit();
+    await this.refreshInbox();
     return ok;
   }
 
@@ -2283,14 +2287,14 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     if (!(file instanceof TFile)) {
       const ok = await this.generateAndPersistDailyPulse(Date.now(), true);
       if (!ok) {
-        await this.refreshCockpit();
+        await this.refreshInbox();
         new Notice("Daily Pulse could not be refreshed. Retry from Automations.");
         return;
       }
       file = this.app.vault.getAbstractFileByPath(reviewPath);
     }
     if (!(file instanceof TFile)) {
-      await this.refreshCockpit();
+      await this.refreshInbox();
       new Notice("Daily Pulse review note is unavailable.");
       return;
     }
@@ -2302,7 +2306,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         await this.saveSettings();
       }
     });
-    await this.refreshCockpit();
+    await this.refreshInbox();
   }
 
   private async openDailyPulseTarget(params: Record<string, string>): Promise<void> {
@@ -2756,7 +2760,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
         new Notice(`Exo: the automation run history was unreadable. A copy is in ${copy}; a new history starts now.`);
       }
       await adapter.write(path, JSON.stringify(change(records)));
-    });
+    }).then(() => void this.refreshInbox()); // the Inbox follows; it never fails the write
   }
 
   /** Persist one write-run record. Oversized snapshots are dropped (the report
@@ -2810,10 +2814,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     return restored;
   }
 
-  /** Mark a write run as reviewed — it leaves the Cockpit "to review" pool. */
-  async markAutomationRunReviewed(id: string): Promise<void> {
+  /** Mark runs reviewed (or dismissed, for a failed run): they leave the Inbox. */
+  async markAutomationRunsReviewed(ids: readonly string[]): Promise<void> {
     const reviewedAt = Date.now();
-    await this.updateAutomationRuns((records) => records.map((r) => (r.id === id ? { ...r, reviewedAt } : r)));
+    await this.updateAutomationRuns((records) => records.map((r) => (ids.includes(r.id) ? { ...r, reviewedAt } : r)));
   }
 
 }

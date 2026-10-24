@@ -45,20 +45,11 @@ export function chatDot(row: { lane?: "running" | "needs-input"; unseen: boolean
 }
 
 /**
- * What a blocked row is waiting for, in the two lengths the UI needs: a bare
- * noun for a chip that already sits under the chat's name, and the full noun
- * phrase for anything that has to read as a sentence (a status line, a screen
- * reader label).
- *
- * One function because the mapping was written three times - here, and twice
- * more in the needs-you strip, where the chip said "answer" and the aria-label
- * said "an answer". Same two-branch decision, three copies, in the module pair
- * whose whole contract is that what a row SAYS is decided in core.
+ * What a blocked row is waiting for, as a noun phrase that reads in a sentence
+ * (the status line). Decided here, in core, because what a row SAYS is.
  */
-export function blockedReason(reason: ChatRow["reason"]): { short: string; long: string } {
-  return reason === "perm"
-    ? { short: "permission", long: "permission" }
-    : { short: "answer", long: "an answer" };
+export function blockedReason(reason: ChatRow["reason"]): string {
+  return reason === "perm" ? "permission" : "an answer";
 }
 
 
@@ -78,7 +69,7 @@ export function blockedReason(reason: ChatRow["reason"]): { short: string; long:
  *    line of a 216px column saying the same thing twice.
  */
 export function rowStatusText(r: Pick<ChatRow, "lane" | "reason" | "activity" | "progress">): string | null {
-  if (r.lane === "needs-input") return `Needs ${blockedReason(r.reason).long}`;
+  if (r.lane === "needs-input") return `Needs ${blockedReason(r.reason)}`;
   if (r.lane !== "running") return null;
   return r.activity ? null : `Working${progressSuffix(r)}`;
 }
@@ -126,21 +117,6 @@ export function chatRowSig(r: ChatRow, o: { rich: boolean; age: string }): strin
     r.activity ?? "", r.permRule ?? "", r.progress ? `${r.progress.done}/${r.progress.total}` : "",
     r.provider, r.model, r.messageCount, r.open, r.pinned, r.unseen, o.age,
   ].join("|");
-}
-
-/**
- * The same discipline for the needs-you strip, which is rebuilt whole rather
- * than reconciled: a chip is two words, so patching one is not worth a keyed
- * list — but a rebuild on every 5s tick would drop the focus ring off a chip
- * the user is tabbing through, so the strip only rebuilds when this moves.
- *
- * It carries exactly what a chip renders: who is waiting and what for. The
- * title is in there because a blocked chat can be retitled while its prompt is
- * open (the generated-title path does it unprompted), and a chip left on the
- * old name is a chip pointing at a chat the user can no longer find by name.
- */
-export function needsStripSig(blocked: readonly Pick<ChatRow, "id" | "title" | "reason">[]): string {
-  return blocked.map((r) => `${r.id}:${r.title}:${r.reason ?? ""}`).join("|");
 }
 
 /**

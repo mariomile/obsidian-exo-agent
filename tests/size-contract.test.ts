@@ -179,7 +179,9 @@ const CEILINGS: Record<string, number> = {
   // solo lo stato vero (query, cursore, ordine, collapse).
   // Abbassato il 2026-10-24 (rimozione Orchestration Board): annidamento dei
   // figli cancellato. 870 -> 738 righe reali, tetto 743.
-  "src/ui/chat-list-view.ts": 743,
+  // Abbassato il 2026-10-24 (Release 2, Inbox): la striscia needs-you e' sostituita
+  // dal pannello Inbox (ui/inbox-panel). 738 -> 696 righe reali, tetto 701.
+  "src/ui/chat-list-view.ts": 701,
   // Aggiunto il 2026-08-12. `styles.css` e' il file piu' grande del repo (6994
   // righe, davanti a view.ts) ed era l'ultimo grande senza tetto: l'ondata
   // chat+cosmos gli ha aggiunto 361 righe e niente l'ha notato.
@@ -198,7 +200,9 @@ const CEILINGS: Record<string, number> = {
   // tetto 6512.
   // Abbassato il 2026-10-24 (review Release 1): stili morti dei chip della
   // vecchia coda. 6507 -> 6502 righe reali, tetto 6507.
-  "styles.css": 6507,
+  // Abbassato il 2026-10-24 (Release 2, Inbox): la striscia needs-you lascia il
+  // posto alle regole compatte `.mva-inbox-*`. 6502 -> 6487 righe reali, tetto 6492.
+  "styles.css": 6492,
 };
 
 /** Righe come le conta `wc -l`: i newline, non i segmenti — così il numero nel
