@@ -129,6 +129,19 @@ describe("collectDailyPulseInput", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("lists unreviewed runs once per automation, newest run first", async () => {
+    const result = await collectDailyPulseInput(sources({
+      loadAutomationRuns: async () => [
+        run("old", { slug: "digest", name: "Digest", startedAt: NOW - 60_000, writes: ["a.md", "b.md"] }),
+        run("new", { slug: "digest", name: "Digest", startedAt: NOW - 10_000, writes: ["b.md"] }),
+      ],
+    }), { now: NOW, lastPulseAt: LAST_PULSE_AT });
+
+    expect(result.input.automationRuns).toEqual([
+      { id: "new", name: "Digest", startedAt: NOW - 10_000, writes: ["b.md", "a.md"] },
+    ]);
+  });
+
   it("keeps successful source data when other sources fail and identifies each warning", async () => {
     const result = await collectDailyPulseInput(sources({
       loadLoops: async () => { throw new Error("loops unavailable"); },

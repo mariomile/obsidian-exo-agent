@@ -27,6 +27,7 @@ import {
   type Automation,
 } from "../../core/automation-model";
 import { dailyPulseMetaLabel } from "../../core/daily-pulse";
+import { openFailedRuns } from "../../core/inbox";
 import { formatAge } from "../../core/actions-hub";
 import type { HubTabContext } from "./shared";
 import { openAutomationEditor, editingState } from "./automation-editor";
@@ -182,7 +183,8 @@ function renderCard(
 
   if (ctx.expanded(runsKey) && own.length) {
     const timeline = list.createDiv({ cls: "mva-auto2-timeline" });
-    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, ctx);
+    const open = new Set(openFailedRuns(own).map((r) => r.id));
+    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, open, ctx);
   }
 }
 
@@ -207,10 +209,17 @@ function renderLegacyRuns(
   });
   if (!ctx.expanded(key)) return;
   const wrap = host.createDiv({ cls: "mva-auto2-timeline" });
-  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, ctx);
+  const open = new Set(openFailedRuns(old).map((r) => r.id));
+  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, open, ctx);
 }
 
-function renderRunRow(host: HTMLElement, r: AutomationRunRecord, ctx: HubTabContext): void {
+/** `openFailed`: ids of the failed runs the Inbox lists as errors (`openFailedRuns`). */
+function renderRunRow(
+  host: HTMLElement,
+  r: AutomationRunRecord,
+  openFailed: ReadonlySet<string>,
+  ctx: HubTabContext
+): void {
   const wrap = host.createDiv();
   const row = wrap.createDiv({ cls: "mva-auto-runrow" });
   const when = new Date(r.startedAt);
@@ -253,6 +262,13 @@ function renderRunRow(host: HTMLElement, r: AutomationRunRecord, ctx: HubTabCont
       reviewed.setAttr("disabled", "true");
       void ctx.plugin.markAutomationRunsReviewed([r.id]).finally(() => ctx.rerender());
     };
+  }
+
+  // A failed run that wrote nothing has nothing to review: Dismiss clears it
+  // from the Inbox (same `reviewedAt` the Inbox's own Dismiss sets).
+  if (openFailed.has(r.id)) {
+    const dismiss = row.createSpan({ cls: "mva-btn", text: "Dismiss" });
+    clickable(dismiss, () => void ctx.plugin.markAutomationRunsReviewed([r.id]).finally(() => ctx.rerender()));
   }
 
   if (r.reportPath) {

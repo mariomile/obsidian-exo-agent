@@ -7,10 +7,8 @@
  * data returned by the other sources.
  */
 
-import {
-  unreviewedWriteRuns,
-  type AutomationRunRecord,
-} from "../core/automations";
+import type { AutomationRunRecord } from "../core/automations";
+import { groupUnreviewedRuns } from "../core/inbox";
 import {
   resetIfNewDay,
   type BudgetLedger,
@@ -281,11 +279,12 @@ export async function collectDailyPulseInput(
         kind,
         title,
       })),
-      automationRuns: unreviewedWriteRuns([...automations.value]).map((run) => ({
-        id: run.id,
-        name: run.name,
-        startedAt: run.startedAt,
-        writes: [...run.writes],
+      // One entry per automation, as in the Inbox: the newest run stands for its group.
+      automationRuns: groupUnreviewedRuns(automations.value).map((g) => ({
+        id: g.runs[0].id,
+        name: g.name,
+        startedAt: g.runs[0].startedAt,
+        writes: [...new Set(g.runs.flatMap((r) => r.writes))],
       })),
       recentNotes: collectRecentNotes(notes.value, modifiedAfter, now, reviewPath, options.configDir),
       budget: {

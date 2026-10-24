@@ -202,9 +202,9 @@ describe("dailyPulseMetaLabel", () => {
   it("reports retry on error regardless of items", () => {
     expect(dailyPulseMetaLabel(state({ status: "error", itemCount: 3 }))).toBe("retry available");
   });
-  it("counts items to review when a newer success is unreviewed", () => {
-    expect(dailyPulseMetaLabel(state({ itemCount: 1, lastSuccessAt: 10 }))).toBe("1 item to review");
-    expect(dailyPulseMetaLabel(state({ itemCount: 4, lastSuccessAt: 10 }))).toBe("4 items to review");
+  it("says ready to review, without a count, when a newer success is unreviewed", () => {
+    expect(dailyPulseMetaLabel(state({ itemCount: 1, lastSuccessAt: 10 }))).toBe("ready to review");
+    expect(dailyPulseMetaLabel(state({ itemCount: 4, lastSuccessAt: 10 }))).toBe("ready to review");
   });
   it("reports reviewed / not generated for the quiet states", () => {
     expect(dailyPulseMetaLabel(state({ itemCount: 2, lastSuccessAt: 10, lastReviewedAt: 20 }))).toBe("reviewed");

@@ -94,12 +94,11 @@ export function dailyPulseNeedsReview(state: DailyPulseReviewState): boolean {
   return state.itemCount > 0 && state.lastSuccessAt > state.lastReviewedAt;
 }
 
-/** Meta-line suffix for the Daily Pulse automation row. */
+/** Meta-line suffix for the Daily Pulse automation row. No item count: the
+ *  Inbox counts the pulse once, so a second number here would disagree. */
 export function dailyPulseMetaLabel(state: DailyPulseReviewState): string {
   if (state.status === "error") return "retry available";
-  if (dailyPulseNeedsReview(state)) {
-    return `${state.itemCount} item${state.itemCount === 1 ? "" : "s"} to review`;
-  }
+  if (dailyPulseNeedsReview(state)) return "ready to review";
   return state.lastSuccessAt > 0 ? "reviewed" : "not generated";
 }
 
