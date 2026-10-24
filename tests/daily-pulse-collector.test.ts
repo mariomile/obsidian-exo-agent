@@ -34,6 +34,7 @@ function run(
 ): AutomationRunRecord {
   return {
     id,
+    slug: id,
     name: `Run ${id}`,
     startedAt: NOW - 30_000,
     ok: true,
@@ -53,6 +54,7 @@ function sources(
       listPending: async () => ({ records: [], warnings: [] }),
     },
     loadAutomationRuns: async () => [],
+    listAutomations: () => [],
     listRecentNotes: async () => [],
     loadBackgroundBudget: async () => ({
       enabled: true,

@@ -47,6 +47,7 @@ const run = (id: string, over: Partial<AutomationRunRecord> = {}): AutomationRun
 const input = (over: Partial<InboxInput> = {}): InboxInput => ({
   chats: [],
   runs: [],
+  automations: [],
   proposals: 0,
   pulse: initialDailyPulseReviewState(),
   answers: [],
@@ -145,17 +146,54 @@ describe("buildInbox: runs", () => {
 
   it("closes a failed run once a later run of the same automation succeeded", () => {
     const runs = [run("f", { ok: false, writes: [], startedAt: NOW - 2 * HOUR }), run("ok", { writes: [], startedAt: NOW - HOUR })];
-    expect(openFailedRuns(runs)).toEqual([]);
+    expect(openFailedRuns(runs, [])).toEqual([]);
     expect(buildInbox(input({ runs })).count).toBe(0);
   });
 
   it("drops a dismissed failed run", () => {
-    expect(openFailedRuns([run("f", { ok: false, writes: [], reviewedAt: NOW })])).toEqual([]);
+    expect(openFailedRuns([run("f", { ok: false, writes: [], reviewedAt: NOW })], [])).toEqual([]);
   });
 
   it("names the group after the automation, without an agent run's trigger", () => {
-    const [g] = groupUnreviewedRuns([run("a", { name: "Inbox Triager (create _inbox x.md)", slug: "triager" })]);
+    const [g] = groupUnreviewedRuns([run("a", { name: "Inbox Triager (create _inbox x.md)", slug: "triager" })], []);
     expect(g).toMatchObject({ key: "triager", name: "Inbox Triager", writes: 1 });
+  });
+});
+
+describe("buildInbox: slug-less runs", () => {
+  const autos = [{ slug: "triager", name: "Inbox Triager" }];
+  const legacy = (id: string, name: string, over: Partial<AutomationRunRecord> = {}) =>
+    run(id, { name, slug: undefined, ...over });
+
+  it("files pre-v2 runs under the automation that claims their name, as the Automations tab does", () => {
+    const runs = [
+      legacy("a", "Inbox Triager (create _inbox a.md)"),
+      legacy("b", "Inbox Triager (create _inbox b.md)", { startedAt: NOW - 2 * HOUR }),
+      legacy("c", "Inbox Triager"),
+    ];
+    const groups = groupUnreviewedRuns(runs, autos);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ key: "triager", name: "Inbox Triager" });
+    expect(buildInbox(input({ runs, automations: autos })).count).toBe(1);
+  });
+
+  it("puts unclaimed pre-v2 runs in one Older runs group", () => {
+    const runs = [legacy("x", "Old one (create a.md)"), legacy("y", "Another old one")];
+    const groups = groupUnreviewedRuns(runs, autos);
+    expect(groups.map((g) => [g.key, g.name])).toEqual([["legacy", "Older runs"]]);
+  });
+
+  it("targets a failed pre-v2 run at its automation's slug, so Run again resolves it", () => {
+    const inbox = buildInbox(input({ runs: [legacy("f", "Inbox Triager (create x.md)", { ok: false, writes: [] })], automations: autos }));
+    expect(inbox.items[0]).toMatchObject({ id: "run:f", title: "Inbox Triager", target: "triager" });
+  });
+
+  it("closes a failed pre-v2 run once its automation later succeeded under a slug", () => {
+    const runs = [
+      legacy("f", "Inbox Triager", { ok: false, writes: [], startedAt: NOW - 2 * HOUR }),
+      run("ok", { slug: "triager", name: "Inbox Triager", writes: [], startedAt: NOW - HOUR }),
+    ];
+    expect(openFailedRuns(runs, autos)).toEqual([]);
   });
 });
 

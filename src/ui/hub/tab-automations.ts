@@ -17,6 +17,7 @@ import { clickable } from "../dom";
 import { NoteDiffModal } from "../note-diff";
 import { basename as noteBasename } from "../../obsidian/graph";
 import {
+  awaitsReview,
   legacyRuns,
   runsForSlug,
   type AutomationRunRecord,
@@ -82,7 +83,9 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
     });
   }
 
-  for (const a of autos) renderCard(list, a, runs, ctx);
+  // The failed runs the Inbox lists as errors: same rule, same automations.
+  const openFailed = new Set(openFailedRuns(runs, autos).map((r) => r.id));
+  for (const a of autos) renderCard(list, a, runs, openFailed, ctx);
 
   const foot = host.createDiv({ cls: "mva-auto-foot" });
   const add = foot.createEl("button", { cls: "mva-btn", text: "New automation" });
@@ -94,7 +97,7 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
   const words = foot.createEl("button", { cls: "mva-btn", text: "Describe it in a chat" });
   words.onclick = () => void describeAutomationInChat(ctx.plugin);
 
-  renderLegacyRuns(host, runs, autos.map((a) => a.name), ctx);
+  renderLegacyRuns(host, runs, autos.map((a) => a.name), openFailed, ctx);
 }
 
 /* ------------------------------- one card ------------------------------- */
@@ -103,6 +106,7 @@ function renderCard(
   list: HTMLElement,
   a: Automation,
   runs: AutomationRunRecord[],
+  openFailed: ReadonlySet<string>,
   ctx: HubTabContext
 ): void {
   const store = ctx.plugin.automationStore;
@@ -183,8 +187,7 @@ function renderCard(
 
   if (ctx.expanded(runsKey) && own.length) {
     const timeline = list.createDiv({ cls: "mva-auto2-timeline" });
-    const open = new Set(openFailedRuns(own).map((r) => r.id));
-    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, open, ctx);
+    for (const r of own.slice(0, 8)) renderRunRow(timeline, r, openFailed, ctx);
   }
 }
 
@@ -195,6 +198,7 @@ function renderLegacyRuns(
   host: HTMLElement,
   runs: AutomationRunRecord[],
   claimedNames: string[],
+  openFailed: ReadonlySet<string>,
   ctx: HubTabContext
 ): void {
   const old = legacyRuns(runs, claimedNames);
@@ -209,8 +213,7 @@ function renderLegacyRuns(
   });
   if (!ctx.expanded(key)) return;
   const wrap = host.createDiv({ cls: "mva-auto2-timeline" });
-  const open = new Set(openFailedRuns(old).map((r) => r.id));
-  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, open, ctx);
+  for (const r of old.slice(0, 8)) renderRunRow(wrap, r, openFailed, ctx);
 }
 
 /** `openFailed`: ids of the failed runs the Inbox lists as errors (`openFailedRuns`). */
@@ -256,7 +259,7 @@ function renderRunRow(
     });
   }
 
-  if (!r.reviewedAt && !r.restoredAt && r.writes.length) {
+  if (awaitsReview(r)) {
     const reviewed = row.createEl("button", { cls: "mva-btn", text: "Reviewed" });
     reviewed.onclick = () => {
       reviewed.setAttr("disabled", "true");

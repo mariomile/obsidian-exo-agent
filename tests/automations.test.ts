@@ -9,7 +9,8 @@ import {
   cadenceLabel,
   migrateScheduledRuns,
   pruneRuns,
-  unreviewedWriteRuns,
+  awaitsReview,
+  runOwner,
   parseCadenceInput,
   type AutomationConfig,
   type AutomationRunRecord,
@@ -116,7 +117,7 @@ describe("pruneRuns", () => {
   });
 });
 
-describe("unreviewedWriteRuns", () => {
+describe("awaitsReview", () => {
   const rec = (id: string, over: Partial<AutomationRunRecord>): AutomationRunRecord => ({
     id,
     name: "A",
@@ -128,13 +129,26 @@ describe("unreviewedWriteRuns", () => {
     ...over,
   });
   it("excludes read-only, reviewed, and restored runs", () => {
-    const pool = unreviewedWriteRuns([
+    const pool = [
       rec("live", {}),
       rec("readonly", { writes: [] }),
       rec("reviewed", { reviewedAt: 5 }),
       rec("restored", { restoredAt: 5 }),
-    ]);
+    ].filter(awaitsReview);
     expect(pool.map((r) => r.id)).toEqual(["live"]);
+  });
+});
+
+describe("runOwner", () => {
+  const rec = (name: string, slug?: string): AutomationRunRecord => ({
+    id: name, name, startedAt: 1, ok: true, reportPath: "", writes: [], checkpoint: [], ...(slug ? { slug } : {}),
+  });
+  const autos = [{ slug: "triager", name: "Inbox Triager" }];
+  it("files a run by its slug, a pre-v2 run by the automation claiming its name, else nowhere", () => {
+    expect(runOwner(rec("Anything", "digest"), autos)).toBe("digest");
+    expect(runOwner(rec("Inbox Triager"), autos)).toBe("triager");
+    expect(runOwner(rec("Inbox Triager (create _inbox x.md)"), autos)).toBe("triager");
+    expect(runOwner(rec("Gone"), autos)).toBeNull();
   });
 });
 

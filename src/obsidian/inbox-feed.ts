@@ -64,6 +64,7 @@ export class InboxFeed {
     return buildInbox({
       chats: rows ? rows.map((r) => ({ ...r, focused: r.focused === true })) : null,
       runs: this.snap.runs,
+      automations: this.plugin.automationStore.list(),
       proposals: this.snap.proposals,
       pulse: s.dailyPulseReviewState,
       answers: this.snap.answers,

@@ -7,7 +7,7 @@
  * data returned by the other sources.
  */
 
-import type { AutomationRunRecord } from "../core/automations";
+import type { AutomationRef, AutomationRunRecord } from "../core/automations";
 import { groupUnreviewedRuns } from "../core/inbox";
 import {
   resetIfNewDay,
@@ -87,6 +87,8 @@ export interface DailyPulseCollectionSources {
   loadLoops(): Promise<readonly LoopEntry[]>;
   proposalStore: { listPending(): Promise<PendingProposalSource> };
   loadAutomationRuns(): Promise<readonly AutomationRunRecord[]>;
+  /** The automations that own runs, so pre-v2 runs group as in the Inbox. */
+  listAutomations(): readonly AutomationRef[];
   listRecentNotes(query: RecentNoteQuery): Promise<readonly RecentNoteCandidate[]>;
   loadBackgroundBudget(): Promise<DailyPulseBudgetSnapshot>;
 }
@@ -280,7 +282,7 @@ export async function collectDailyPulseInput(
         title,
       })),
       // One entry per automation, as in the Inbox: the newest run stands for its group.
-      automationRuns: groupUnreviewedRuns(automations.value).map((g) => ({
+      automationRuns: groupUnreviewedRuns(automations.value, sources.listAutomations()).map((g) => ({
         id: g.runs[0].id,
         name: g.name,
         startedAt: g.runs[0].startedAt,

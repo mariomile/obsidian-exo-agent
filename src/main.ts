@@ -2158,6 +2158,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       },
       proposalStore: this.proposalStore,
       loadAutomationRuns: () => this.loadAutomationRuns(),
+      listAutomations: () => this.automationStore.list(),
       listRecentNotes: async ({ modifiedAfter, limit }) =>
         this.app.vault.getMarkdownFiles()
           .filter((file) => file.stat.mtime > modifiedAfter && file.stat.mtime <= now)

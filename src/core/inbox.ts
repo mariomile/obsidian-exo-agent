@@ -17,7 +17,7 @@
  * field to write, so they alone are tracked in `settings.inboxSeen`, keyed by
  * a versioned id: a new answer gets a new id, so an old "read" cannot hide it.
  */
-import { unreviewedWriteRuns, type AutomationRunRecord } from "./automations";
+import { awaitsReview, runOwner, type AutomationRef, type AutomationRunRecord } from "./automations";
 import { dailyPulseNeedsReview, type DailyPulseReviewState } from "./daily-pulse";
 import { deriveLane, type SessionSnapshot } from "./session-cards";
 import { effectiveSnoozed, wokeAt } from "./thread-lifecycle";
@@ -28,7 +28,7 @@ export type InboxVerb = "read" | "resolve" | "archive";
 
 export interface InboxItem {
   /** Stable and versioned: a new event gets a new id, so an old read or dismiss cannot hide it.
-   *  chat:<convoId>:<perm|ask|error|reply> · runs:<slug|name> · run:<runId>
+   *  chat:<convoId>:<perm|ask|error|reply> · runs:<slug|legacy> · run:<runId>
    *  proposals · pulse:<lastSuccessAt> · pulse-error:<lastAttemptAt> · answer:<path>@<answeredAt> */
   id: string;
   kind: InboxKind;
@@ -73,6 +73,8 @@ export interface InboxInput {
   /** Null when no chat view is open: chats then contribute nothing. */
   chats: readonly InboxChat[] | null;
   runs: readonly AutomationRunRecord[];
+  /** The automations that own runs: pre-v2 runs are filed by name against them. */
+  automations: readonly AutomationRef[];
   /** Pending suggestions; 0 when the proposal kernel is off. */
   proposals: number;
   pulse: DailyPulseReviewState;
@@ -120,14 +122,22 @@ export function isUnseen(c: UnseenFacts, now: number): boolean {
   return news > Math.max(c.lastActiveAt ?? 0, c.seenAt ?? 0);
 }
 
-/** Which automation a run belongs to: its file slug, else (pre-v2) its name. */
-export function runGroupKey(r: AutomationRunRecord): string {
-  return r.slug ?? r.name;
+/** Group key of the pre-v2 runs no automation claims: one "Older runs" group,
+ *  as on the Automations tab. */
+export const LEGACY_RUNS_KEY = "legacy";
+
+/** Which automation a run belongs to, exactly as the Automations tab files it
+ *  (core/automations `runOwner`), so the Inbox and the tab show the same groups
+ *  and "Run again" finds the automation by its slug. */
+export function runGroupKey(r: AutomationRunRecord, automations: readonly AutomationRef[]): string {
+  return runOwner(r, automations) ?? LEGACY_RUNS_KEY;
 }
 
-/** A run name as the automation's name: agent runs carry their trigger in
- *  parentheses ("Inbox Triager (create _inbox x.md)"). */
-const automationName = (r: AutomationRunRecord): string => r.name.replace(/ \(.*\)$/, "");
+/** Who ran it: the owning automation's name, else the run name without an
+ *  agent run's trigger ("Inbox Triager (create _inbox x.md)"). */
+function ownerName(key: string, r: AutomationRunRecord, automations: readonly AutomationRef[]): string {
+  return automations.find((a) => a.slug === key)?.name ?? r.name.replace(/ \(.*\)$/, "");
+}
 
 export interface RunGroup {
   key: string;
@@ -140,14 +150,18 @@ export interface RunGroup {
 
 /** Unreviewed write runs, one group per automation, newest group first. A
  *  failed write run lives here too: it wrote, so it is reviewed, never twice. */
-export function groupUnreviewedRuns(runs: readonly AutomationRunRecord[]): RunGroup[] {
+export function groupUnreviewedRuns(
+  runs: readonly AutomationRunRecord[],
+  automations: readonly AutomationRef[],
+): RunGroup[] {
   const groups = new Map<string, RunGroup>();
-  const sorted = [...unreviewedWriteRuns([...runs])].sort((a, b) => b.startedAt - a.startedAt);
+  const sorted = runs.filter(awaitsReview).sort((a, b) => b.startedAt - a.startedAt);
   for (const r of sorted) {
-    const key = runGroupKey(r);
+    const key = runGroupKey(r, automations);
     let g = groups.get(key);
     if (!g) {
-      g = { key, name: automationName(r), runs: [], writes: 0 };
+      const name = key === LEGACY_RUNS_KEY ? "Older runs" : ownerName(key, r, automations);
+      g = { key, name, runs: [], writes: 0 };
       groups.set(key, g);
     }
     g.runs.push(r);
@@ -158,11 +172,14 @@ export function groupUnreviewedRuns(runs: readonly AutomationRunRecord[]): RunGr
 
 /** Failed runs that wrote nothing, are not dismissed, and were not followed
  *  by a successful run of the same automation. */
-export function openFailedRuns(runs: readonly AutomationRunRecord[]): AutomationRunRecord[] {
+export function openFailedRuns(
+  runs: readonly AutomationRunRecord[],
+  automations: readonly AutomationRef[],
+): AutomationRunRecord[] {
   const lastOk = new Map<string, number>();
   for (const r of runs) {
     if (!r.ok) continue;
-    const key = runGroupKey(r);
+    const key = runGroupKey(r, automations);
     lastOk.set(key, Math.max(lastOk.get(key) ?? 0, r.startedAt));
   }
   return runs
@@ -172,7 +189,7 @@ export function openFailedRuns(runs: readonly AutomationRunRecord[]): Automation
         !r.reviewedAt &&
         !r.restoredAt &&
         r.writes.length === 0 &&
-        (lastOk.get(runGroupKey(r)) ?? -1) < r.startedAt,
+        (lastOk.get(runGroupKey(r, automations)) ?? -1) < r.startedAt,
     )
     .sort((a, b) => b.startedAt - a.startedAt);
 }
@@ -244,7 +261,7 @@ export function buildInbox(i: InboxInput): Inbox {
     const it = chatItem(c, i.now);
     if (it) items.push(it);
   }
-  for (const g of groupUnreviewedRuns(i.runs)) {
+  for (const g of groupUnreviewedRuns(i.runs, i.automations)) {
     items.push({
       id: `runs:${g.key}`,
       kind: "request",
@@ -269,15 +286,16 @@ export function buildInbox(i: InboxInput): Inbox {
       verbs: ["resolve"],
     });
   }
-  for (const r of openFailedRuns(i.runs)) {
+  for (const r of openFailedRuns(i.runs, i.automations)) {
+    const key = runGroupKey(r, i.automations);
     items.push({
       id: `run:${r.id}`,
       kind: "error",
       source: "run",
-      title: automationName(r),
+      title: ownerName(key, r, i.automations),
       detail: "Run failed",
       at: r.startedAt,
-      target: runGroupKey(r),
+      target: key,
       runIds: [r.id],
       verbs: ["resolve", "archive"],
     });
