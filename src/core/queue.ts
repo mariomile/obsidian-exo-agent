@@ -64,11 +64,24 @@ export function takeAt(queue: QueuedMessage[], i: number): QueuedMessage | undef
   return queue.splice(i, 1)[0];
 }
 
-/** A queued message can be injected into the live turn only as plain text:
- *  steer carries no images (both providers refuse them), no hidden prefix, no
- *  agent and no frozen context, so a message with any of those waits for its own
- *  turn. Never outside a turn, in Research Mode, held, or open in the editor. */
-export function canSteer(q: QueuedMessage, opts: { streaming: boolean; researchOn: boolean; hasSteer: boolean }): boolean {
-  const plain = !q.images?.length && !q.sendPrefix && !q.isRecoveryRetry && !q.agent && !q.context?.paths.length && !q.context?.selection;
-  return opts.streaming && opts.hasSteer && !opts.researchOn && plain && !q.held && !q.editing;
+/** A message can be injected into the live turn only as plain text: steer
+ *  carries no images (both providers refuse them), no hidden prefix, no agent,
+ *  no research run, and no context beyond what the turn already carries, so a
+ *  message with any of those waits for its own turn. Never outside a turn, in
+ *  Research Mode, held, or open in the editor. */
+export function canSteer(
+  q: QueuedMessage,
+  opts: { streaming: boolean; researchOn: boolean; hasSteer: boolean; turnContext?: QueuedContext }
+): boolean {
+  const plain = !q.images?.length && !q.sendPrefix && !q.isRecoveryRetry && !q.agent && !q.researchMode;
+  return opts.streaming && opts.hasSteer && !opts.researchOn && plain && contextSent(q.context, opts.turnContext) && !q.held && !q.editing;
+}
+
+/** Whether the running turn already carries everything `ctx` would add: a steer
+ *  sends only text, so a note or selection the turn never saw would be lost. */
+function contextSent(ctx: QueuedContext | undefined, turn: QueuedContext | undefined): boolean {
+  if (!ctx) return true;
+  const sel = ctx.selection;
+  if (sel && (sel.path !== turn?.selection?.path || sel.text !== turn.selection.text)) return false;
+  return ctx.paths.every((p) => turn?.paths.includes(p));
 }

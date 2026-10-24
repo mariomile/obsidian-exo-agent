@@ -83,7 +83,9 @@ export type RecoveryInput = {
  * resumeRisky flag. `enqueueRecapRetry` — stage-2 only: auto-retry the same user
  * message once with a private recap threaded to the provider. `holdQueue`:
  * pause the queued messages (core/queue) instead of draining them into a chat
- * that would fail them the same way; a Stop holds them itself.
+ * that would fail them the same way; a Stop holds them itself. A poisoned turn
+ * never holds, even if it also threw: the ladder recovers the session, so the
+ * queue drains into the recovered one.
  */
 export type RecoveryPlan = {
   footer: string | null;

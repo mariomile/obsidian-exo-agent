@@ -79,7 +79,19 @@ describe("canSteer", () => {
     expect(canSteer({ text: "a", context: { paths: [], selection: { text: "s", path: "A.md" } } }, live)).toBe(false);
     expect(canSteer({ text: "a", agent: "researcher" }, live)).toBe(false);
     expect(canSteer({ text: "a", sendPrefix: "handoff" }, live)).toBe(false);
+    expect(canSteer({ text: "a", researchMode: { enabled: true, startedAt: 1 } }, live)).toBe(false);
     // An empty frozen context is nothing to lose.
     expect(canSteer({ text: "a", context: { paths: [], selection: null } }, live)).toBe(true);
+  });
+
+  it("steers when the running turn already carries the message's notes and selection", () => {
+    const sel = { text: "s", path: "A.md" };
+    const turn = { ...live, turnContext: { paths: ["A.md", "B.md"], selection: sel } };
+    // The common case: the note open beside the chat rode the turn already.
+    expect(canSteer({ text: "a", context: { paths: ["A.md"], selection: null } }, turn)).toBe(true);
+    expect(canSteer({ text: "a", context: { paths: ["A.md"], selection: { ...sel } } }, turn)).toBe(true);
+    // A note or selection the turn never saw would be lost.
+    expect(canSteer({ text: "a", context: { paths: ["C.md"], selection: null } }, turn)).toBe(false);
+    expect(canSteer({ text: "a", context: { paths: [], selection: { text: "other", path: "A.md" } } }, turn)).toBe(false);
   });
 });

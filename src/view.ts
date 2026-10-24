@@ -147,8 +147,8 @@ import {
 } from "./core/workflow-signals";
 import { planInputParts, planStateText } from "./core/plan";
 import { caretHost } from "./core/caret-host";
-import { hasPending, holdQueue, nextRunnable, takeAt, type TurnOpts } from "./core/queue";
-import { queueHandlers, renderQueueRows } from "./ui/queue-view";
+import { hasPending, holdQueue, type QueuedMessage, type TurnOpts } from "./core/queue";
+import { queueHandlers, renderQueueRows, runNextQueued, trySteer } from "./ui/queue-view";
 import { showCliReadiness } from "./ui/cli-readiness";
 import {
   buildResearchOutbound,
@@ -286,7 +286,7 @@ export class ChatView extends ItemView {
    *  that chat has background work, even when the working row scrolls off. */
   private agentChipEl: HTMLElement | null = null;
   /** The open chat's queued messages, pinned above the composer (ui/queue-view). */
-  private queueEl!: HTMLElement;
+  queueEl!: HTMLElement;
   /** The enumerable list popover for `agentChipEl`, when open. */
   private agentPopoverEl: HTMLElement | null = null;
   /** Sole owner of every conversation's live-task map. Repaints both agent
@@ -1869,6 +1869,7 @@ export class ChatView extends ItemView {
     c.sessionId = undefined;
     c.allow.clear();
     c.queue = [];
+    this.renderQueue(c);
     // Terminal state belongs to the turn that ended, and that turn is gone.
     // Both feed `deriveTabState` (`stopped`, and `resumeRisky` as `poisoned`),
     // so leaving them set would paint the stopped ring or the error dot on a tab
@@ -4668,35 +4669,18 @@ export class ChatView extends ItemView {
     if (c.streaming) {
       // Mid-turn behavior. Default (steerMode "queue") always enqueues so the
       // message starts as the next turn. Opt-in "steer" injects into the live
-      // turn. The provider's steer() owns the capability contract; both
-      // providers return false when images are attached, so the shared path stays
-      // provider-agnostic. A false return or a throw falls back to queue.
-      let steered = false;
-      if (!c.researchMode.enabled && this.plugin.settings.steerMode === "steer") {
-        try {
-          steered = c.session?.steer?.(this.hoistOutbound(text), images) ?? false;
-        } catch {
-          steered = false;
-        }
-      }
-      if (steered) {
-        // Render the user bubble now and flush it; the working row stays and the
-        // turn continues folding this in — nothing is enqueued.
-        this.addUserTurn(c, text, images);
-        this.persist();
-      } else {
-        // queue while a turn is running (a handoff prefix rides along and is
-        // forwarded by the queue-drain logic like the recovery recap)
-        c.queue.push({
-          text,
-          images,
-          sendPrefix: handoff,
-          researchMode: researchModeForTurn ?? (
-            c.researchMode.enabled ? { ...c.researchMode } : undefined
-          ),
-          agent: agentForTurn,
-          context: { paths: this.composer.contextPaths(), selection: this.composer.contextSelection() },
-        });
+      // turn when nothing the message carries would be lost (core/queue
+      // canSteer); otherwise, or if the provider refuses, it queues.
+      const q: QueuedMessage = {
+        text,
+        images,
+        sendPrefix: handoff,
+        researchMode: researchModeForTurn ?? (c.researchMode.enabled ? { ...c.researchMode } : undefined),
+        agent: agentForTurn,
+        context: { paths: this.composer.contextPaths(), selection: this.composer.contextSelection() },
+      };
+      if (this.plugin.settings.steerMode !== "steer" || !trySteer(this, c, q)) {
+        c.queue.push(q);
         this.renderQueue(c);
       }
     } else {
@@ -4921,6 +4905,7 @@ export class ChatView extends ItemView {
     const isActiveConvo = c === this.active;
     const paths = opts?.context?.paths ?? (isActiveConvo ? this.composer.contextPaths() : []);
     const selection = opts?.context ? opts.context.selection : isActiveConvo ? this.composer.contextSelection() : null;
+    c.turnContext = { paths, selection }; // a steer may only add what this turn already carries (core/queue)
     const injectContent = this.plugin.settings.injectContextContent;
     let contents: Record<string, string> | undefined;
     const noteMtimes: Record<string, number> = {};
@@ -5758,16 +5743,11 @@ export class ChatView extends ItemView {
       // Drain the queue: run the next message in this conversation. The item is
       // its own TurnOpts, so a recovery retry's sendPrefix/isRecoveryRetry and a
       // queued message's frozen context and agent ride along unchanged.
-      const next = takeAt(c.queue, nextRunnable(c.queue)); // held messages wait for Run
-      if (next) {
-        this.renderQueue(c);
-        // Hand the claim to the continuation (release + immediate re-claim
-        // inside runTurn's own guard) — see turnClaimGen for why this call's
-        // own finally won't then clear a reservation it no longer owns.
-        c.turnClaimed = false;
-        void this.runTurn(c, next.text, next.images, next);
-      } else {
-        this.renderQueue(c); // held pills drop the steer action now the turn is over
+      // Hand the claim to the continuation (release + immediate re-claim
+      // inside runTurn's own guard): see turnClaimGen for why this call's own
+      // finally won't then clear a reservation it no longer owns.
+      c.turnClaimed = false;
+      if (!runNextQueued(this, c)) {
         // Turn (and any queue) is fully settled — safe to surface related notes again.
         this.renderTailSurfacing(c);
         // Warm session after Esc: a user stop dropped the (possibly mid-tool) live
