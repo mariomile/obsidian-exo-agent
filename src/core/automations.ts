@@ -84,17 +84,19 @@ export interface AutomationRef {
 
 /**
  * The automation a run belongs to, the way the Automations tab files it: its
- * slug, else (pre-v2) the automation that claims its name, else null (the
- * collapsed "Older runs" bucket).
+ * slug while that automation exists, else (pre-v2) the automation that claims
+ * its name, else null (the collapsed "Older runs" bucket, which also holds the
+ * runs of a deleted or archived automation).
  */
 export function runOwner(r: AutomationRunRecord, automations: readonly AutomationRef[]): string | null {
-  return r.slug ?? automations.find((a) => claimsRunName(a.name, r.name))?.slug ?? null;
+  if (r.slug) return automations.some((a) => a.slug === r.slug) ? r.slug : null;
+  return automations.find((a) => claimsRunName(a.name, r.name))?.slug ?? null;
 }
 
-/** Pre-v2 records no automation claims — shown once, collapsed. */
-export function legacyRuns(records: AutomationRunRecord[], claimedNames: string[] = []): AutomationRunRecord[] {
+/** Runs no current automation owns (`runOwner`): shown once, collapsed. */
+export function legacyRuns(records: AutomationRunRecord[], automations: readonly AutomationRef[] = []): AutomationRunRecord[] {
   return records
-    .filter((r) => !r.slug && !claimedNames.some((name) => claimsRunName(name, r.name)))
+    .filter((r) => runOwner(r, automations) === null)
     .sort((a, b) => b.startedAt - a.startedAt);
 }
 

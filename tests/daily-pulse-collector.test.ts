@@ -54,7 +54,10 @@ function sources(
       listPending: async () => ({ records: [], warnings: [] }),
     },
     loadAutomationRuns: async () => [],
-    listAutomations: () => [],
+    listAutomations: () => [
+      ...["pending", "reviewed", "restored", "read-only"].map((slug) => ({ slug, name: `Run ${slug}` })),
+      { slug: "digest", name: "Digest" },
+    ],
     listRecentNotes: async () => [],
     loadBackgroundBudget: async () => ({
       enabled: true,

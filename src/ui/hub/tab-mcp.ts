@@ -176,8 +176,8 @@ export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promi
   if (parseError) {
     models.push({ key: "mcp-json-error", sig: parseError, build: () => buildParseError(ctx, parseError) });
   }
-  if (!allItems.length) {
-    models.push({ key: "mcp-empty", sig: "empty", build: () => createDiv({ cls: "mva-conn-empty", text: "No MCP servers yet — add one above." }) });
+  if (!allItems.length && !parseError) {
+    models.push({ key: "mcp-empty", sig: "empty", build: () => createDiv({ cls: "mva-conn-empty", text: "No MCP servers yet, add one above." }) });
   } else if (!items.length) {
     models.push({ key: "mcp-no-match", sig: query, build: () => createDiv({ cls: "mva-conn-empty", text: `No servers match "${query}".` }) });
   }

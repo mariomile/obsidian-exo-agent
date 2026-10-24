@@ -20,6 +20,7 @@ import {
   awaitsReview,
   legacyRuns,
   runsForSlug,
+  type AutomationRef,
   type AutomationRunRecord,
 } from "../../core/automations";
 import {
@@ -97,7 +98,7 @@ export async function renderAutomationsTab(host: HTMLElement, ctx: HubTabContext
   const words = foot.createEl("button", { cls: "mva-btn", text: "Describe it in a chat" });
   words.onclick = () => void describeAutomationInChat(ctx.plugin);
 
-  renderLegacyRuns(host, runs, autos.map((a) => a.name), openFailed, ctx);
+  renderLegacyRuns(host, runs, autos, openFailed, ctx);
 }
 
 /* ------------------------------- one card ------------------------------- */
@@ -197,11 +198,11 @@ function renderCard(
 function renderLegacyRuns(
   host: HTMLElement,
   runs: AutomationRunRecord[],
-  claimedNames: string[],
+  automations: readonly AutomationRef[],
   openFailed: ReadonlySet<string>,
   ctx: HubTabContext
 ): void {
-  const old = legacyRuns(runs, claimedNames);
+  const old = legacyRuns(runs, automations);
   if (!old.length) return;
   const key = "auto-runs:legacy";
   const head = host.createDiv({ cls: "mva-pv-label mva-auto2-legacy", text: `Older runs (${old.length})` });

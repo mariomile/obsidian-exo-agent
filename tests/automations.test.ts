@@ -143,9 +143,10 @@ describe("runOwner", () => {
   const rec = (name: string, slug?: string): AutomationRunRecord => ({
     id: name, name, startedAt: 1, ok: true, reportPath: "", writes: [], checkpoint: [], ...(slug ? { slug } : {}),
   });
-  const autos = [{ slug: "triager", name: "Inbox Triager" }];
+  const autos = [{ slug: "triager", name: "Inbox Triager" }, { slug: "digest", name: "Digest" }];
   it("files a run by its slug, a pre-v2 run by the automation claiming its name, else nowhere", () => {
     expect(runOwner(rec("Anything", "digest"), autos)).toBe("digest");
+    expect(runOwner(rec("Inbox Triager", "deleted"), autos), "a deleted automation's runs").toBeNull();
     expect(runOwner(rec("Inbox Triager"), autos)).toBe("triager");
     expect(runOwner(rec("Inbox Triager (create _inbox x.md)"), autos)).toBe("triager");
     expect(runOwner(rec("Gone"), autos)).toBeNull();

@@ -219,7 +219,8 @@ describe("run buckets", () => {
   it("splits per-slug and legacy runs", () => {
     const records = [rec({ id: "a", slug: "x", startedAt: 1 }), rec({ id: "b", slug: "x", startedAt: 5 }), rec({ id: "c" })];
     expect(runsForSlug(records, "x").map((r) => r.id)).toEqual(["b", "a"]);
-    expect(legacyRuns(records).map((r) => r.id)).toEqual(["c"]);
+    expect(legacyRuns(records, [{ slug: "x", name: "Ex" }]).map((r) => r.id)).toEqual(["c"]);
+    expect(legacyRuns(records).map((r) => r.id), "runs of a deleted automation are older runs").toEqual(["b", "a", "c"]);
   });
 
   it("claims pre-v2 records by exact name so an upgrade keeps its history", () => {
@@ -229,7 +230,7 @@ describe("run buckets", () => {
       rec({ id: "stray", name: "Something Else" }),
     ];
     expect(runsForSlug(records, "morning-digest", "Morning Digest").map((r) => r.id)).toEqual(["new", "old"]);
-    expect(legacyRuns(records, ["Morning Digest"]).map((r) => r.id)).toEqual(["stray"]);
+    expect(legacyRuns(records, [{ slug: "morning-digest", name: "Morning Digest" }]).map((r) => r.id)).toEqual(["stray"]);
   });
 
   it("claims agent-run records by their \"Name (reason)\" shape", () => {
@@ -239,7 +240,7 @@ describe("run buckets", () => {
       rec({ id: "other", name: "Inbox Triager Deluxe", startedAt: 2 }),
     ];
     expect(runsForSlug(records, "inbox-triager", "Inbox Triager").map((r) => r.id)).toEqual(["evt", "manual"]);
-    expect(legacyRuns(records, ["Inbox Triager"]).map((r) => r.id)).toEqual(["other"]);
+    expect(legacyRuns(records, [{ slug: "inbox-triager", name: "Inbox Triager" }]).map((r) => r.id)).toEqual(["other"]);
   });
 
   it("does not claim by name when the automation name is not given", () => {

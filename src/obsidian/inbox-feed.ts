@@ -43,7 +43,11 @@ export class InboxFeed {
   /** The first load, and the tick's teardown on unload. Called once from `onload`. */
   start(): void {
     this.plugin.register(() => this.stopTick());
-    this.plugin.app.workspace.onLayoutReady(() => void this.refresh());
+    this.plugin.app.workspace.onLayoutReady(() => {
+      // Runs are filed by the automation list: repaint when it loads or changes.
+      this.plugin.automationStore.onChange(() => this.emit());
+      void this.refresh();
+    });
   }
 
   /** Reload the on-disk sources, then tell every surface. Tolerant: a source

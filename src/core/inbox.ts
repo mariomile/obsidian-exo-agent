@@ -135,9 +135,10 @@ export function isUnseen(c: UnseenFacts, now: number): boolean {
   return news > Math.max(c.lastActiveAt ?? 0, c.seenAt ?? 0);
 }
 
-/** Group key of the pre-v2 runs no automation claims: one "Older runs" group,
- *  as on the Automations tab. */
-export const LEGACY_RUNS_KEY = "legacy";
+/** Group key of the runs no current automation owns: one "Older runs" group,
+ *  as on the Automations tab. The slash keeps it apart from every slug, which
+ *  is a file name. */
+export const LEGACY_RUNS_KEY = "/older-runs";
 
 /** Which automation a run belongs to, exactly as the Automations tab files it
  *  (core/automations `runOwner`), so the Inbox and the tab show the same groups
@@ -146,8 +147,8 @@ export function runGroupKey(r: AutomationRunRecord, automations: readonly Automa
   return runOwner(r, automations) ?? LEGACY_RUNS_KEY;
 }
 
-/** Who ran it: the owning automation's name, else the run name without an
- *  agent run's trigger ("Inbox Triager (create _inbox x.md)"). */
+/** Who ran it: the owning automation's name, else (a run no automation owns)
+ *  the run name without an agent run's trigger ("Inbox Triager (create x.md)"). */
 function ownerName(key: string, r: AutomationRunRecord, automations: readonly AutomationRef[]): string {
   return automations.find((a) => a.slug === key)?.name ?? r.name.replace(/ \(.*\)$/, "");
 }

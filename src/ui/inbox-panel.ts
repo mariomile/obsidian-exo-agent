@@ -14,7 +14,7 @@
  * tabbing through.
  */
 import { setIcon } from "obsidian";
-import { inboxSig, type Inbox, type InboxHandlers, type InboxItem, type InboxKind } from "../core/inbox";
+import { inboxSig, LEGACY_RUNS_KEY, type Inbox, type InboxHandlers, type InboxItem, type InboxKind } from "../core/inbox";
 import { clickable, isolateActivation } from "./dom";
 
 const SECTIONS: readonly { kind: InboxKind; label: string; bulk?: string }[] = [
@@ -66,7 +66,8 @@ function renderRow(list: HTMLElement, it: InboxItem, h: InboxHandlers): void {
   if (it.source === "runs" && it.runIds?.length) {
     action(acts, `Mark ${it.runIds.length} reviewed`, () => h.markReviewed(it));
   }
-  if (it.kind === "error" && (it.source === "run" || it.source === "pulse")) {
+  // A run no current automation owns has nothing to run again.
+  if (it.kind === "error" && (it.source === "pulse" || (it.source === "run" && it.target !== LEGACY_RUNS_KEY))) {
     action(acts, "Run again", () => h.retry(it));
   }
   if (it.verbs.includes("archive")) action(acts, "Dismiss", () => h.clear([it]));

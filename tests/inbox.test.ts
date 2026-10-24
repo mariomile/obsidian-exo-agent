@@ -4,6 +4,7 @@ import {
   groupUnreviewedRuns,
   inboxSig,
   isUnseen,
+  LEGACY_RUNS_KEY,
   openFailedRuns,
   pruneSeen,
   type InboxChat,
@@ -47,7 +48,7 @@ const run = (id: string, over: Partial<AutomationRunRecord> = {}): AutomationRun
 const input = (over: Partial<InboxInput> = {}): InboxInput => ({
   chats: [],
   runs: [],
-  automations: [],
+  automations: [{ slug: "digest", name: "Digest" }],
   proposals: 0,
   pulse: initialDailyPulseReviewState(),
   answers: [],
@@ -155,7 +156,8 @@ describe("buildInbox: runs", () => {
   });
 
   it("names the group after the automation, without an agent run's trigger", () => {
-    const [g] = groupUnreviewedRuns([run("a", { name: "Inbox Triager (create _inbox x.md)", slug: "triager" })], []);
+    const autos = [{ slug: "triager", name: "Inbox Triager" }];
+    const [g] = groupUnreviewedRuns([run("a", { name: "Inbox Triager (create _inbox x.md)", slug: "triager" })], autos);
     expect(g).toMatchObject({ key: "triager", name: "Inbox Triager", writes: 1 });
   });
 });
@@ -180,12 +182,21 @@ describe("buildInbox: slug-less runs", () => {
   it("puts unclaimed pre-v2 runs in one Older runs group", () => {
     const runs = [legacy("x", "Old one (create a.md)"), legacy("y", "Another old one")];
     const groups = groupUnreviewedRuns(runs, autos);
-    expect(groups.map((g) => [g.key, g.name])).toEqual([["legacy", "Older runs"]]);
+    expect(groups.map((g) => [g.key, g.name])).toEqual([[LEGACY_RUNS_KEY, "Older runs"]]);
   });
 
   it("targets a failed pre-v2 run at its automation's slug, so Run again resolves it", () => {
     const inbox = buildInbox(input({ runs: [legacy("f", "Inbox Triager (create x.md)", { ok: false, writes: [] })], automations: autos }));
     expect(inbox.items[0]).toMatchObject({ id: "run:f", title: "Inbox Triager", target: "triager" });
+  });
+
+  it("files a deleted automation's runs under Older runs, as the Automations tab does", () => {
+    const runs = [run("w", { slug: "gone", name: "Gone", startedAt: NOW - 2 * HOUR }), run("f", { slug: "gone", name: "Gone", ok: false, writes: [] })];
+    const inbox = buildInbox(input({ runs, automations: autos }));
+    expect(inbox.items.map((i) => [i.id, i.title, i.target])).toEqual([
+      ["runs:" + LEGACY_RUNS_KEY, "Older runs", LEGACY_RUNS_KEY],
+      ["run:f", "Gone", LEGACY_RUNS_KEY],
+    ]);
   });
 
   it("closes a failed pre-v2 run once its automation later succeeded under a slug", () => {

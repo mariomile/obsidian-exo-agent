@@ -148,8 +148,9 @@ export class ChatListView extends ItemView {
     // shared space, so registerInterval clears a setTimeout just as well.
     this.registerInterval(window.setTimeout(() => this.paint(), 800));
     // Runs, suggestions and queue answers move on disk, not on this tick: the
-    // feed says when, so the Inbox does not wait five seconds to agree.
-    this.register(this.plugin.inbox.onChange(() => this.paintInbox()));
+    // feed says when, so the Inbox does not wait five seconds to agree. The
+    // whole pane: an Inbox action (dismiss, mark read) moves the rows too.
+    this.register(this.plugin.inbox.onChange(() => this.paint()));
     this.paint();
     // Bring the semantic index up to date in the background. Incremental and
     // pipeline-free when nothing changed, so opening the pane costs ~50ms; the

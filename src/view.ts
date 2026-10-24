@@ -865,6 +865,7 @@ export class ChatView extends ItemView {
     c.session?.dispose(reason);
     c.session = null;
     c.sessionSig = "";
+    c.caps = undefined; // "This chat" shows the next session's servers, never the dropped one's
     // Abort any in-flight AI-title call for this conversation (dropSession is the
     // teardown path for close/delete/reset — the title becomes moot).
     c.titleAbort?.abort();
