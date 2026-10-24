@@ -163,6 +163,27 @@ describe("buildInbox: runs", () => {
     expect(buildInbox(input({ runs })).count).toBe(0);
   });
 
+  it("keeps an orphan failed run open when an unrelated orphan run succeeded later", () => {
+    const orphan = (id: string, name: string, over: Partial<AutomationRunRecord> = {}) =>
+      run(id, { name, slug: undefined, writes: [], ...over });
+    const runs = [
+      orphan("f", "Weekly Digest", { ok: false, startedAt: NOW - 2 * HOUR }),
+      orphan("other", "Something Else", { startedAt: NOW - HOUR }),
+    ];
+    expect(openFailedRuns(runs, []).map((r) => r.id)).toEqual(["f"]);
+    expect(buildInbox(input({ runs })).items.map((i) => i.id)).toEqual(["run:f"]);
+  });
+
+  it("closes an orphan failed run on a later success of the same name, trigger suffix aside", () => {
+    const orphan = (id: string, name: string, over: Partial<AutomationRunRecord> = {}) =>
+      run(id, { name, slug: undefined, writes: [], ...over });
+    const runs = [
+      orphan("f", "Old Agent (create a.md)", { ok: false, startedAt: NOW - 2 * HOUR }),
+      orphan("ok", "Old Agent (create b.md)", { startedAt: NOW - HOUR }),
+    ];
+    expect(openFailedRuns(runs, [])).toEqual([]);
+  });
+
   it("drops a dismissed failed run", () => {
     expect(openFailedRuns([run("f", { ok: false, writes: [], reviewedAt: NOW })], [])).toEqual([]);
   });

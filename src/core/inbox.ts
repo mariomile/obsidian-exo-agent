@@ -150,8 +150,10 @@ export function runGroupKey(r: AutomationRunRecord, automations: readonly Automa
 /** Who ran it: the owning automation's name, else (a run no automation owns)
  *  the run name without an agent run's trigger ("Inbox Triager (create x.md)"). */
 function ownerName(key: string, r: AutomationRunRecord, automations: readonly AutomationRef[]): string {
-  return automations.find((a) => a.slug === key)?.name ?? r.name.replace(/ \(.*\)$/, "");
+  return automations.find((a) => a.slug === key)?.name ?? baseName(r);
 }
+
+const baseName = (r: AutomationRunRecord): string => r.name.replace(/ \(.*\)$/, "");
 
 export interface RunGroup {
   key: string;
@@ -184,6 +186,14 @@ export function groupUnreviewedRuns(
   return [...groups.values()];
 }
 
+/** What "a later success of the same automation" means for a run. An owned run
+ *  is judged by its automation. Orphans all share one group, so each is judged
+ *  by its own base name: an unrelated orphan's success closes nothing. */
+function successKey(r: AutomationRunRecord, automations: readonly AutomationRef[]): string {
+  const key = runGroupKey(r, automations);
+  return key === LEGACY_RUNS_KEY ? `${key}:${baseName(r)}` : key;
+}
+
 /** Failed runs that wrote nothing, are not dismissed, and were not followed
  *  by a successful run of the same automation. */
 export function openFailedRuns(
@@ -193,7 +203,7 @@ export function openFailedRuns(
   const lastOk = new Map<string, number>();
   for (const r of runs) {
     if (!r.ok) continue;
-    const key = runGroupKey(r, automations);
+    const key = successKey(r, automations);
     lastOk.set(key, Math.max(lastOk.get(key) ?? 0, r.startedAt));
   }
   return runs
@@ -203,7 +213,7 @@ export function openFailedRuns(
         !r.reviewedAt &&
         !r.restoredAt &&
         r.writes.length === 0 &&
-        (lastOk.get(runGroupKey(r, automations)) ?? -1) < r.startedAt,
+        (lastOk.get(successKey(r, automations)) ?? -1) < r.startedAt,
     )
     .sort((a, b) => b.startedAt - a.startedAt);
 }
