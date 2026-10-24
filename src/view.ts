@@ -147,7 +147,7 @@ import {
 } from "./core/workflow-signals";
 import { planInputParts, planStateText } from "./core/plan";
 import { caretHost } from "./core/caret-host";
-import { hasPending, holdQueue, type QueuedMessage, type TurnOpts } from "./core/queue";
+import { hasPending, holdQueue, restoreQueue, serializeQueue, type QueuedMessage, type TurnOpts } from "./core/queue";
 import { queueHandlers, renderQueueRows, runNextQueued, trySteer } from "./ui/queue-view";
 import { showCliReadiness } from "./ui/cli-readiness";
 import {
@@ -1071,7 +1071,7 @@ export class ChatView extends ItemView {
         stopped: false,
         pendingPerm: null,
         pendingAsk: null,
-        queue: [],
+        queue: restoreQueue(d.queue), // always held: a reload never sends by itself (core/queue)
         currentCtx: null,
         liveTasks: new Map(),
         tailSurfaceEl: null,
@@ -1102,6 +1102,7 @@ export class ChatView extends ItemView {
     if (this.active.messages.length === 0) this.renderEmptyState();
     this.refreshProviderUI();
     this.refreshTabs(); // the strip AND the resume verbs: boot IS a re-entry moment
+    renderQueueRows(this.queueEl, this.active.queue, queueHandlers(this, this.active)); // held from before the reload; renderQueue would persist, and restore() never does
     this.scrollToBottom();
     reenterActive(this.active, this.reentryHost); // worked overnight; gated, because `loadIfDeferred` boots this view into a collapsed sidebar
     this.renderTailSurfacing(this.active);
@@ -1135,6 +1136,7 @@ export class ChatView extends ItemView {
       ...(c.titleLocked ? { titleLocked: true } : {}),
       ...(c.readIndex !== undefined ? { readIndex: c.readIndex } : {}), // 0 is a position, not an absence
       ...(c.harvestedIndex !== undefined ? { harvestedIndex: c.harvestedIndex } : {}), // memory harvest watermark
+      ...(c.queue.length ? { queue: serializeQueue(c.queue) } : {}),
       messages: c.messages.map((message) =>
         persistMessage(message, {
           maxToolOutput: MAX_PERSIST_OUTPUT,
@@ -4833,6 +4835,7 @@ export class ChatView extends ItemView {
   /** Render queued (not-yet-sent) messages as pills (ui/queue-view). */
   renderQueue(c: Convo): void {
     if (c === this.active) renderQueueRows(this.queueEl, c.queue, queueHandlers(this, c));
+    this.persist(); // every queue change is saved: it survives a reload
   }
 
   /** TUI parity: the CLI only expands /commands that OPEN the message, so a

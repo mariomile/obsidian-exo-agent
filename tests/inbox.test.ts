@@ -116,6 +116,24 @@ describe("buildInbox: chats", () => {
     expect(inbox.count).toBe(0);
   });
 
+  it("labels a chat that woke from a snooze with nothing unread as Snooze ended, dated at the wake", () => {
+    const woke = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 3 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
+    const [it] = buildInbox(input({ chats: [woke] })).items;
+    expect(it).toMatchObject({ kind: "result", detail: "Snooze ended", at: NOW - HOUR, verbs: ["read"] });
+  });
+
+  it("keeps New reply, dated at the turn, when a reply landed while the chat was snoozed", () => {
+    const c = chat("a", { updatedAt: NOW - 90 * 60_000, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR / 2 });
+    const [it] = buildInbox(input({ chats: [c] })).items;
+    expect(it).toMatchObject({ detail: "New reply", at: NOW - 90 * 60_000 });
+  });
+
+  it("keeps New reply when an unread reply was snoozed without being opened", () => {
+    const c = chat("a", { updatedAt: NOW - 3 * HOUR, lastActiveAt: NOW - 4 * HOUR, snoozedAt: NOW - 2 * HOUR, snoozedUntil: NOW - HOUR });
+    const [it] = buildInbox(input({ chats: [c] })).items;
+    expect(it).toMatchObject({ detail: "New reply", at: NOW - 3 * HOUR });
+  });
+
   it("lists an unseen finished chat as a new result", () => {
     const inbox = buildInbox(input({ chats: [chat("a")] }));
     expect(inbox.items[0]).toMatchObject({ id: "chat:a:reply", kind: "result", verbs: ["read"] });
@@ -149,6 +167,27 @@ describe("buildInbox: runs", () => {
     const runs = [run("f", { ok: false, writes: [], startedAt: NOW - 2 * HOUR }), run("ok", { writes: [], startedAt: NOW - HOUR })];
     expect(openFailedRuns(runs, [])).toEqual([]);
     expect(buildInbox(input({ runs })).count).toBe(0);
+  });
+
+  it("keeps an orphan failed run open when an unrelated orphan run succeeded later", () => {
+    const orphan = (id: string, name: string, over: Partial<AutomationRunRecord> = {}) =>
+      run(id, { name, slug: undefined, writes: [], ...over });
+    const runs = [
+      orphan("f", "Weekly Digest", { ok: false, startedAt: NOW - 2 * HOUR }),
+      orphan("other", "Something Else", { startedAt: NOW - HOUR }),
+    ];
+    expect(openFailedRuns(runs, []).map((r) => r.id)).toEqual(["f"]);
+    expect(buildInbox(input({ runs })).items.map((i) => i.id)).toEqual(["run:f"]);
+  });
+
+  it("closes an orphan failed run on a later success of the same name, trigger suffix aside", () => {
+    const orphan = (id: string, name: string, over: Partial<AutomationRunRecord> = {}) =>
+      run(id, { name, slug: undefined, writes: [], ...over });
+    const runs = [
+      orphan("f", "Old Agent (create a.md)", { ok: false, startedAt: NOW - 2 * HOUR }),
+      orphan("ok", "Old Agent (create b.md)", { startedAt: NOW - HOUR }),
+    ];
+    expect(openFailedRuns(runs, [])).toEqual([]);
   });
 
   it("drops a dismissed failed run", () => {

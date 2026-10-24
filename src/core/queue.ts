@@ -11,7 +11,7 @@
 
 import type { ImageAttachment } from "../providers/types";
 import type { ContextSelection } from "./context-assembly";
-import type { ResearchModeState } from "./research";
+import { normalizeResearchModeState, type ResearchModeState } from "./research";
 
 /** Composer context captured at enqueue time. */
 export interface QueuedContext {
@@ -39,6 +39,54 @@ export interface QueuedMessage extends TurnOpts {
   held?: true;
   /** Open in the pill editor: never drained or steered until the edit is saved. */
   editing?: true;
+}
+
+/** On-disk form of a queued message: no images (user messages in history do not
+ *  persist them either), and never held or editing: those are restore-time state. */
+export type PersistedQueuedMessage = Omit<QueuedMessage, "images" | "held" | "editing">;
+
+/** The queue as written to disk. Copies, so a later edit never leaks into the
+ *  saved snapshot. A message left with no text (it was only images) is dropped:
+ *  there is nothing to send. */
+export function serializeQueue(queue: readonly QueuedMessage[]): PersistedQueuedMessage[] {
+  const out: PersistedQueuedMessage[] = [];
+  for (const q of queue) {
+    if (!q.text.trim() || q.isRecoveryRetry) continue; // a recovery retry drains in the same tick, never a pill
+    const p: PersistedQueuedMessage = { text: q.text };
+    if (q.context) p.context = { paths: [...q.context.paths], selection: q.context.selection ? { ...q.context.selection } : null };
+    if (q.agent) p.agent = q.agent;
+    if (q.researchMode) p.researchMode = { ...q.researchMode };
+    if (q.sendPrefix) p.sendPrefix = q.sendPrefix;
+    out.push(p);
+  }
+  return out;
+}
+
+/** The queue read back from disk. Every message returns HELD: a reload must
+ *  never send anything by itself, the user releases each with Run. Malformed
+ *  entries are skipped. */
+export function restoreQueue(raw: unknown): QueuedMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: QueuedMessage[] = [];
+  for (const entry of raw as unknown[]) {
+    if (!entry || typeof entry !== "object") continue;
+    const r = entry as Record<string, unknown>;
+    if (typeof r.text !== "string" || !r.text.trim()) continue;
+    const q: QueuedMessage = { text: r.text, held: true };
+    const ctx = r.context as { paths?: unknown; selection?: { text?: unknown; path?: unknown } | null } | null | undefined;
+    if (ctx && Array.isArray(ctx.paths)) {
+      const sel = ctx.selection;
+      q.context = {
+        paths: (ctx.paths as unknown[]).filter((p): p is string => typeof p === "string"),
+        selection: sel && typeof sel.text === "string" && typeof sel.path === "string" ? { text: sel.text, path: sel.path } : null,
+      };
+    }
+    if (typeof r.agent === "string" && r.agent) q.agent = r.agent;
+    if (r.researchMode) q.researchMode = normalizeResearchModeState(r.researchMode);
+    if (typeof r.sendPrefix === "string" && r.sendPrefix) q.sendPrefix = r.sendPrefix;
+    out.push(q);
+  }
+  return out;
 }
 
 /** Stop / non-recoverable error: pause every queued message, in place, so a
