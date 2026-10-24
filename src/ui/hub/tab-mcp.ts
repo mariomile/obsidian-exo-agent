@@ -1,6 +1,7 @@
 import { MarkdownRenderer, Notice, setIcon } from "obsidian";
 import { homedir } from "os";
 import { readFile } from "fs/promises";
+import { shell } from "electron";
 import {
   scanCodexMcp,
   scanClaudeGlobalMcp,
@@ -52,7 +53,9 @@ import { clickable } from "../dom";
 /** Read every MCP source, normalize, and diff against what Exo already has.
  *  `ourNames` = servers in the vault's own .mcp.json (ours to edit/remove, vs
  *  inherited/live-only servers configured at their own source). */
-export async function gatherMcp(ctx: HubTabContext): Promise<{ items: DiscoveryItem[]; ourNames: Set<string> }> {
+export async function gatherMcp(
+  ctx: HubTabContext
+): Promise<{ items: DiscoveryItem[]; ourNames: Set<string>; parseError: string | null }> {
   const home = homedir();
   const caps = ctx.plugin.lastSessionCaps;
 
@@ -65,10 +68,13 @@ export async function gatherMcp(ctx: HubTabContext): Promise<{ items: DiscoveryI
 
   // Vault-owned servers (.mcp.json) — both enabled and disabled, each carrying
   // its config so the row can Edit / Enable / Disable / Remove it.
+  // A file that does not parse lists nothing, and says why (renderMcpTab).
   let vaultServers: { name: string; config: Record<string, unknown>; enabled: boolean }[] = [];
+  let parseError: string | null = null;
   try {
     const parsed = parseMcpJson(await ctx.app.vault.adapter.read(".mcp.json"));
-    if (!parsed.error) vaultServers = parsed.servers;
+    if (parsed.error) parseError = parsed.error;
+    else vaultServers = parsed.servers;
   } catch { /* no .mcp.json yet */ }
   const ourNames = new Set(vaultServers.map((s) => s.name));
   const vaultItems: DiscoveryItem[] = vaultServers.map((s) => ({
@@ -105,7 +111,7 @@ export async function gatherMcp(ctx: HubTabContext): Promise<{ items: DiscoveryI
   const live = scanLiveCaps(caps?.mcpServers ?? [], covered);
   const vaultBase = (ctx.app.vault.adapter as { getBasePath?(): string }).getBasePath?.() ?? "";
   const localNames = new Set(Object.keys(localScopeServers(claudeJson, vaultBase)));
-  return { items: markSkippedObsidianMcp([...vaultItems, ...mcpFromConfig, ...live], localNames), ourNames };
+  return { items: markSkippedObsidianMcp([...vaultItems, ...mcpFromConfig, ...live], localNames), ourNames, parseError };
 }
 
 /** A standing allow/deny rule covering the WHOLE server, if the user wrote one.
@@ -152,7 +158,7 @@ async function readDocRaw(ctx: HubTabContext, name: string): Promise<string | nu
 }
 
 export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promise<void> {
-  const { items: allItems, ourNames } = await gatherMcp(ctx);
+  const { items: allItems, ourNames, parseError } = await gatherMcp(ctx);
   const query = ctx.filterText();
   const items = allItems.filter((it) => matchesQuery(query, it.name, it.origin, it.desc));
   const documented = await gatherDocumented(ctx, items.map((i) => i.name));
@@ -166,6 +172,9 @@ export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promi
   // with the fix one click away. The #1 "where are my MCPs?" confusion.
   if (ctx.plugin.settings.fastStartup) {
     models.push({ key: "fast-startup", sig: "on", build: () => buildFastStartupWarning(ctx) });
+  }
+  if (parseError) {
+    models.push({ key: "mcp-json-error", sig: parseError, build: () => buildParseError(ctx, parseError) });
   }
   if (!allItems.length) {
     models.push({ key: "mcp-empty", sig: "empty", build: () => createDiv({ cls: "mva-conn-empty", text: "No MCP servers yet — add one above." }) });
@@ -192,6 +201,25 @@ export async function renderMcpTab(host: HTMLElement, ctx: HubTabContext): Promi
   await section("Inherited", sections.inherited);
   await section("Skipped in Exo", sections.skipped);
   reconcileList(host, models);
+}
+
+/** The vault's .mcp.json does not parse: its servers are missing from the list
+ *  and from new sessions. Clicking the row opens the file in the default editor
+ *  (a dotfile, so Obsidian itself cannot open it). */
+function buildParseError(ctx: HubTabContext, error: string): HTMLElement {
+  const { row, right } = buildRowScaffold(
+    "Couldn't parse .mcp.json",
+    undefined,
+    `${error}. Its servers are not listed or loaded until the file is fixed.`
+  );
+  right.createSpan({ cls: "mva-conn-dot is-failed" });
+  right.createSpan({ cls: "mva-btn", text: "Open .mcp.json" });
+  clickable(row, () => {
+    void shell.openPath(`${ctx.base()}/.mcp.json`).then((err) => {
+      if (err) new Notice(`Couldn't open .mcp.json: ${err}`);
+    });
+  });
+  return row;
 }
 
 function buildFastStartupWarning(ctx: HubTabContext): HTMLElement {
