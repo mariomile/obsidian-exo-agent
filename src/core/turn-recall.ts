@@ -13,6 +13,11 @@ export const RECALL_CLOSE = "[/vault-recall]";
 export const RECALL_MAX_CHARS = 2000;
 export const RECALL_MAX_NOTES = 5;
 export const RECALL_MAX_CHATS = 2;
+/** How deep each note lane is read before fusion: a note Sonar ranks 13th can
+ *  still lead when the title lane names it too. */
+export const RECALL_LANE_DEPTH = 20;
+/** Reciprocal rank fusion constant, the same as Sonar's own `fuse`. */
+const RRF_K = 60;
 export const RECALL_EXCERPT_CHARS = 300;
 /** How far back past chats are matched. */
 export const RECALL_CHAT_WINDOW_DAYS = 60;
@@ -143,17 +148,90 @@ export function matchPastChats(
 export interface RecallLanes {
   /** Sonar (or the built-in scorer), best first, exclusions already applied. */
   sonar: NoteRecall[];
-  /** Notes whose name matches the message. */
+  /** Notes whose name the message mentions ({@link titleLane}). */
   title: NoteRecall[];
   /** {@link matchPastChats}. */
   lexicalChats: ChatRecall[];
-  /** The semantic chat index, best first; null when it could not run. */
+  /** The semantic chat index ({@link chatsFromIds}), best first; null when it
+   *  could not answer in time. */
   semanticChats: ChatRecall[] | null;
+}
+
+/** Name words that can match a keyword: the same normalisation as
+ *  {@link recallKeywords}, minus dates and numbers. */
+const nameWords = (name: string): string[] => [...new Set(words(name).filter((w) => w.length >= 4 && !/^\d+$/.test(w)))];
+
+/**
+ * Notes the message names: a basename or alias that shares two keywords with
+ * it, or whose every word is a keyword ("Turno", "Alberto Aspese"). More shared
+ * words first, then names covered more fully, then path. A name sharing a
+ * single word with a longer title is noise, not a mention.
+ */
+export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): string[] {
+  const asked = new Set(keywords);
+  const hits: { path: string; shared: number; cover: number }[] = [];
+  for (const note of notes) {
+    let best: { shared: number; cover: number } | null = null;
+    for (const name of [note.basename, ...note.aliases]) {
+      const ws = nameWords(name);
+      const shared = ws.filter((w) => asked.has(w)).length;
+      if (!shared || (shared < 2 && shared < ws.length)) continue;
+      const cover = shared / ws.length;
+      if (!best || shared > best.shared || (shared === best.shared && cover > best.cover)) best = { shared, cover };
+    }
+    if (best) hits.push({ path: note.path, ...best });
+  }
+  return hits
+    .sort((a, b) => b.shared - a.shared || b.cover - a.cover || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .map((h) => h.path);
+}
+
+/** Recalls for the chats the semantic index returned, in its order: the chat's
+ *  first user message stands in for the match (the index embeds whole chats,
+ *  so it cannot point at a line). No time window: that is the lane's point. */
+export function chatsFromIds(ids: readonly string[], chats: readonly ChatRecord[], opts: { excludeId: string }): ChatRecall[] {
+  const byId = new Map(chats.map((c) => [c.id, c]));
+  const out: ChatRecall[] = [];
+  for (const id of ids) {
+    const chat = byId.get(id);
+    if (!chat || id === opts.excludeId) continue;
+    const first = chatLines(chat.messages).find((l) => l.role === "user" && l.text);
+    const at = first?.at ?? chat.updatedAt;
+    out.push({
+      id,
+      title: chat.title || "Untitled chat",
+      date: at === undefined ? "" : localDate(at),
+      snippet: flat(first?.text ?? "", RECALL_EXCERPT_CHARS),
+      msgIndex: first?.index ?? null,
+    });
+  }
+  return out;
+}
+
+/** Reciprocal rank fusion: an item found by several lanes adds up; the first
+ *  lane that holds an item supplies it (Sonar's excerpt, the lexical snippet).
+ *  Equal scores break by key, so the order never depends on lane timing. */
+function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
+  const acc = new Map<string, { item: T; score: number }>();
+  for (const lane of lanes) {
+    lane.forEach((item, i) => {
+      const k = key(item);
+      const hit = acc.get(k);
+      if (hit) hit.score += 1 / (RRF_K + i + 1);
+      else acc.set(k, { item, score: 1 / (RRF_K + i + 1) });
+    });
+  }
+  return [...acc.entries()]
+    .sort(([ka, a], [kb, b]) => b.score - a.score || (ka < kb ? -1 : ka > kb ? 1 : 0))
+    .map(([, v]) => v.item);
 }
 
 /** The notes and chats one turn injects, best first. */
 export function rankRecall(lanes: RecallLanes, opts: { maxNotes: number; maxChats: number }): { notes: NoteRecall[]; chats: ChatRecall[] } {
-  return { notes: lanes.sonar.slice(0, opts.maxNotes), chats: lanes.lexicalChats.slice(0, opts.maxChats) };
+  return {
+    notes: fuse([lanes.sonar, lanes.title], (n) => n.path).slice(0, opts.maxNotes),
+    chats: fuse([lanes.lexicalChats, lanes.semanticChats ?? []], (c) => c.id).slice(0, opts.maxChats),
+  };
 }
 
 /**

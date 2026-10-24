@@ -87,3 +87,12 @@ export class FuzzySuggestModal<T> {
   }
   onChooseItem(_item: T): void {}
 }
+
+/** Obsidian's reader for `aliases` / `alias` frontmatter: a list or a single
+ *  string, null when there is none. The per-turn title lane reads names
+ *  through it. */
+export function parseFrontMatterAliases(frontmatter: Record<string, unknown> | null | undefined): string[] | null {
+  const raw = frontmatter?.aliases ?? frontmatter?.alias;
+  if (Array.isArray(raw)) return raw.map(String);
+  return typeof raw === "string" ? [raw] : null;
+}

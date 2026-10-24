@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  chatsFromIds,
   formatRecallBlock,
   matchPastChats,
   rankRecall,
   recallKeywords,
   shouldRecall,
+  titleLane,
   RECALL_CLOSE,
   RECALL_MAX_CHARS,
   RECALL_MAX_CHATS,
@@ -13,7 +15,13 @@ import {
   type ChatRecall,
   type NoteRecall,
 } from "../src/core/turn-recall";
-import { recallForTurn } from "../src/obsidian/turn-recall";
+import { recallForTurn, SEMANTIC_BUDGET_MS } from "../src/obsidian/turn-recall";
+import { recallChats } from "../src/ui/chat-recall";
+
+vi.mock("../src/ui/chat-recall", () => ({
+  recallChats: vi.fn(() => Promise.resolve(null)),
+  recallHost: (pluginDir: string) => ({ pluginDir, scriptPath: `${pluginDir}/chat-recall.mjs` }),
+}));
 import type { ChatRecord } from "../src/core/recent-chats";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -163,6 +171,78 @@ describe("rankRecall on single lanes (parity with the pre-extraction pipeline)",
   });
 });
 
+describe("titleLane", () => {
+  const note = (path: string, aliases: string[] = []) => ({ path, basename: path.replace(/^.*\//, "").replace(/\.md$/, ""), aliases });
+
+  it("a note the message names in full beats one that shares a single word", () => {
+    const keywords = recallKeywords("Chi è Alberto Aspese e quanti eventi in calendario abbiamo avuto?");
+    const notes = [note("Templates/Calendario.md"), note("CRM/People/Alberto Aspese.md"), note("CRM/People/Alberto Rossi.md")];
+    expect(titleLane(keywords, notes)).toEqual(["CRM/People/Alberto Aspese.md", "Templates/Calendario.md"]);
+  });
+  it("normalises diacritics and hyphens: open-core matches open core, città matches citta", () => {
+    const keywords = recallKeywords("Che cosa è diventato Turno con il modello open core?");
+    expect(titleLane(keywords, [note("D/2026-10-03-turno-saas-open-core.md")])).toEqual(["D/2026-10-03-turno-saas-open-core.md"]);
+    expect(titleLane(recallKeywords("parlami della nuova universita di citta alta"), [note("N/Università Città Alta.md")])).toEqual(["N/Università Città Alta.md"]);
+  });
+  it("aliases count as names", () => {
+    const keywords = recallKeywords("cosa sappiamo della Orchestration Board ormai?");
+    expect(titleLane(keywords, [note("P/Board ideas v2.md", ["Orchestration Board"])])).toEqual(["P/Board ideas v2.md"]);
+  });
+  it("one shared word with a longer name is not a title match", () => {
+    expect(titleLane(recallKeywords("quale task manager uso adesso"), [note("R/Notes on everything task related.md")])).toEqual([]);
+  });
+  it("ties break by path, so the lane is deterministic", () => {
+    const keywords = recallKeywords("parliamo di Bending Spoons domani mattina");
+    expect(titleLane(keywords, [note("Z/Bending Spoons.md"), note("A/Bending Spoons.md")])).toEqual(["A/Bending Spoons.md", "Z/Bending Spoons.md"]);
+  });
+});
+
+describe("rankRecall fusion", () => {
+  const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
+  const c = (id: string, snippet = "s"): ChatRecall => ({ id, title: id, date: "2026-10-01", snippet, msgIndex: 0 });
+  const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
+
+  it("a note found by two lanes outranks the note one lane ranked first", () => {
+    const sonar = ["Top.md", "B.md", "C.md", "D.md", "E.md", "F.md", "Both.md"].map(n);
+    const r = rankRecall({ sonar, title: [{ path: "Both.md", excerpt: "" }], lexicalChats: [], semanticChats: null }, opts);
+    expect(r.notes.map((x) => x.path)).toEqual(["Both.md", "Top.md", "B.md", "C.md", "D.md"]);
+    expect(r.notes[0].excerpt).toBe("about Both.md");
+  });
+  it("equal scores break by path", () => {
+    const r = rankRecall({ sonar: [n("Z.md")], title: [{ path: "A.md", excerpt: "" }], lexicalChats: [], semanticChats: null }, opts);
+    expect(r.notes.map((x) => x.path)).toEqual(["A.md", "Z.md"]);
+  });
+  it("chats from both lanes are deduped by id, keeping the lexical snippet", () => {
+    const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("x", "lexical")], semanticChats: [c("y"), c("x", "semantic")] }, opts);
+    expect(r.chats.map((x) => [x.id, x.snippet])).toEqual([["x", "lexical"], ["y", "s"]]);
+  });
+  it("still two chats at most", () => {
+    const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("a")], semanticChats: [c("b"), c("d"), c("e")] }, opts);
+    expect(r.chats).toHaveLength(2);
+  });
+});
+
+describe("chatsFromIds", () => {
+  const old: ChatRecord = {
+    id: "old",
+    title: "Equity talk",
+    messages: [
+      { role: "user", text: "report", at: NOW - 200 * DAY, auto: true },
+      { role: "user", text: "Is equity the real   wealth multiplier?", at: NOW - 200 * DAY },
+      { role: "assistant", segments: [{ t: "text", md: "Mostly." }] },
+    ],
+  };
+
+  it("maps semantic ids to recalls at the first user message, with no time window", () => {
+    expect(chatsFromIds(["old"], [old], { excludeId: "current" })).toEqual([
+      { id: "old", title: "Equity talk", date: "2026-03-09", snippet: "Is equity the real wealth multiplier?", msgIndex: 1 },
+    ]);
+  });
+  it("skips the current chat and ids the store no longer has", () => {
+    expect(chatsFromIds(["current", "gone", "old"], [old, { ...old, id: "current" }], { excludeId: "current" }).map((x) => x.id)).toEqual(["old"]);
+  });
+});
+
 describe("recallForTurn", () => {
   const app = (hits: { path: string; title: string; score: number; excerpt: string }[]) => {
     const calls: string[] = [];
@@ -170,6 +250,7 @@ describe("recallForTurn", () => {
       calls,
       app: {
         vault: { getMarkdownFiles: () => [] },
+        metadataCache: { getFileCache: () => null },
         plugins: {
           plugins: {
             sonar: {
@@ -206,5 +287,46 @@ describe("recallForTurn", () => {
   it("null when nothing matches anywhere", async () => {
     const { app: a } = app([]);
     expect(await recallForTurn(a, { message: "tell me about quantum gardening robots", convoId: "x", chats, now: NOW })).toBeNull();
+  });
+
+  const withVault = (a: object) => ({ ...(a as object), vault: { getMarkdownFiles: () => [], adapter: { basePath: "/v" } } }) as never;
+  const semantic = vi.mocked(recallChats);
+  afterEach(() => {
+    semantic.mockReset();
+    vi.useRealTimers();
+  });
+
+  it("adds the semantic chat lane: a chat outside the lexical window is recalled", async () => {
+    const old: ChatRecord = { id: "old", title: "Pricing history", messages: [{ role: "user", text: "how did pricing start", at: NOW - 300 * DAY }] };
+    semantic.mockResolvedValue(["current", "old"]);
+    const r = await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats: [...chats, old], now: NOW, pluginDir: ".obsidian/plugins/exo-agent" });
+    expect(semantic).toHaveBeenCalledWith({ pluginDir: "/v/.obsidian/plugins/exo-agent", scriptPath: "/v/.obsidian/plugins/exo-agent/chat-recall.mjs" }, "what are the Exo pricing tiers", 12);
+    expect(r!.chats.map((c) => c.id)).toEqual(["c1", "old"]);
+  });
+
+  it("a semantic lane past its budget leaves the lexical chats alone", async () => {
+    vi.useFakeTimers();
+    semantic.mockReturnValue(new Promise(() => {}));
+    const pending = recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW, pluginDir: "p" });
+    await vi.advanceTimersByTimeAsync(SEMANTIC_BUDGET_MS);
+    const r = await pending;
+    expect(r!.chats.map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("no plugin dir, no semantic lane", async () => {
+    await recallForTurn(app([]).app, { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW });
+    expect(semantic).not.toHaveBeenCalled();
+  });
+
+  it("the title lane comes from note names and aliases, minus excluded paths", async () => {
+    const file = (path: string) => ({ path, basename: path.replace(/^.*\//, "").replace(/\.md$/, "") });
+    const files = [file("Projects/Exo Pricing Tiers.md"), file(".archive/Exo Pricing Tiers.md"), file("Misc/Plan.md")];
+    const a = {
+      ...(app([]).app as object),
+      vault: { getMarkdownFiles: () => files },
+      metadataCache: { getFileCache: (f: { path: string }) => (f.path === "Misc/Plan.md" ? { frontmatter: { aliases: ["Pricing tiers"] } } : null) },
+    } as never;
+    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers", convoId: "current", chats: [], now: NOW });
+    expect(r!.notes.map((x) => x.path)).toEqual(["Misc/Plan.md", "Projects/Exo Pricing Tiers.md"]);
   });
 });

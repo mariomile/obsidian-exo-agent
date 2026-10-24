@@ -2690,7 +2690,7 @@ export class ChatView extends ItemView {
     }));
     // Exo's own reports and anything the user excluded never ride as recall.
     const exclude = vaultExclusion(this.app, [`${this.plugin.paths.reports}/`]);
-    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude });
+    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude, pluginDir: this.plugin.manifest.dir });
     if (recall) this.diag.push("recall", `injected ${recall.notes.length} notes, ${recall.chats.length} chats`);
     return recall;
   }
