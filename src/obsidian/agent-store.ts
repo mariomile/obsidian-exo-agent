@@ -5,7 +5,7 @@
  * (`.claude/agents/<slug>.md`, discovered across scopes, never written) and the
  * Exo **contract** (`<memoryRoot>/agents/<slug>.md`, owned here). Every write
  * goes through one shared `WriteQueue`, matching the contract already used by
- * the open-loops and Orchestration ledgers.
+ * the open-loops ledger.
  *
  * Both IO surfaces are injected as structural slices — `AgentVaultAdapter` for
  * the vault and a `brains()` thunk for the multi-scope filesystem walk — so the

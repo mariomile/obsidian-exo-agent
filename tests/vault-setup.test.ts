@@ -62,7 +62,6 @@ describe("scaffoldItems presets", () => {
     const minimal = scaffoldItems(LEGACY, "minimal").map((i) => i.path);
     // mechanism present
     expect(minimal).toContain(LEGACY.queue);
-    expect(minimal).toContain(LEGACY.tasks);
     expect(minimal).toContain(LEGACY.openLoops);
     // no content whatsoever — no vault-context, preferences, or agent identity
     expect(minimal.some((p) => p.startsWith(`${LEGACY.rules}/`))).toBe(false);

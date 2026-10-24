@@ -1,6 +1,6 @@
 /**
  * Cockpit view-models (pure). The cockpit shell (`ui/cockpit-view.ts`) gathers
- * raw inputs (parsed loops/tasks, conversation index, queue scans, file stats)
+ * raw inputs (parsed loops, conversation index, queue scans, file stats)
  * and these builders turn them into render-ready rows. Action-first contract:
  * every row carries a `CockpitAction` the shell maps to a handler — seed a
  * chat (`ask`), open a conversation (`convo`), open a note (`open`), or run a
@@ -10,7 +10,6 @@
 import { activeLoops, dueLoops, type LoopEntry } from "./open-loops";
 import { formatAge } from "./actions-hub";
 import { normalizeUtilization } from "./rate-limit";
-import type { TaskEntry, TaskStatus } from "./tasks";
 
 export interface CockpitAction {
   kind: "ask" | "convo" | "open" | "command";
@@ -84,23 +83,6 @@ export function loopRows(loops: LoopEntry[], now: number, cap = 6): CockpitRow[]
     sub: formatAge(l.openedAt, now, ""),
     ...(due.has(l.id) ? { badge: "due" } : {}),
     action: { kind: "ask", arg: `Chiudiamo questo loop: ${l.title}` },
-  }));
-}
-
-/** Board columns by live-ness: what's moving (or stuck) before what's parked. */
-const TASK_ORDER: TaskStatus[] = ["running", "needs-input", "review", "queued", "backlog"];
-
-export function taskRows(tasks: TaskEntry[], cap = 6): CockpitRow[] {
-  const open = tasks.filter((t) => TASK_ORDER.includes(t.status));
-  open.sort(
-    (a, b) =>
-      TASK_ORDER.indexOf(a.status) - TASK_ORDER.indexOf(b.status) ||
-      Date.parse(b.updated) - Date.parse(a.updated)
-  );
-  return open.slice(0, cap).map((t) => ({
-    label: t.title,
-    sub: t.status,
-    action: { kind: "command", arg: "exo-agent:open-orchestration-board" },
   }));
 }
 

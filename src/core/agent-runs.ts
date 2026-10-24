@@ -309,7 +309,7 @@ export function extractProposalBlock(output: string): string | null {
  * `act` already writes — asking it for proposals too would mean the same change
  * could arrive twice, once applied and once pending.
  *
- * The vocabulary is the kernel's existing four kinds on purpose: a new "apply
+ * The vocabulary is the kernel's existing three kinds on purpose: a new "apply
  * this edit" kind would let an accepted proposal write anywhere, which is
  * exactly the power the kernel exists to withhold.
  */
@@ -319,18 +319,17 @@ export function proposalContract(memoryRootHint: string): string {
     "If anything you found should become an action, end your reply with a fenced block:",
     "",
     "```" + AGENT_PROPOSAL_FENCE,
-    '[{"kind":"task","title":"…","prompt":"…","rationale":"why this is worth doing"}]',
+    '[{"kind":"loop","title":"…","note":"…","rationale":"why this is worth keeping"}]',
     "```",
     "",
     "Rules for that block:",
     "- A flat JSON array. Every entry needs `kind` and `rationale`, plus the fields for its kind:",
-    "  - `task` (work to run later) → `title`, `prompt`",
     "  - `loop` (an open thread to resurface) → `title`, `note` (optional `resurface` as YYYY-MM-DD, `tags`)",
     "  - `decision` (a choice worth recording) → `title`, `context`, `decision`",
     "  - `playbook` (a repeatable prompt worth saving) → `name`, `prompt`",
     "- At most 3 entries, and only things worth keeping or that a human would plausibly accept. An empty run needs no block at all.",
     "- Titles stay under 120 characters and rationales under 500. One bad entry rejects the whole block, so keep it minimal and valid.",
-    "- `loop` and `decision` entries are recorded in the vault as soon as your run ends and are reviewed afterwards, so write them as final. `task` and `playbook` entries stay inert until a human accepts them. Do not propose the same thing twice.",
+    "- `loop` and `decision` entries are recorded in the vault as soon as your run ends and are reviewed afterwards, so write them as final. `playbook` entries stay inert until a human accepts them. Do not propose the same thing twice.",
     `- Do not use a proposal to ask for a file edit you could describe in prose; edits stay in your report (${memoryRootHint}).`,
     "",
   ].join("\n");

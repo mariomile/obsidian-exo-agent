@@ -197,8 +197,8 @@ describe("extractProposalBlock", () => {
   const block = (body: string) => "```" + AGENT_PROPOSAL_FENCE + "\n" + body + "\n```";
 
   it("pulls the payload out of a prose report", () => {
-    const out = `Found two things.\n\n${block('[{"kind":"task"}]')}\n\nDone.`;
-    expect(extractProposalBlock(out)).toBe('[{"kind":"task"}]');
+    const out = `Found two things.\n\n${block('[{"kind":"playbook"}]')}\n\nDone.`;
+    expect(extractProposalBlock(out)).toBe('[{"kind":"playbook"}]');
   });
 
   it("returns null when there is no block — the normal empty run", () => {
@@ -212,7 +212,7 @@ describe("extractProposalBlock", () => {
   });
 
   it("ignores ordinary json fences", () => {
-    expect(extractProposalBlock('```json\n[{"kind":"task"}]\n```')).toBeNull();
+    expect(extractProposalBlock('```json\n[{"kind":"playbook"}]\n```')).toBeNull();
   });
 
   it("treats an empty block as no proposals", () => {
@@ -224,7 +224,7 @@ describe("extractProposalBlock", () => {
   // every proposal an agent emits get rejected, silently.
   it("round-trips one entry of every kind into the kernel's own parser", () => {
     const candidates = [
-      { kind: "task", title: "Draft the post", prompt: "write it", rationale: "the draft is stale" },
+      { kind: "playbook", name: "Draft the post", prompt: "write it", rationale: "the draft is stale" },
       { kind: "loop", title: "Chase the reply", note: "no answer yet", rationale: "it has been a week" },
       { kind: "decision", title: "Pick a tier", context: "two options", decision: "went with propose", rationale: "safer" },
     ];
@@ -243,7 +243,7 @@ describe("extractProposalBlock", () => {
     // The example uses "…" placeholders, so only its SHAPE can be checked:
     // flat keys, no nested payload.
     const parsed = JSON.parse(example!.trim()) as Record<string, unknown>[];
-    expect(parsed[0]).toHaveProperty("prompt");
+    expect(parsed[0]).toHaveProperty("note");
     expect(parsed[0]).toHaveProperty("rationale");
     expect(parsed[0]).not.toHaveProperty("payload");
   });
@@ -282,10 +282,10 @@ describe("buildAgentRunPrompt — the empty-run contract", () => {
 });
 
 describe("salvageProposalCandidates", () => {
-  const good = { kind: "task", title: "Do it", prompt: "the work", rationale: "worth doing" };
+  const good = { kind: "playbook", name: "Do it", prompt: "the work", rationale: "worth doing" };
   const alsoGood = { kind: "loop", title: "Chase", note: "no reply", rationale: "a week now" };
   // The exact shape that broke the first real run: a second entry with no rationale.
-  const noRationale = { kind: "task", title: "Other", prompt: "x" };
+  const noRationale = { kind: "playbook", name: "Other", prompt: "x" };
 
   it("keeps the valid entries when one is malformed", () => {
     const out = salvageProposalCandidates(JSON.stringify([good, noRationale]));
@@ -300,7 +300,7 @@ describe("salvageProposalCandidates", () => {
 
   it("returns [] for garbage rather than throwing", () => {
     expect(salvageProposalCandidates("not json")).toEqual([]);
-    expect(salvageProposalCandidates('{"kind":"task"}')).toEqual([]);
+    expect(salvageProposalCandidates('{"kind":"playbook"}')).toEqual([]);
     expect(salvageProposalCandidates("[]")).toEqual([]);
     expect(salvageProposalCandidates(JSON.stringify([noRationale]))).toEqual([]);
   });
@@ -366,7 +366,7 @@ describe("buildAgentRunPrompt — the proposal channel", () => {
 
   it("names the kernel's existing kinds and says proposals are inert", () => {
     const p = buildAgentRunPrompt(propose, "x", undefined, undefined, "r", true);
-    for (const kind of ["task", "loop", "decision", "playbook"]) expect(p).toContain(`\`${kind}\``);
+    for (const kind of ["loop", "decision", "playbook"]) expect(p).toContain(`\`${kind}\``);
     expect(p).toContain("stay inert until a human accepts");
   });
 });
@@ -651,7 +651,7 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
     turnId: "run-1",
     createdAt: 1_720_000_000_000,
   };
-  const taskJson = { kind: "task", title: "Follow up", prompt: "do it", rationale: "because" };
+  const playbookJson = { kind: "playbook", name: "Follow up", prompt: "do it", rationale: "because" };
 
   function fenced(candidates: unknown): string {
     return ["Here is what I found.", "", "```exo-proposals", JSON.stringify(candidates), "```"].join("\n");
@@ -671,15 +671,15 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
 
   it("turns a fenced block into a pending proposal with the run as its source", async () => {
     const mocked = runDeps();
-    expect(await collectRunProposals(fenced([taskJson]), runSource, mocked.value)).toBe(1);
+    expect(await collectRunProposals(fenced([playbookJson]), runSource, mocked.value)).toBe(1);
     expect(mocked.append).toHaveBeenCalledTimes(1);
     expect(mocked.append.mock.calls[0][1]).toEqual(runSource);
   });
 
   it("salvages the valid entries when one candidate in the block is invalid", async () => {
     const mocked = runDeps();
-    const missingRationale = { kind: "task", title: "Missing rationale", prompt: "do it" };
-    expect(await collectRunProposals(fenced([taskJson, missingRationale]), runSource, mocked.value)).toBe(1);
+    const missingRationale = { kind: "playbook", name: "Missing rationale", prompt: "do it" };
+    expect(await collectRunProposals(fenced([playbookJson, missingRationale]), runSource, mocked.value)).toBe(1);
     expect(mocked.append).toHaveBeenCalledTimes(1);
     expect(mocked.diagnostic).toHaveBeenCalledTimes(1);
   });
@@ -689,7 +689,7 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
     const append = vi.fn(async (candidate: ProposalCandidate) => ({
       status: candidate.kind === "loop" ? "applied" : "appended",
     }));
-    const landed = await collectRunProposals(fenced([taskJson, loopJson]), runSource, { store: { append } });
+    const landed = await collectRunProposals(fenced([playbookJson, loopJson]), runSource, { store: { append } });
     expect(append).toHaveBeenCalledTimes(2);
     expect(landed).toBe(1);
   });
@@ -699,16 +699,16 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
       throw new Error("disk full");
     });
     const diagnostic = vi.fn();
-    expect(await collectRunProposals(fenced([taskJson]), runSource, { store: { append }, diagnostic })).toBe(0);
+    expect(await collectRunProposals(fenced([playbookJson]), runSource, { store: { append }, diagnostic })).toBe(0);
     expect(diagnostic).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("proposalContract copy", () => {
-  it("says loops and decisions are recorded directly and only tasks and playbooks stay inert", () => {
+  it("says loops and decisions are recorded directly and only playbooks stay inert", () => {
     const text = proposalContract("Memory/");
     expect(text).toMatch(/`loop` and `decision` entries are recorded in the vault/);
-    expect(text).toMatch(/`task` and `playbook` entries stay inert until a human accepts/);
+    expect(text).toMatch(/`playbook` entries stay inert until a human accepts/);
     expect(text).not.toMatch(/Proposals are INERT/);
   });
 });

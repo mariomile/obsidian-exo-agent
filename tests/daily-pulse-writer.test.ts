@@ -19,12 +19,12 @@ function pulse(): DailyPulse {
       {
         title: "Attention",
         items: [{
-          id: "task:task-1",
-          kind: "task",
-          title: "Approve launch",
-          detail: "Needs input",
-          target: { kind: "task", id: "task-1" },
-          action: { kind: "review", target: "task", id: "task-1" },
+          id: "automation:run-1",
+          kind: "automation",
+          title: "Morning sync",
+          detail: "1 write to review",
+          target: { kind: "automation", id: "run-1" },
+          action: { kind: "review", target: "automation", id: "run-1" },
         }],
       },
       {
@@ -146,11 +146,11 @@ describe("Daily Pulse non-destructive writer", () => {
   it("renders deterministic wikilinks and target-specific CTA metadata without executing actions", () => {
     const content = renderDailyPulseBlock(pulse(), []);
 
-    expect(content).toContain("[[_system/orchestration/tasks|Approve launch]]");
+    expect(content).toContain("**Morning sync**");
     expect(content).toContain("[[_system/memory/open-loops|Follow up]]");
     expect(content).toContain("[[Active/Projects/Exo|Exo]]");
-    expect(content).toContain("Action: [Review task](obsidian://exo-daily-pulse?target=task)");
-    expect(content).toContain('<!-- exo:daily-pulse:cta {"kind":"review","target":"task","id":"task-1"} -->');
+    expect(content).toContain("Action: [Review automation](obsidian://exo-daily-pulse?target=automation)");
+    expect(content).toContain('<!-- exo:daily-pulse:cta {"kind":"review","target":"automation","id":"run-1"} -->');
     expect(content).toContain("Action: [Review suggestion](obsidian://exo-daily-pulse?target=proposal)");
     expect(content).toContain("Action: [Open note](obsidian://exo-daily-pulse?target=note&path=Active%2FProjects%2FExo.md)");
     expect(content).toContain('<!-- exo:daily-pulse:cta {"kind":"review","target":"proposal","id":"proposal-1"} -->');
@@ -173,7 +173,7 @@ describe("Daily Pulse non-destructive writer", () => {
     const unsafe = pulse();
     unsafe.sections[0].items[0].title = DAILY_PULSE_START_MARKER;
     const content = renderDailyPulseBlock(unsafe, [{
-      source: "tasks",
+      source: "automations",
       message: DAILY_PULSE_END_MARKER,
     }]);
 

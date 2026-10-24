@@ -49,7 +49,7 @@ function fakeApp(opts: { annotations?: FakeAnnotation[]; withAiditor?: boolean; 
 }
 
 function makeServer(app: any) {
-  // Read-only construction (no memory writes, no orchestration) — the annotation
+  // Read-only construction (no memory writes) — the annotation
   // tools are unconditional so this default shape registers them.
   return createObsidianToolServer(app, { alwaysLoad: true, memoryWrite: false, memoryRead: true });
 }

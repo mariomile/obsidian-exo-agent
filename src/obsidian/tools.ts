@@ -18,9 +18,6 @@ import {
 import { WriteQueue } from "../core/write-queue";
 import { EXO_CALLER, type AgentCaller } from "../core/agent-runs";
 import { patchFrontmatter } from "../core/frontmatter-patch";
-import { createBacklogTask, createChildTask, ChildTaskRefused, adaptAppToTaskVault } from "./task-store";
-import { canSpawnChild, childrenOf } from "../core/child-tasks";
-import { parseTasksFile } from "../core/tasks";
 import { unreviewedWriteRuns } from "../core/automations";
 import { parseDuration, formatDuration } from "../core/agents";
 import {
@@ -171,13 +168,10 @@ export interface ObsidianToolOpts {
   memory?: MemoryCaps;
   askBridge?: (questions: AskQuestion[]) => Promise<Record<string, string>>;
   loopsWriteQueue?: WriteQueue;
-  orchestrationEnabled?: boolean;
-  tasksWriteQueue?: WriteQueue;
   /** Convo id of the conversation this tool server belongs to. Present only
-   *  for real chat sessions (never headless runs) — `spawn_task` is not
-   *  registered without it, since a child with no parent has nobody to
-   *  report to. */
-  parentConvoId?: string;
+   *  for real chat sessions (never headless runs): the chat tools are not
+   *  registered without it, since there is no "this chat" to act on. */
+  convoId?: string;
   /** Per-convo bridge to the shared agent-browser tab. Absent → the browser_*
    *  tools are not registered at all (feature off, mobile, or headless run):
    *  the tool list must stay byte-identical to before the feature existed. */
@@ -203,18 +197,9 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     memory = DEFAULT_TOOL_MEMORY,
     askBridge,
     loopsWriteQueue = new WriteQueue(),
-    /** Orchestration Board master flag (default OFF). Gates the task tools:
-     *  add_task, list_tasks, spawn_task, task_status, task_cancel. With it off
-     *  none of them is registered. */
-    orchestrationEnabled = false,
-    /** Shared write-queue for the tasks ledger (`paths.tasks`),
-     *  injected by the plugin the same way `loopsWriteQueue` is, so `add_task`
-     *  and any future board-side writer serialize on the SAME queue. */
-    tasksWriteQueue = new WriteQueue(),
     /** Convo id of the conversation this tool server belongs to. Absent for
-     *  headless runs — `spawn_task` is gated on this being present, in
-     *  addition to `orchestrationEnabled`. */
-    parentConvoId,
+     *  headless runs, which register no chat tools. */
+    convoId,
     /** Bridge to the shared agent-browser tab, curried for THIS conversation by
      *  the plugin controller. Absent is the normal case: feature off, mobile, or
      *  a headless run, which must not drive a surface whose whole point is that
@@ -816,89 +801,6 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     }
   );
 
-  /* --------------------------- orchestration ------------------------ */
-
-  const addTask = tool(
-    "add_task",
-    "Put something on the Orchestration Board as a backlog task — use this when the user asks to put this on the board, turn this into a task, or queue this up for later instead of doing it in this conversation right now. Creates a `backlog` entry; it does not run anything.",
-    {
-      title: z.string().describe("Short task title shown on the board card."),
-      prompt: z.string().describe("The task prompt — what the spawned conversation should do, verbatim."),
-      model: z.string().optional().describe("Provider model id to run the task with; omit to use the default from settings."),
-    },
-    async (args) => {
-      const vault = adaptAppToTaskVault(app);
-      const entry = await createBacklogTask(vault, tasksWriteQueue, {
-        title: args.title,
-        prompt: args.prompt,
-        ...(args.model ? { model: args.model } : {}),
-      });
-      return ok(`Added ${entry.id} to the Backlog: ${entry.title}`);
-    }
-  );
-
-  const spawnTask = tool(
-    "spawn_task",
-    "Delegate a piece of work to a separate child conversation that runs in parallel with this one. Use it when the work is self-contained and would otherwise crowd this thread: research a source, draft a section, check a dataset. The child runs as a normal chat (its approvals show up here too) and, when it finishes, its report wakes this chat on its own, so never poll for it. Use task_status to look in, task_cancel to stop it, send_to_chat to give it more instructions. Prefer doing small work yourself: each child is a whole conversation Mario has to supervise.",
-    {
-      title: z.string().describe("Short title shown on the board card and in the sidebar."),
-      prompt: z.string().describe("The full instruction for the child conversation — it does not see this chat's history."),
-      model: z.string().optional().describe("Provider model id for the child; omit for the default."),
-    },
-    async (args) => {
-      if (!parentConvoId) return ok("Delegation is unavailable in this session.");
-      const vault = adaptAppToTaskVault(app);
-      try {
-        const entry = await createChildTask(
-          vault,
-          tasksWriteQueue,
-          {
-            title: args.title,
-            prompt: args.prompt,
-            parent: parentConvoId,
-            ...(args.model ? { model: args.model } : {}),
-          },
-          paths.tasks,
-          // Evaluated INSIDE createChildTask's own queued turn, against a
-          // read taken that same turn — never a snapshot from before this
-          // call was enqueued. That's what keeps N concurrent spawn_task
-          // calls (one assistant turn, several parallel tool blocks) from
-          // all passing the same stale "N < cap" check simultaneously.
-          (tasks) => canSpawnChild(tasks, parentConvoId)
-        );
-        return ok(
-          `Queued child task ${entry.id}: ${entry.title}. It starts as soon as a slot is free and reports back to this chat when it is done.`
-        );
-      } catch (e) {
-        // A cap/depth refusal is expected traffic, not a failure — surface the
-        // gate's own reason verbatim as a normal result so the agent reads it
-        // as an answer instead of retrying the tool call.
-        if (e instanceof ChildTaskRefused) return ok(e.reason);
-        throw e;
-      }
-    }
-  );
-
-  const listTasks = tool(
-    "list_tasks",
-    "List tasks on the Orchestration Board. By default it shows only the child tasks this conversation delegated, with their current status — use it to check on work you handed off before reporting to Mario.",
-    {
-      all: z.boolean().optional().describe("List every task on the board instead of only this conversation's children."),
-    },
-    async (args) => {
-      const vault = adaptAppToTaskVault(app);
-      const existing = vault.getFile(paths.tasks);
-      const tasks = parseTasksFile(existing ? await vault.read(paths.tasks) : "");
-      const shown = args.all ? tasks : parentConvoId ? childrenOf(tasks, parentConvoId) : [];
-      if (!shown.length) return ok(args.all ? "The board is empty." : "This conversation has not delegated any tasks.");
-      return ok(
-        shown
-          .map((t) => `- ${t.id} · ${t.status} · ${t.title}${t.convo ? "" : " (not started yet)"}`)
-          .join("\n")
-      );
-    }
-  );
-
   /* ------------------------- automations (exo) ------------------------- */
   // Chat-side management of scheduled playbook runs — the same operations as
   // the Automations panel, so "metti in pausa il digest" works as a sentence.
@@ -1232,10 +1134,8 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     ...(memory.ledgerWrite ? [captureDecision, openLoop, closeLoopTool] : []),
     // `rethink_memory` also needs a live view bridge to render its diff.
     ...(memory.rethink && rethinkBridge ? [rethinkMemory] : []),
-    ...buildMemoryTools(app, memory, parentConvoId),
-    ...(orchestrationEnabled ? [addTask, listTasks] : []),
-    ...(orchestrationEnabled && parentConvoId ? [spawnTask] : []),
-    ...(parentConvoId ? buildChatTools(app, parentConvoId, orchestrationEnabled) : []),
+    ...buildMemoryTools(app, memory, convoId),
+    ...(convoId ? buildChatTools(app, convoId) : []),
     ...(browserBridge ? buildBrowserTools(browserBridge) : []),
     ...(collaboBridge ? buildCollaboTools(collaboBridge) : []),
   ];
@@ -1276,10 +1176,6 @@ export const OBSIDIAN_READ_TOOLS = new Set([
   "mcp__obsidian__list_loops",
   "mcp__obsidian__list_automations",
   "mcp__obsidian__list_agents",
-  // Reads the ledger and writes nothing. Its own description tells the agent to
-  // "check on work you handed off" — raising a write-permission card for that
-  // turns a status glance into an interruption.
-  "mcp__obsidian__list_tasks",
   // Browser observers: they change nothing on the page or in the vault. The
   // interacting tools (open/navigate/click/type/scroll) are deliberately NOT
   // here: their permission card, showing the URL/selector, is the evidence
@@ -1300,11 +1196,3 @@ export const OBSIDIAN_MEMORY_TOOLS = new Set([
   "mcp__obsidian__rethink_memory",
   "mcp__obsidian__undo_memory_write",
 ]);
-
-// `OBSIDIAN_ORCHESTRATION_TOOLS` used to live here, listing `add_task` alone.
-// Removed rather than extended with `spawn_task`/`list_tasks`: it had ZERO
-// production consumers, and it never could have one — the `orchestrationEnabled`
-// gate is applied at REGISTRATION (see `createObsidianToolServer`), so a tool
-// that is off is not on the server at all and there is nothing left to classify.
-// A Set nobody reads cannot go red when it drifts, which is exactly how
-// `list_tasks` came to be missing from the read-tools Set above unnoticed.

@@ -65,9 +65,8 @@ function registeredBareNames(): Set<string> {
       { surface: "chat" },
     ),
     askBridge: async () => ({}),
-    orchestrationEnabled: true,
     rethinkBridge: async () => "",
-    parentConvoId: "convo-test",
+    convoId: "convo-test",
     browserBridge: fakeBrowserBridge,
   });
   const reg = (server.instance as unknown as { _registeredTools: Record<string, unknown> })._registeredTools;
@@ -97,10 +96,10 @@ describe("obsidian tool classifier registries stay in sync with registered tools
   });
 
   /**
-   * The OTHER direction, which this file could not see. `list_tasks` shipped
-   * read-only and absent from `OBSIDIAN_READ_TOOLS`, so every "check on the
-   * work you handed off" raised a write permission card — and the listed ->
-   * registered check above passes just as happily with the tool missing.
+   * The OTHER direction, which this file could not see. A read-only tool once
+   * shipped absent from `OBSIDIAN_READ_TOOLS`, so every call raised a write
+   * permission card — and the listed -> registered check above passes just as
+   * happily with the tool missing.
    *
    * A full inverse (every registered tool is classified) is not the rule: most
    * tools are writes and belong to no Set. So the rule is stated where it is

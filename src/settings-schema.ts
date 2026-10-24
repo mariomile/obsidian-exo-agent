@@ -166,10 +166,6 @@ export interface MVASettings {
   /** Quiet days before an idle chat moves to the Settled shelf on its own
    *  (core/thread-lifecycle). 0 = never. Default 3, T3 Code's default. */
   chatsAutoSettleDays: number;
-  /** Chats-sidebar rows whose fan-out children are folded away, by CONVERSATION
-   *  ID. A list of its own rather than a share of `chatsCollapsed`: the two are
-   *  keyed in different namespaces — core/chat-list-state. */
-  chatsCollapsedParents: string[];
   /** Prompts waiting to run in a chat at a set time (core/scheduled-prompts). */
   scheduledPrompts: ScheduledPrompt[];
   /** LEGACY scheduled playbook runs ("<Prompt name> | daily" per line) — migrated
@@ -218,14 +214,6 @@ export interface MVASettings {
    *  drift. The debounce quiet period after a write (2 min, fixed) usually
    *  fires first. */
   vaultAutoCommitIntervalMinutes: number;
-  /** Orchestration Board master flag, default OFF. Gates the `add_task` tool,
-   *  the "Promote to task" command, and (future) the board view/ribbon icon —
-   *  chat is unaffected either way. See docs/superpowers/specs/2026-07-08-orchestration-board-design.md.
-   *  Turning this OFF never touches already-running conversations — they keep
-   *  going as normal chats; it only stops new tasks from being queued/started. */
-  orchestrationEnabled: boolean;
-  /** Max number of Orchestration Board tasks the driver runs concurrently. */
-  orchestrationMaxConcurrent: number;
   /** Soft ceiling for conversations.json, in megabytes. Exceeding it proposes a
    *  cleanup in the history — it never deletes anything on its own. */
   retentionBudgetMb: number;
@@ -323,7 +311,6 @@ export const DEFAULT_SETTINGS: MVASettings = {
   chatsMode: "activity",
   chatsCollapsed: [],
   chatsAutoSettleDays: 3,
-  chatsCollapsedParents: [],
   scheduledPrompts: [],
   scheduledRuns: "",
   automations: [],
@@ -340,8 +327,6 @@ export const DEFAULT_SETTINGS: MVASettings = {
   autoUpdateCli: true,
   vaultAutoCommit: false,
   vaultAutoCommitIntervalMinutes: 15,
-  orchestrationEnabled: false,
-  orchestrationMaxConcurrent: 2,
   retentionBudgetMb: 50,
   stripMaxTabs: 6,
   agentsEnabled: false,
@@ -369,6 +354,9 @@ const OBSOLETE_SETTING_KEYS = [
   "memoryFileBudget",
   "claudememProjects",
   "appliedProposalKeys",
+  "orchestrationEnabled",
+  "orchestrationMaxConcurrent",
+  "chatsCollapsedParents",
 ] as const;
 
 /** Delete obsolete keys in place; true when anything was removed (caller saves). */
@@ -392,9 +380,7 @@ export function stripObsoleteSettings(s: object): boolean {
  * on every load from the ids still on disk. Deleting the highest-numbered chat
  * therefore freed its number, and the next new chat was minted with a dead
  * chat's id — which four durable stores then resolved against: the settled
- * note's `exo_convo` stamp, the orchestration board's `- convo:` line,
- * `proposals.json`, and `workflow-signals.json`. The worst of them was silent:
- * a task driven by an unrelated conversation.
+ * note's `exo_convo` stamp, `proposals.json`, and `workflow-signals.json`.
  *
  * Keeping the max here rather than at the call site means a caller that reads a
  * stale seed, or writes out of order, still cannot lower it.

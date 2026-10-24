@@ -24,7 +24,6 @@ import type { Message } from "./model";
 import type { ExoPaths } from "./paths";
 import type { Recap } from "./recap";
 import { documentNewline, frontmatterBounds, patchFrontmatter } from "./frontmatter-patch";
-import { terminalConvoState } from "./convo-state";
 
 /** The frontmatter key that ties a note back to the conversation it mirrors.
  *  This — not the filename — is what makes re-settling an UPDATE: a chat that
@@ -84,14 +83,9 @@ export function canSettleRow(r: {
 
 /** How a settled conversation ended, in the note's vocabulary. */
 export function settleOutcome(s: { stopped: boolean; poisoned: boolean }): SettleOutcome {
-  // Derived, not restated. The precedence (a stop outranks an error) is a fact
-  // about a conversation, not about notes, and it already lives in
-  // `terminalConvoState`. Two copies of it were kept in step by a comment
-  // saying "matching terminalConvoState", which is the codebase admitting the
-  // duplication and proposing prose as the enforcement.
-  const { state } = terminalConvoState(s);
-  if (state === "stopped") return "stopped";
-  return state === "turn-end" ? "settled" : "error";
+  // A stop outranks an error: a turn the user stopped reads as a stop.
+  if (s.stopped) return "stopped";
+  return s.poisoned ? "error" : "settled";
 }
 
 /** Everything the distiller needs about one conversation. Structural, not

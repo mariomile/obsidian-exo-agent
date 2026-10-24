@@ -220,38 +220,12 @@ describe("PlaybookProposalTarget", () => {
 });
 
 describe("createProposalAcceptanceDeps", () => {
-  it("wraps the shared TaskStore create-once boundary with the proposal marker", async () => {
-    const { adapter } = fakeVault();
-    const tasks = { createOnce: vi.fn(async () => ({ id: "task-1" })) };
-    const deps = createProposalAcceptanceDeps({
-      tasks,
-      vault: adapter,
-      loopsWriteQueue: new WriteQueue(),
-      playbooksWriteQueue: new WriteQueue(),
-      playbooks: {
-        settings: () => ({ customPrompts: [] }),
-        saveSettings: async () => undefined,
-      },
-      noteWrite: vi.fn(),
-    });
-    await expect(deps.tasks.create({
-      proposalId: "proposal-task",
-      title: "Ship",
-      prompt: "Do it",
-    })).resolves.toEqual({ id: "task-1" });
-    expect(tasks.createOnce).toHaveBeenCalledWith(
-      { title: "Ship", prompt: `Do it\n\n${proposalMarker("proposal-task")}` },
-      proposalMarker("proposal-task")
-    );
-  });
-
   it("lets the router convert a production adapter failure to a retryable route error", async () => {
     const { adapter } = fakeVault();
     adapter.create = async () => {
       throw new Error("vault is read-only");
     };
     const deps = createProposalAcceptanceDeps({
-      tasks: { createOnce: async () => ({ id: "task-1" }) },
       vault: adapter,
       loopsWriteQueue: new WriteQueue(),
       playbooksWriteQueue: new WriteQueue(),
@@ -282,7 +256,6 @@ describe("createProposalAcceptanceDeps", () => {
     const { adapter } = fakeVault();
     const noteWrite = vi.fn();
     const deps = createProposalAcceptanceDeps({
-      tasks: { createOnce: async () => ({ id: "task-1" }) },
       vault: adapter,
       loopsWriteQueue: new WriteQueue(),
       playbooksWriteQueue: new WriteQueue(),

@@ -24,7 +24,6 @@
  */
 import { deriveLane, type NeedsInputReason, type SessionBadge } from "./session-cards";
 import { groupByTime, type TimeGroupLabel } from "./history";
-import { groupAcrossHomes, groupByParent, type GroupedConvo } from "./child-tree";
 import { findInChat, fold, snippetAround } from "./chat-search";
 import type { ChatMessage } from "./recent-chats";
 import {
@@ -59,9 +58,6 @@ export interface ChatRowSource {
   /** User turns, not total messages: it answers "how much of this is mine",
    *  which is what makes a conversation feel long or throwaway. */
   messageCount: number;
-  /** The conversation that spawned this one via `spawn_task`. Drives the
-   *  indent; absent for everything the user started themselves. */
-  parentConvoId?: string;
   // Live signals, consumed by deriveLane.
   streaming: boolean;
   pendingPerm: boolean;
@@ -91,8 +87,6 @@ export interface ChatRowSource {
   focused?: boolean;
   /** Last time the user had this chat in view. Clears the "woke" marker. */
   lastActiveAt?: number;
-  /** A finished child's report is waiting: wakes a snooze, blocks auto-settle. */
-  pendingReport?: boolean;
   /** The agent's checklist, shown on a running row. */
   planProgress?: PlanProgress;
   /** The conversation itself, by reference, for searching what was said
@@ -114,23 +108,6 @@ export interface ChatRow {
    *  The live tier answers "what is happening"; this answers the question that
    *  actually matters more often — "what happened while I was not looking". */
   unseen: boolean;
-  /** Kept on the row so the cross-collection grouping pass can see it. */
-  parentConvoId?: string;
-  /** How far to indent, decided by `groupAcrossHomes` across every collection
-   *  at once. 0 for anything the user started, and for a child whose parent
-   *  is not visible anywhere in the current list — an orphan renders at top
-   *  level rather than vanishing. A child that IS visible is 1 regardless of
-   *  which collection it would otherwise have landed in: it is relocated to
-   *  sit under its parent, in the parent's collection. */
-  depth: 0 | 1;
-  /** At least one row is nested UNDER this one in the list as painted — what
-   *  earns the row its own collapse toggle. Decided by the same grouping pass
-   *  that decided `depth` (see `GroupedConvo.hasChildren`), never re-derived by
-   *  the renderer: the pass knows which children were anchored away and which
-   *  parents the search filtered out, and a second derivation would answer with
-   *  less. Always false at depth 1 — a grandchild renders beside its parent,
-   *  not under it. */
-  hasChildren: boolean;
   /** A search matched inside the chat and `preview` holds the matching line,
    *  so the row needs its second line even where it would be compact. */
   snippet?: true;
@@ -362,21 +339,6 @@ const SECTION_SORT: Partial<Record<ActivityKey, (a: ChatRow, b: ChatRow) => numb
   settled: bySettled,
 };
 
-/**
- * Rows that must never be relocated under a parent: anything running,
- * blocked or ended badly (an errored child nested under a settled parent would
- * be folded away on a closed shelf), and anything snoozed (a snoozed child
- * nested under an inbox parent would be on screen while claiming to be hidden).
- *
- * Live verification found the failure this exists for: a fan-out child blocked
- * on a permission prompt, whose parent was an old closed chat, was nested into
- * a history bucket — a conversation waiting on the user, filed under the
- * archive. Nesting is a convenience; "this is blocked on you" is not. Anchoring
- * pins the row's OWN position only: its children still nest under it, in its
- * section, same as under any other root.
- */
-const isAnchored = (r: ChatRow): boolean => needsYou(r) || r.lane !== undefined || r.shelf === "snoozed";
-
 function toRow(s: ChatRowSource): ChatRow {
   const row: ChatRow = {
     id: s.id,
@@ -388,12 +350,9 @@ function toRow(s: ChatRowSource): ChatRow {
     pinned: s.pinned,
     unseen: s.unseen,
     messageCount: s.messageCount,
-    depth: 0,
-    hasChildren: false,
     shelf: "inbox",
   };
   if (s.updatedAt !== undefined) row.updatedAt = s.updatedAt;
-  if (s.parentConvoId) row.parentConvoId = s.parentConvoId;
   return row;
 }
 
@@ -455,27 +414,11 @@ export function nextNeedsInput(
   return blocked[(at + 1) % blocked.length].id;
 }
 
-/** Stamp the nesting `groupAcrossHomes` decided — the indent AND whether
- *  anything sits under the row — onto each row of one output collection. A row
- *  that is neither indented nor a parent already says so (`toRow`), so it comes
- *  back unchanged; only a row the pass actually moved or marked needs a new
- *  object, same as the old per-tier `nest` did. */
-function stampNesting(grouped: readonly GroupedConvo<ChatRow>[]): ChatRow[] {
-  return grouped.map(({ item, depth, hasChildren }) =>
-    depth === 0 && !hasChildren ? item : { ...item, depth, hasChildren },
-  );
-}
-
 /**
  * Build the list. Order of operations matters: exclusions, then the query
  * filter, then sectioning. Filtering first is what lets a zero-match search
  * return no sections at all, so the view renders one "no matches" state
  * instead of a stack of empty headers.
- *
- * A row lands in exactly one section — EXCEPT a child, which is relocated to
- * sit under its parent regardless of the section it would otherwise have
- * earned (see `depth` on `ChatRow`), and except an anchored row, which is
- * never relocated at all (see `isAnchored`).
  */
 export function buildChatList(
   sources: readonly ChatRowSource[],
@@ -542,8 +485,8 @@ export function buildChatList(
   }
   blocked.sort(byRecency);
 
-  // Named homes for the nesting pass, in paint order. `related` is deliberately
-  // NOT one of them — see below.
+  // Named sections, in paint order. `related` is deliberately NOT one of them:
+  // it is the semantic tier, rows that do NOT contain what was typed.
   const homes = new Map<string, ChatRow[]>();
   const labels = new Map<string, string>();
 
@@ -568,36 +511,15 @@ export function buildChatList(
     for (const [key] of ACTIVITY_SECTIONS) homes.get(key)!.sort(SECTION_SORT[key] ?? byRecency);
   }
 
-  // One cross-collection pass, not one per section: a child is relocated to sit
-  // under its parent wherever the parent landed, even when that is a different
-  // section entirely — see `depth` on `ChatRow` and `groupAcrossHomes`. Each
-  // section's OWN sort decides root order within it; this only decides which
-  // section a child ends up in and where among its siblings.
-  //
-  // Anchoring applies to `activity` only: it exists to protect the state
-  // sections, and `days` has none — there the axis IS the date, and a child
-  // sitting in its parent's day is that mode working as designed rather than a
-  // row hiding from the section that promised it.
-  const grouped = groupAcrossHomes(homes, mode === "days" ? undefined : { isAnchored });
-
-  // `related` gets its own, single-home nesting pass instead of joining the
-  // union above: it is the semantic tier, defined for the user as rows that
-  // do NOT contain what was typed (chat-list-view.ts). Folding it into the
-  // cross-collection pass would let a literal match get relocated INTO
-  // "doesn't contain your word", and would let a related-only hit get
-  // laundered into a literal section by nesting under a parent that actually
-  // matched. A child can still nest under a parent that is ALSO in `related`
-  // — this is `groupByParent`, the single-home case, not a no-op.
   const sections: ChatSection[] = [...homes.keys()].map((key) => ({
     key: key as ChatSectionKey,
     label: labels.get(key) ?? key,
-    items: stampNesting(grouped.get(key) ?? []),
+    items: homes.get(key) ?? [],
   }));
-  sections.push({ key: "related", label: "Related", items: stampNesting(groupByParent(related)) });
+  sections.push({ key: "related", label: "Related", items: related });
 
   return {
-    // A section that relocation emptied — its only row pulled out to sit under
-    // a parent elsewhere — is dropped rather than rendered as a header over
+    // An empty section is dropped rather than rendered as a header over
     // nothing: a label with no rows under it promises content that isn't there.
     sections: sections.filter((s) => s.items.length > 0),
     blocked,

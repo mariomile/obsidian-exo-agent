@@ -12,7 +12,6 @@ const NOW = Date.parse("2026-07-20T08:00:00.000Z");
 function input(overrides: Partial<DailyPulseInput> = {}): DailyPulseInput {
   return {
     now: NOW,
-    tasks: [],
     dueLoops: [],
     pendingProposals: [],
     automationRuns: [],
@@ -32,7 +31,6 @@ function section(
 describe("buildDailyPulse", () => {
   it("builds all five sections with review/open targets and action metadata", () => {
     const result = buildDailyPulse(input({
-      tasks: [{ id: "task-1", title: "Approve launch", status: "needs-input" }],
       dueLoops: [{ id: "loop-1", title: "Follow up", resurface: "2026-07-20" }],
       pendingProposals: [{ id: "proposal-1", kind: "decision", title: "Choose pricing" }],
       automationRuns: [{ id: "run-1", name: "Morning sync", startedAt: NOW - 1_000, writes: ["Journal/today.md"] }],
@@ -49,14 +47,6 @@ describe("buildDailyPulse", () => {
       "System",
     ]);
     expect(section(result.sections, "Attention")?.items).toEqual([
-      {
-        id: "task:task-1",
-        kind: "task",
-        title: "Approve launch",
-        detail: "Needs input",
-        target: { kind: "task", id: "task-1" },
-        action: { kind: "review", target: "task", id: "task-1" },
-      },
       {
         id: "automation:run-1",
         kind: "automation",
@@ -105,15 +95,10 @@ describe("buildDailyPulse", () => {
 
   it("caps every section at five items, including the combined Attention section", () => {
     const result = buildDailyPulse(input({
-      tasks: Array.from({ length: 6 }, (_, index) => ({
-        id: `task-${index}`,
-        title: `Task ${index}`,
-        status: "needs-input" as const,
-      })),
       dueLoops: Array.from({ length: 7 }, (_, index) => ({ id: `loop-${index}`, title: `Loop ${index}` })),
       pendingProposals: Array.from({ length: 8 }, (_, index) => ({
         id: `proposal-${index}`,
-        kind: "task" as const,
+        kind: "playbook" as const,
         title: `Proposal ${index}`,
       })),
       automationRuns: Array.from({ length: 6 }, (_, index) => ({
@@ -135,18 +120,13 @@ describe("buildDailyPulse", () => {
 
   it("orders deterministically regardless of input order", () => {
     const values = input({
-      tasks: [
-        { id: "task-review", title: "Review", status: "review" },
-        { id: "task-z", title: "Zulu", status: "needs-input" },
-        { id: "task-a", title: "Alpha", status: "needs-input" },
-      ],
       dueLoops: [
         { id: "loop-later", title: "Later", resurface: "2026-07-20" },
         { id: "loop-now", title: "Now" },
       ],
       pendingProposals: [
         { id: "proposal-loop", kind: "loop", title: "Loop" },
-        { id: "proposal-task", kind: "task", title: "Task" },
+        { id: "proposal-playbook", kind: "playbook", title: "Playbook" },
       ],
       automationRuns: [
         { id: "run-old", name: "Old", startedAt: NOW - 2_000, writes: ["old.md"] },
@@ -159,7 +139,6 @@ describe("buildDailyPulse", () => {
     });
     const reversed = input({
       ...values,
-      tasks: [...values.tasks].reverse(),
       dueLoops: [...values.dueLoops].reverse(),
       pendingProposals: [...values.pendingProposals].reverse(),
       automationRuns: [...values.automationRuns].reverse(),
@@ -168,9 +147,6 @@ describe("buildDailyPulse", () => {
 
     expect(buildDailyPulse(reversed)).toEqual(buildDailyPulse(values));
     expect(section(buildDailyPulse(values).sections, "Attention")?.items.map((item) => item.id)).toEqual([
-      "task:task-a",
-      "task:task-z",
-      "task:task-review",
       "automation:run-new",
       "automation:run-old",
     ]);
@@ -182,7 +158,6 @@ describe("buildDailyPulse", () => {
 
   it("handles zero budget, no-write runs, root notes, ties and does not mutate input", () => {
     const values = input({
-      tasks: [{ id: "b", title: "Same", status: "review" }, { id: "a", title: "Same", status: "review" }],
       automationRuns: [
         { id: "ignored", name: "Read only", startedAt: NOW, writes: [] },
         { id: "run", name: "Writer", startedAt: NOW, writes: ["a.md", "b.md"] },
@@ -195,8 +170,6 @@ describe("buildDailyPulse", () => {
 
     expect(values).toEqual(snapshot);
     expect(section(result.sections, "Attention")?.items.map((item) => item.id)).toEqual([
-      "task:a",
-      "task:b",
       "automation:run",
     ]);
     expect(section(result.sections, "Attention")?.items.at(-1)?.detail).toBe("2 writes to review");

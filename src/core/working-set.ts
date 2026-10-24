@@ -139,36 +139,6 @@ export function nextFocusAfterRemoval(orderedIds: readonly string[], removedId: 
   return orderedIds[idx + 1] ?? orderedIds[idx - 1];
 }
 
-/**
- * The strip after a freshly spawned CHILD conversation is taken back out of it.
- *
- * A child is delegated work, not something the user opened: it belongs to the
- * chats sidebar (indented under its parent) and to the board, and putting it in
- * the strip would let one `spawn_task` burst evict the user's own tabs through
- * the cap. The spawn path still creates it as a tab — seeding goes through the
- * composer, which needs the conversation focused — so this undoes that.
- *
- * TWO invariants, and both are load-bearing:
- *  - the ACTIVE tab is never removed. When there was no prior conversation to
- *    switch back to, the child IS the active one, and removing it would leave
- *    the view focused on a conversation the strip does not contain. A visible
- *    child is a far smaller problem than a stranded view.
- *  - an id that is not in the strip is returned untouched, so calling this
- *    twice (or on an already-excluded child) is a no-op rather than a silent
- *    mutation of somebody else's tab.
- *
- * Returns the SAME array instance when nothing changed, so the caller can skip
- * the re-render and the persist with a cheap identity check.
- */
-export function stripAfterChildSpawn(
-  openTabs: readonly string[],
-  childId: string,
-  activeId: string,
-): readonly string[] {
-  if (childId === activeId || !openTabs.includes(childId)) return openTabs;
-  return openTabs.filter((id) => id !== childId);
-}
-
 /** Clamp the configured cap. Mirrors `retentionBudgetBytes` in retention.ts:
  *  settings come from a hand-editable data.json, and a 0 / negative / NaN cap
  *  would retire every non-exempt tab in the strip in one go. */
@@ -260,7 +230,7 @@ export interface RetiredCandidateSource {
  *   archive gestures, and the manual x (see `closeTab`). "Left the strip" has to
  *   mean one thing however you left, or the number is a subset of itself.
  * - not archived — archiving is a different exit with a different destination
- *   (the separate archive store, surfaced by the board's "Show archived").
+ *   (the separate archive store, surfaced by "Show archived").
  * - has messages — see `messages` above.
  * - not an open tab — reopening un-retires (`switchTo` clears `retiredAt`), but
  *   this also covers the window before that: a tab on screen is not "hidden".
@@ -337,7 +307,7 @@ export function countSurvivingRetirees<T extends RetireNoticeCandidate>(
 export type TabState = "idle" | "streaming" | "unread" | "stopped" | "error";
 
 /** The runtime signals a tab renders from. Same shape as the fields
- *  `SessionSnapshot` carries, so the board and the strip read one vocabulary of
+ *  `SessionSnapshot` carries, so the sidebar and the strip read one vocabulary of
  *  signals even though they render different vocabularies of output. */
 export interface TabSignals {
   streaming: boolean;

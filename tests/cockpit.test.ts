@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   buildAttention,
   loopRows,
-  taskRows,
   resumeRows,
   previewFromMessages,
   healthRows,
@@ -10,7 +9,6 @@ import {
   parseAnsweredStamp,
 } from "../src/core/cockpit";
 import type { LoopEntry } from "../src/core/open-loops";
-import type { TaskEntry } from "../src/core/tasks";
 
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-07-13T12:00:00");
@@ -21,16 +19,6 @@ const loop = (over: Partial<LoopEntry>): LoopEntry => ({
   note: "",
   openedAt: 1,
   status: "open",
-  ...over,
-});
-
-const task = (over: Partial<TaskEntry>): TaskEntry => ({
-  id: "task-1",
-  title: "t",
-  status: "backlog",
-  created: "2026-07-10T10:00:00.000Z",
-  updated: "2026-07-10T10:00:00.000Z",
-  prompt: "p",
   ...over,
 });
 
@@ -76,19 +64,6 @@ describe("loopRows", () => {
   it("caps the list", () => {
     const many = Array.from({ length: 9 }, (_, i) => loop({ id: `loop-${i}`, title: `l${i}`, openedAt: i }));
     expect(loopRows(many, NOW, 6)).toHaveLength(6);
-  });
-});
-
-describe("taskRows", () => {
-  it("orders by live-ness (running first), excludes done/archived", () => {
-    const rows = taskRows([
-      task({ id: "task-1", title: "b", status: "backlog" }),
-      task({ id: "task-2", title: "r", status: "running" }),
-      task({ id: "task-3", title: "d", status: "done" }),
-      task({ id: "task-4", title: "n", status: "needs-input" }),
-    ]);
-    expect(rows.map((r) => r.label)).toEqual(["r", "n", "b"]);
-    expect(rows[0].action.kind).toBe("command");
   });
 });
 

@@ -31,7 +31,6 @@ export function sessionSignature(
     s.contextSavingMode,
     codex ? s.codexSandbox : "",
     codex ? s.codexApproval : "",
-    s.orchestrationEnabled,
     s.browserEnabled,
     codex ? s.codexBin : s.claudeBin,
     c.id,

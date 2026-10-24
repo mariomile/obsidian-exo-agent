@@ -10,7 +10,6 @@ type PayloadByKind = {
 };
 
 const payloads = {
-  task: { kind: "task", title: "Ship Phase 1", prompt: "Finish the proposal inbox", model: "sonnet" },
   loop: { kind: "loop", title: "Check adoption", note: "Review proposal acceptance", resurface: "2026-08-01", tags: ["exo"] },
   decision: { kind: "decision", title: "Use explicit accept", context: "Suggestions are inert", decision: "Require Accept" },
   playbook: { kind: "playbook", name: "Weekly Review", prompt: "Review this week" },
@@ -31,7 +30,6 @@ function record<K extends ProposalPayload["kind"]>(kind: K): ProposalRecord {
 
 function deps(): ProposalAcceptanceDeps {
   return {
-    tasks: { create: vi.fn(async () => ({ id: "task-1" })) },
     loops: { create: vi.fn(async () => ({ id: "loop-1", path: "Memory/open-loops.md" })) },
     decisions: { captureRawPreserving: vi.fn(async () => ({ path: "_system/memory/decisions/decision.md" })) },
     playbooks: {
@@ -41,17 +39,6 @@ function deps(): ProposalAcceptanceDeps {
 }
 
 describe("routeAcceptedProposal", () => {
-  it("routes tasks through the TaskStore.create-shaped dependency", async () => {
-    const d = deps();
-    await expect(routeAcceptedProposal(record("task"), d)).resolves.toEqual({ ok: true, target: "task-1" });
-    expect(d.tasks.create).toHaveBeenCalledWith({
-      proposalId: "proposal-task",
-      title: "Ship Phase 1",
-      prompt: "Finish the proposal inbox",
-      model: "sonnet",
-    });
-  });
-
   it("routes loops through the shared queued Open Loops create dependency", async () => {
     const d = deps();
     await expect(routeAcceptedProposal(record("loop"), d)).resolves.toEqual({
@@ -93,11 +80,10 @@ describe("routeAcceptedProposal", () => {
     });
   });
 
-  it.each(["task", "loop", "decision", "playbook"] as const)(
+  it.each(["loop", "decision", "playbook"] as const)(
     "converts a %s dependency failure to a route error",
     async (kind) => {
       const d = deps();
-      if (kind === "task") vi.mocked(d.tasks.create).mockRejectedValue(new Error("task unavailable"));
       if (kind === "loop") vi.mocked(d.loops.create).mockRejectedValue(new Error("loop unavailable"));
       if (kind === "decision") vi.mocked(d.decisions.captureRawPreserving).mockRejectedValue(new Error("decision unavailable"));
       if (kind === "playbook") vi.mocked(d.playbooks.save).mockRejectedValue(new Error("playbook unavailable"));
@@ -111,17 +97,17 @@ describe("routeAcceptedProposal", () => {
 
   it("rejects a runtime-corrupt kind/payload mismatch before invoking dependencies", async () => {
     const d = deps();
-    const corrupt = { ...record("task"), payload: payloads.loop } as unknown as ProposalRecord;
+    const corrupt = { ...record("playbook"), payload: payloads.loop } as unknown as ProposalRecord;
     await expect(routeAcceptedProposal(corrupt, d)).resolves.toEqual({
       ok: false,
-      error: 'Proposal kind "task" does not match payload kind "loop".',
+      error: 'Proposal kind "playbook" does not match payload kind "loop".',
     });
-    expect(d.tasks.create).not.toHaveBeenCalled();
+    expect(d.playbooks.save).not.toHaveBeenCalled();
     expect(d.loops.create).not.toHaveBeenCalled();
   });
 
   it("returns an error instead of throwing for structurally corrupt runtime input", async () => {
-    const corrupt = { ...record("task"), payload: null } as unknown as ProposalRecord;
+    const corrupt = { ...record("playbook"), payload: null } as unknown as ProposalRecord;
     await expect(routeAcceptedProposal(corrupt, deps())).resolves.toEqual({
       ok: false,
       error: "Invalid proposal payload.",
@@ -129,6 +115,6 @@ describe("routeAcceptedProposal", () => {
   });
 
   it("keeps the kind matrix compile-time exhaustive", () => {
-    expect(Object.keys(payloads).sort()).toEqual(["decision", "loop", "playbook", "task"]);
+    expect(Object.keys(payloads).sort()).toEqual(["decision", "loop", "playbook"]);
   });
 });

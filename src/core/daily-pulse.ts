@@ -181,7 +181,6 @@ export class DailyPulseSlotRunner {
 
 export interface DailyPulseInput {
   now: number;
-  tasks: { id: string; title: string; status: "needs-input" | "review" }[];
   dueLoops: { id: string; title: string; resurface?: string }[];
   pendingProposals: { id: string; kind: ProposalKind; title: string }[];
   automationRuns: { id: string; name: string; startedAt: number; writes: string[] }[];
@@ -197,7 +196,6 @@ export type DailyPulseSectionTitle =
   | "System";
 
 export type DailyPulseTarget =
-  | { kind: "task"; id: string }
   | { kind: "loop"; id: string }
   | { kind: "proposal"; id: string }
   | { kind: "automation"; id: string }
@@ -205,12 +203,12 @@ export type DailyPulseTarget =
   | { kind: "system"; id: "budget" };
 
 export type DailyPulseAction =
-  | { kind: "review"; target: "task" | "loop" | "proposal" | "automation"; id: string }
+  | { kind: "review"; target: "loop" | "proposal" | "automation"; id: string }
   | { kind: "open"; path: string };
 
 export interface DailyPulseItem {
   id: string;
-  kind: "task" | "loop" | "proposal" | "automation" | "note" | "system";
+  kind: "loop" | "proposal" | "automation" | "note" | "system";
   title: string;
   detail?: string;
   target: DailyPulseTarget;
@@ -229,16 +227,10 @@ export interface DailyPulse {
 
 export const DAILY_PULSE_SECTION_LIMIT = 5;
 
-const TASK_STATUS_ORDER: Record<DailyPulseInput["tasks"][number]["status"], number> = {
-  "needs-input": 0,
-  review: 1,
-};
-
 const PROPOSAL_KIND_ORDER: Record<ProposalKind, number> = {
-  task: 0,
-  loop: 1,
-  decision: 2,
-  playbook: 3,
+  loop: 0,
+  decision: 1,
+  playbook: 2,
 };
 
 function compareText(a: string, b: string): number {
@@ -274,21 +266,6 @@ function bounded(items: DailyPulseItem[]): DailyPulseItem[] {
 }
 
 function attentionItems(input: DailyPulseInput): DailyPulseItem[] {
-  const tasks: DailyPulseItem[] = [...input.tasks]
-    .sort(
-      (a, b) =>
-        TASK_STATUS_ORDER[a.status] - TASK_STATUS_ORDER[b.status] ||
-        compareTitleAndId(a, b)
-    )
-    .map((task) => ({
-      id: `task:${task.id}`,
-      kind: "task",
-      title: task.title,
-      detail: task.status === "needs-input" ? "Needs input" : "Ready for review",
-      target: { kind: "task", id: task.id },
-      action: { kind: "review", target: "task", id: task.id },
-    }));
-
   const runs: DailyPulseItem[] = input.automationRuns
     .filter((run) => run.writes.length > 0)
     .slice()
@@ -307,7 +284,7 @@ function attentionItems(input: DailyPulseInput): DailyPulseItem[] {
       action: { kind: "review", target: "automation", id: run.id },
     }));
 
-  return bounded([...tasks, ...runs]);
+  return bounded(runs);
 }
 
 function loopItems(input: DailyPulseInput): DailyPulseItem[] {

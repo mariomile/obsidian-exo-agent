@@ -4,15 +4,15 @@
  * This module deliberately has no Obsidian imports and performs no IO. Model
  * output enters through `parseProposalCandidates`; only validated records may
  * later be routed to a side-effecting store. Memory kinds (loop, decision) are
- * routed as soon as they are validated and deduped; action kinds (task,
- * playbook) are routed only once the user accepts them.
+ * routed as soon as they are validated and deduped; the action kind
+ * (playbook) is routed only once the user accepts it.
  */
 
-export type ProposalKind = "task" | "loop" | "decision" | "playbook";
+export type ProposalKind = "loop" | "decision" | "playbook";
 /**
  * Memory kinds (open-loops ledger, decisions) are written the moment they are
  * validated and deduped: review happens after the fact, never before. Actions
- * (`task`, `playbook`) stay pending until the user accepts.
+ * (`playbook`) stay pending until the user accepts.
  */
 export function isMemoryProposalKind(kind: ProposalKind): boolean {
   return kind === "loop" || kind === "decision";
@@ -21,7 +21,6 @@ export function isMemoryProposalKind(kind: ProposalKind): boolean {
 export type ProposalStatus = "pending" | "accepted" | "dismissed";
 
 export type ProposalPayload =
-  | { kind: "task"; title: string; prompt: string; model?: string }
   | { kind: "loop"; title: string; note: string; resurface?: string; tags?: string[] }
   | { kind: "decision"; title: string; context: string; decision: string; rationale?: string }
   | {
@@ -214,28 +213,6 @@ function validateCandidate(value: unknown, index: number): ValidationResult<Prop
   if (rationale.status !== "ok") return rationale;
 
   switch (object.kind) {
-    case "task": {
-      const title = requiredString(object, "title", `${path}.title`, PROPOSAL_LIMITS.title);
-      if (title.status !== "ok") return title;
-      const prompt = requiredString(object, "prompt", `${path}.prompt`, PROPOSAL_LIMITS.content);
-      if (prompt.status !== "ok") return prompt;
-      const model = optionalString(object, "model", `${path}.model`);
-      if (model.status !== "ok") return model;
-      return {
-        status: "ok",
-        value: {
-          kind: "task",
-          title: title.value,
-          payload: {
-            kind: "task",
-            title: title.value,
-            prompt: prompt.value,
-            ...(model.value ? { model: model.value } : {}),
-          },
-          rationale: rationale.value,
-        },
-      };
-    }
     case "loop": {
       const title = requiredString(object, "title", `${path}.title`, PROPOSAL_LIMITS.title);
       if (title.status !== "ok") return title;
@@ -361,8 +338,6 @@ function normalize(value: string): string {
 
 function canonicalPayload(payload: ProposalPayload): string {
   switch (payload.kind) {
-    case "task":
-      return [payload.kind, payload.title, payload.prompt, payload.model ?? ""].map(normalize).join("\u001f");
     case "loop":
       return [
         payload.kind,

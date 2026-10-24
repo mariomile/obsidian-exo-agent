@@ -1,21 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  SPAWN_CANCEL_WINDOW_MS,
-  spawnCancelledByStop,
-  MAX_AGENT_HOPS,
-  nextHop,
-  formatChatTranscript,
-  formatTaskStatus,
-  openChildTasks,
-  ownedTask,
-  planSend,
-  shouldWakeParent,
-  WAKE_TEXT,
-} from "../src/core/delegation";
-import type { TaskEntry } from "../src/core/tasks";
-
-const task = (over: Partial<TaskEntry>): TaskEntry =>
-  ({ id: "task-1", title: "Research", status: "running", order: 0, prompt: "p", parent: "P", ...over }) as TaskEntry;
+import { MAX_AGENT_HOPS, nextHop, formatChatTranscript, planSend } from "../src/core/delegation";
 
 describe("planSend", () => {
   it("an idle chat runs the message now, whatever the mode", () => {
@@ -29,58 +13,6 @@ describe("planSend", () => {
   });
   it("a turn still in its preamble counts as busy, so the message is queued, not lost", () => {
     for (const m of ["auto", "queue", "steer"] as const) expect(planSend(m, false, true, true)).toBe("queued");
-  });
-});
-
-describe("shouldWakeParent", () => {
-  const idle = { stopped: false, queue: [] };
-  it("wakes an open parent once", () => {
-    expect(shouldWakeParent(idle, "done", true)).toBe(true);
-    expect(shouldWakeParent({ stopped: false, queue: [{ text: WAKE_TEXT }] }, "done", true)).toBe(false);
-  });
-  it("never restarts a parent the user stopped", () => {
-    expect(shouldWakeParent({ stopped: true, queue: [] }, "done", true)).toBe(false);
-  });
-  it("a stopped child's report waits for the parent's next turn, even after the user typed again", () => {
-    expect(shouldWakeParent(idle, "stopped", true)).toBe(false);
-  });
-  it("a blocked child does not wake the parent: its card is already there", () => {
-    expect(shouldWakeParent(idle, "blocked", true)).toBe(false);
-  });
-  it("never runs a turn in a parent that was closed or archived", () => {
-    expect(shouldWakeParent(idle, "done", false)).toBe(false);
-    expect(shouldWakeParent({ ...idle, archived: true }, "done", true)).toBe(false);
-  });
-});
-
-describe("ownedTask / openChildTasks", () => {
-  const tasks = [
-    task({ id: "a" }),
-    task({ id: "b", parent: "Q" }),
-    task({ id: "c", status: "queued" }),
-    task({ id: "d", status: "done" }),
-    task({ id: "e", status: "review" }),
-  ];
-  it("refuses a task this chat did not delegate", () => {
-    expect(ownedTask(tasks, "b", "P")).toBe("Task b was not delegated by this chat.");
-    expect(ownedTask(tasks, "zz", "P")).toBe("No task zz.");
-    expect((ownedTask(tasks, "a", "P") as TaskEntry).id).toBe("a");
-  });
-  it("a stop takes down only this parent's unfinished tasks", () => {
-    expect(openChildTasks(tasks, "P").map((t) => t.id)).toEqual(["a", "c"]);
-  });
-});
-
-describe("formatTaskStatus", () => {
-  it("says waiting for approval when the child is blocked on a card", () => {
-    const s = formatTaskStatus(task({ convo: "k1" }), { exists: true, streaming: true, hasPending: true }, "half done");
-    expect(s).toContain("status: waiting for the user's approval");
-    expect(s).toContain("chat: k1");
-    expect(s).toContain("last answer:\nhalf done");
-  });
-  it("falls back to the ledger status when the chat is idle or closed", () => {
-    expect(formatTaskStatus(task({ status: "review", convo: "k1" }), { exists: false, streaming: false, hasPending: false }, ""))
-      .toBe("task-1 · Research\nstatus: review\nchat: k1 (closed)");
   });
 });
 
@@ -115,15 +47,5 @@ describe("nextHop (send_to_chat loop guard)", () => {
     expect(nextHop(depths, "A")).toBeNull();
     depths.delete("A");
     expect(nextHop(depths, "A")).toBe(1);
-  });
-});
-
-describe("spawnCancelledByStop", () => {
-  it("cancels a spawn only for a fresh Stop of the parent", () => {
-    expect(spawnCancelledByStop({ stopped: true, stopRequestedAt: 1_000 }, 1_000 + 5_000)).toBe(true);
-    // An old Stop belongs to an earlier turn: a child re-run later from the board still starts.
-    expect(spawnCancelledByStop({ stopped: true, stopRequestedAt: 1_000 }, 1_000 + SPAWN_CANCEL_WINDOW_MS + 1)).toBe(false);
-    expect(spawnCancelledByStop({ stopped: false, stopRequestedAt: 1_000 }, 1_001)).toBe(false);
-    expect(spawnCancelledByStop(undefined, 1)).toBe(false);
   });
 });

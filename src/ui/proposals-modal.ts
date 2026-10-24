@@ -25,7 +25,6 @@ export function playbookMetadataDetails(payload: PlaybookPayload): { label: stri
 
 export function proposalTargetLabel(payload: ProposalPayload): string {
   switch (payload.kind) {
-    case "task": return "Orchestration backlog";
     case "loop": return "Open Loops";
     case "decision": return "Decision record";
     case "playbook": return "Custom prompts";
@@ -34,11 +33,6 @@ export function proposalTargetLabel(payload: ProposalPayload): string {
 
 export function proposalPayloadDetails(payload: ProposalPayload): { label: string; value: string }[] {
   switch (payload.kind) {
-    case "task":
-      return [
-        { label: "Prompt", value: payload.prompt },
-        ...(payload.model ? [{ label: "Model", value: payload.model }] : []),
-      ];
     case "loop":
       return [
         { label: "Note", value: payload.note },

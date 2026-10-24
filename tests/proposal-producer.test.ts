@@ -17,9 +17,9 @@ const source: ProposalRecord["source"] = {
   createdAt: 1_720_000_000_000,
 };
 
-const taskJson = {
-  kind: "task",
-  title: "Prepare launch checklist",
+const playbookJson = {
+  kind: "playbook",
+  name: "Prepare launch checklist",
   prompt: "Prepare the launch checklist agreed in this turn.",
   rationale: "Explicit next action: the launch checklist was committed to.",
 };
@@ -140,7 +140,7 @@ describe("proposal producer extraction", () => {
 
   it("parses and appends at most three valid candidates with source", async () => {
     const raw = JSON.stringify([
-      taskJson,
+      playbookJson,
       { kind: "loop", title: "Revisit launch", note: "Review launch readiness next week.", rationale: "Explicit follow-up loop." },
       { kind: "playbook", name: "Launch review", prompt: "Review launch readiness and list blockers.", rationale: "Reusable workflow requested." },
     ]);
@@ -188,7 +188,7 @@ describe("proposal producer extraction", () => {
       status: "invalid",
       errors: [{ code: "required", path: "$[0].title", message: "title is required" }],
     };
-    const mocked = deps(JSON.stringify([taskJson, { ...taskJson, title: "Second" }, { ...taskJson, title: "Third" }]), [
+    const mocked = deps(JSON.stringify([playbookJson, { ...playbookJson, name: "Second" }, { ...playbookJson, name: "Third" }]), [
       { status: "appended", record: {} as ProposalRecord },
       duplicate,
       invalid,
@@ -206,8 +206,8 @@ describe("proposal producer extraction", () => {
   });
 
   it("reports memory records written directly apart from pending suggestions", async () => {
-    const taskJson = { kind: "task", title: "First", prompt: "Do it", rationale: "Explicit" };
-    const mocked = deps(JSON.stringify([taskJson, { ...taskJson, title: "Second" }]), [
+    const playbookJson = { kind: "playbook", name: "First", prompt: "Do it", rationale: "Explicit" };
+    const mocked = deps(JSON.stringify([playbookJson, { ...playbookJson, name: "Second" }]), [
       { status: "appended", record: { status: "pending" } as ProposalRecord },
       {
         status: "applied",

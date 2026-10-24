@@ -196,7 +196,7 @@ export function buildBrowserTools(bridge: BrowserBridge): AnyTool[] {
 }
 
 /** The observing tools: they change nothing Mario sees and write nothing, so
- *  they ride the same auto-allow rail as list_tasks. Everything else raises a
+ *  they ride the same auto-allow rail as the read-only vault tools. Everything else raises a
  *  permission card whose input (URL, selector, text) is the evidence trail. */
 export const BROWSER_READ_TOOLS = new Set([
   "mcp__obsidian__browser_snapshot",

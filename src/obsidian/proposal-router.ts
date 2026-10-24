@@ -8,7 +8,6 @@
  * leave the record pending, keep the error, and offer Retry.
  */
 import type { ProposalPayload, ProposalRecord } from "../core/proposals";
-import type { NewBacklogTask } from "../core/tasks";
 import type { ProposalRouteResult } from "./proposal-store";
 
 export type ProposalAcceptanceResult = ProposalRouteResult;
@@ -30,10 +29,6 @@ export interface DecisionCaptureInput {
 }
 
 export interface ProposalAcceptanceDeps {
-  /** The shared TaskStore.create surface; never write tasks.md in this router. */
-  tasks: {
-    create(task: NewBacklogTask & { proposalId: string }): Promise<{ id: string }>;
-  };
   /** Production implementation must use the shared Open Loops WriteQueue. */
   loops: {
     create(loop: OpenLoopCreateInput): Promise<{ id: string; path: string }>;
@@ -94,15 +89,6 @@ export async function routeAcceptedProposal(
 
     const payload = rawPayload as ProposalPayload;
     switch (payload.kind) {
-      case "task": {
-        const created = await deps.tasks.create({
-          proposalId: record.id,
-          title: payload.title,
-          prompt: payload.prompt,
-          ...(payload.model ? { model: payload.model } : {}),
-        });
-        return { ok: true, target: created.id };
-      }
       case "loop": {
         const created = await deps.loops.create({
           proposalId: record.id,
