@@ -159,7 +159,7 @@ import {
 } from "./core/workflow-signals";
 import { planInputParts, planStateText } from "./core/plan";
 import { caretHost } from "./core/caret-host";
-import { holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedContext } from "./core/queue";
+import { hasPending, holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedContext } from "./core/queue";
 import { queueHandlers, renderQueueRows } from "./ui/queue-view";
 import { showCliReadiness } from "./ui/cli-readiness";
 import {
@@ -452,6 +452,7 @@ export class ChatView extends ItemView {
         if (e.key !== "Escape" || !this.streaming) return;
         const ac = this.containerEl.querySelector<HTMLElement>(".mva-ac");
         if (ac && ac.offsetParent !== null) return; // overlay open — it wins
+        if ((e.target as HTMLElement | null)?.closest?.(".mva-queued-input")) return; // Esc cancels the pill edit
         e.preventDefault();
         e.stopPropagation();
         this.stop("esc");
@@ -5022,7 +5023,7 @@ export class ChatView extends ItemView {
     // own continuation is pushed below, after this check; recovery retries are
     // gated out by the !poisoned caller). If that ever changes, this precedence
     // check would misread a system-queued item as user input and kill the goal.
-    if (c.queue.length) {
+    if (hasPending(c.queue)) {
       c.goal = clearGoal(c.goal);
       this.composer.refreshGoal(c);
       return;
@@ -5927,6 +5928,7 @@ export class ChatView extends ItemView {
         resumeRisky: !!c.resumeRisky,
         authFailed,
       });
+      if (authFailed && c.queue.length) c.queue = holdQueue(c.queue); // a logged-out CLI fails every queued message
       if (plan.session !== "none") this.dropSession(c, `recovery-${plan.session}`);
       if (plan.session === "drop-clear-id") c.sessionId = undefined;
       c.resumeRisky = plan.nextResumeRisky;
@@ -5961,6 +5963,7 @@ export class ChatView extends ItemView {
           sendPrefix: recap,
           isRecoveryRetry: true,
           researchMode,
+          context: opts?.context,
         });
       }
       this.emitTurnTerminal(c, poisoned); // fire-and-forget board hook (no-op when off; can't throw)
@@ -6013,6 +6016,7 @@ export class ChatView extends ItemView {
         c.turnClaimed = false;
         void this.runTurn(c, next.text, next.images, retryOpts);
       } else {
+        this.renderQueue(c); // held pills drop the steer action now the turn is over
         // Turn (and any queue) is fully settled — safe to surface related notes again.
         this.renderTailSurfacing(c);
         // Warm session after Esc: a user stop dropped the (possibly mid-tool) live

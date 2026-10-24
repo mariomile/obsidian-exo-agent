@@ -78,16 +78,19 @@ function action(row: HTMLElement, icon: string, label: string, fn: () => void): 
   clickable(a, fn);
 }
 
-/** Swap the pill's text for a textarea. The item is held while it is being
- *  edited, so a turn ending meanwhile can't send the old text. Enter or blur
- *  saves, Esc cancels, an emptied message is removed. The handlers look the
- *  item up by identity, never by index: the queue may drain while editing. */
+/** Text typed in an open editor, so a repaint (Stop, a turn ending) reopens the
+ *  editor with the edit instead of dropping it. */
+const drafts = new WeakMap<QueuedMessage, string>();
+
+/** Swap the pill's text for a textarea. While open the item is `editing`: never
+ *  drained or steered, so a turn ending meanwhile can't send the old text.
+ *  Enter or blur saves, Esc cancels, an emptied message is removed. The
+ *  handlers look the item up by identity, never by index. */
 function editInPlace(row: HTMLElement, textEl: HTMLElement, q: QueuedMessage, h: QueueHandlers): void {
-  const wasHeld = !!q.held;
-  q.held = true;
+  q.editing = true;
   const input = createEl("textarea", { cls: "mva-queued-input" });
-  input.value = q.text;
-  input.rows = Math.min(6, q.text.split("\n").length);
+  input.value = drafts.get(q) ?? q.text;
+  input.rows = Math.min(6, input.value.split("\n").length);
   textEl.replaceWith(input);
   row.addClass("is-editing");
   let done = false;
@@ -95,24 +98,30 @@ function editInPlace(row: HTMLElement, textEl: HTMLElement, q: QueuedMessage, h:
     if (done) return;
     done = true;
     const text = input.value.trim();
-    if (!wasHeld) delete q.held;
+    delete q.editing;
+    drafts.delete(q);
     if (save && !text) return h.remove(q);
     if (save) q.text = text;
     h.changed(q);
   };
+  input.addEventListener("input", () => drafts.set(q, input.value));
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       finish(true);
     } else if (e.key === "Escape") {
       e.preventDefault();
-      e.stopPropagation(); // Esc in the view is Stop; here it only cancels the edit
+      e.stopPropagation();
       finish(false);
     }
   });
-  // Deferred: a repaint removing the textarea also blurs it, and saving from
-  // inside that repaint would re-enter it.
-  input.addEventListener("blur", () => window.setTimeout(() => finish(true), 0));
+  // Deferred, and ignored once a repaint has replaced this textarea: the new
+  // editor carries the draft on.
+  input.addEventListener("blur", () =>
+    window.setTimeout(() => {
+      if (input.isConnected) finish(true);
+    }, 0)
+  );
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
 }
@@ -139,5 +148,6 @@ export function renderQueueRows(el: HTMLElement, queue: readonly QueuedMessage[]
       });
     }
     action(row, "x", "Remove", () => h.remove(q));
+    if (q.editing) editInPlace(row, textEl, q, h);
   }
 }

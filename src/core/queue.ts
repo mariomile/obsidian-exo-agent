@@ -35,21 +35,27 @@ export interface QueuedMessage {
   context?: QueuedContext;
   /** Kept after a Stop or a failed turn: never drained, runs only on request. */
   held?: true;
+  /** Open in the pill editor: never drained or steered until the edit is saved. */
+  editing?: true;
 }
 
-/** Stop / non-recoverable error: drop Exo's own items, hold the user's. */
+/** Stop / non-recoverable error: drop Exo's own items, hold the user's. The
+ *  kept items are the same objects, so a pill open in the editor keeps its edit. */
 export function holdQueue(queue: readonly QueuedMessage[]): QueuedMessage[] {
-  return queue.filter((q) => !q.auto).map((q) => ({ ...q, held: true as const }));
+  const kept = queue.filter((q) => !q.auto);
+  for (const q of kept) q.held = true;
+  return kept;
 }
 
 /** Index of the next message the turn-end drain may run, or -1. */
 export function nextRunnable(queue: readonly QueuedMessage[]): number {
-  return queue.findIndex((q) => !q.held);
+  return queue.findIndex((q) => !q.held && !q.editing);
 }
 
-/** True when the drain has something to run (held messages do not count). */
-export function hasRunnable(queue: readonly QueuedMessage[]): boolean {
-  return nextRunnable(queue) !== -1;
+/** True when the user still has a message waiting to run, queued or being
+ *  edited. Held messages do not count: they run only on Run. */
+export function hasPending(queue: readonly QueuedMessage[]): boolean {
+  return queue.some((q) => !q.held);
 }
 
 /** Remove and return the item at `i` (undefined when out of range). */
@@ -75,7 +81,8 @@ export function turnOptsFor(q: QueuedMessage):
 }
 
 /** A queued message can be injected into the live turn only without images
- *  (both providers refuse steer with attachments) and outside Research Mode. */
+ *  (both providers refuse steer with attachments), outside Research Mode, and
+ *  never while held (it belongs to no turn) or open in the editor. */
 export function canSteer(q: QueuedMessage, opts: { streaming: boolean; researchOn: boolean; hasSteer: boolean }): boolean {
-  return opts.streaming && opts.hasSteer && !opts.researchOn && !q.images?.length && !q.isRecoveryRetry;
+  return opts.streaming && opts.hasSteer && !opts.researchOn && !q.images?.length && !q.isRecoveryRetry && !q.held && !q.editing;
 }

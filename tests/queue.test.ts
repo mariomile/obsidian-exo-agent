@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canSteer, hasRunnable, holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedMessage } from "../src/core/queue";
+import { canSteer, hasPending, holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedMessage } from "../src/core/queue";
 
 const img = { mediaType: "image/png", data: "x" } as unknown as NonNullable<QueuedMessage["images"]>[number];
 
@@ -18,10 +18,14 @@ describe("holdQueue (Stop / broken session)", () => {
     expect(holdQueue([{ text: "wake", auto: true }, { text: "mine" }])).toEqual([{ text: "mine", held: true }]);
   });
 
-  it("does not mutate the input", () => {
-    const q: QueuedMessage[] = [{ text: "a" }];
-    holdQueue(q);
-    expect(q[0].held).toBeUndefined();
+  it("keeps the same objects, so a pill open in the editor keeps its edit", () => {
+    const mine: QueuedMessage = { text: "a", editing: true };
+    const held = holdQueue([mine]);
+    expect(held[0]).toBe(mine);
+    mine.text = "edited";
+    delete mine.editing;
+    expect(held[0]).toEqual({ text: "edited", held: true });
+    expect(nextRunnable(held)).toBe(-1); // saving the edit does not un-hold it
   });
 });
 
@@ -29,7 +33,7 @@ describe("drain", () => {
   it("skips held messages and runs the first runnable one", () => {
     const q: QueuedMessage[] = [{ text: "held", held: true }, { text: "next" }];
     expect(nextRunnable(q)).toBe(1);
-    expect(hasRunnable(q)).toBe(true);
+    expect(hasPending(q)).toBe(true);
     expect(takeAt(q, nextRunnable(q))?.text).toBe("next");
     expect(q).toEqual([{ text: "held", held: true }]);
   });
@@ -37,9 +41,21 @@ describe("drain", () => {
   it("runs nothing when everything is held (no double send after Stop)", () => {
     const q: QueuedMessage[] = holdQueue([{ text: "a" }, { text: "b" }]);
     expect(nextRunnable(q)).toBe(-1);
-    expect(hasRunnable(q)).toBe(false);
+    expect(hasPending(q)).toBe(false);
     expect(takeAt(q, -1)).toBeUndefined();
     expect(q).toHaveLength(2);
+  });
+});
+
+describe("a pill being edited", () => {
+  it("is never drained: the turn end must not send the old text", () => {
+    const q: QueuedMessage[] = [{ text: "draft", editing: true }, { text: "next" }];
+    expect(nextRunnable(q)).toBe(1);
+  });
+
+  it("still counts as the user's input, so it wins over an active goal", () => {
+    expect(hasPending([{ text: "draft", editing: true }])).toBe(true);
+    expect(hasPending([{ text: "paused", held: true }])).toBe(false);
   });
 });
 
@@ -68,6 +84,11 @@ describe("canSteer", () => {
     expect(canSteer({ text: "a" }, { ...live, streaming: false })).toBe(false);
     expect(canSteer({ text: "a" }, { ...live, hasSteer: false })).toBe(false);
     expect(canSteer({ text: "a" }, { ...live, researchOn: true })).toBe(false);
+  });
+
+  it("never for a held message or one being edited", () => {
+    expect(canSteer({ text: "a", held: true }, live)).toBe(false);
+    expect(canSteer({ text: "a", editing: true }, live)).toBe(false);
   });
 
   it("never with images: both providers refuse them mid-turn", () => {

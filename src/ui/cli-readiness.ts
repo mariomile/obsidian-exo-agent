@@ -2,7 +2,8 @@
  * CLI readiness row on top of the composer. When the chat view opens or the
  * active chat changes provider, probe that provider's CLI (the cached
  * `cliDiagnostics`, the same probe Settings shows). If it can't be found, say so
- * before the first message instead of after a failed turn.
+ * before the first message instead of after a failed turn. While the row is up,
+ * focusing the composer probes again, so fixing the path in settings clears it.
  */
 
 import { setIcon } from "obsidian";
@@ -34,5 +35,12 @@ export function showCliReadiness(
       const act = row.createSpan({ cls: "mva-cli-missing-act", text: "Open settings" });
       clickable(act, openSettings);
       composerEl.prepend(row);
+      composerEl.addEventListener(
+        "focusin",
+        () => {
+          if (gen === probeGen.get(composerEl)) showCliReadiness(composerEl, provider, bins, openSettings);
+        },
+        { once: true }
+      );
     });
 }
