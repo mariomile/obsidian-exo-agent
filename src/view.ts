@@ -44,7 +44,7 @@ import { sessionSignature } from "./core/session-signature";
 import { isUntouchedChat } from "./core/untouched-chat";
 import { recallForTurn, type TurnRecall } from "./obsidian/turn-recall";
 import { vaultExclusion } from "./obsidian/vault-search";
-import { renderRecallRow } from "./ui/recall-row";
+import { bubbleThenRecall } from "./ui/recall-row";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
@@ -4919,26 +4919,26 @@ export class ChatView extends ItemView {
     const embedded = await this.composer.embeddedImages(text);
     if (embedded.length) imgs = [...(imgs ?? []), ...embedded];
 
-    // Per-turn recall: related notes and past chats for THIS message, in a
-    // `[vault-recall]` block on the outbound payload only. Null when memory
-    // recall is off or nothing matched: the payload is then built exactly as
-    // before. Recovery retries skip it: they already carry a recap prefix.
-    const recalled = opts?.isRecoveryRetry ? null : await this.turnRecall(c, text);
-
-    // A recovery retry reuses the user bubble the poisoned turn already rendered —
-    // don't render (or re-persist) a duplicate. The original message is still the
-    // only "user" entry in c.messages for this turn.
     const turnFrom = c.messages.length; // where THIS turn starts; the stretch before it is not its to mark read
-    if (!opts?.isRecoveryRetry && !opts?.reuseUserTurn) {
-      const userEl = this.addUserTurn(c, text, imgs);
-      // Quiet "Recalled N" row under the bubble: the trust surface, so the
-      // injection is never invisible. Only when there was any.
-      if (recalled) renderRecallRow(userEl, recalled, { openPath: (p) => void this.app.workspace.openLinkText(p, "", "tab"), openChat: (id, i) => this.openConvoById(id, i) });
-      // Flush the user's message to disk immediately: it lives only in RAM until
-      // the turn's finally otherwise, so an Obsidian crash mid-turn would lose the
-      // exchange from the UI. The atomic write keeps this cheap and safe.
-      this.persist();
-    }
+    // The bubble first, then per-turn recall: related notes and past chats for
+    // THIS message, in a `[vault-recall]` block on the outbound payload only,
+    // with a quiet "Recalled N" row hung under the bubble when it resolves (the
+    // trust surface: the injection is never invisible). Null when memory recall
+    // is off or nothing matched: the payload is then built exactly as before.
+    // Recovery retries skip recall (they carry a recap prefix) and reuse the
+    // bubble the poisoned turn already rendered: no duplicate, no re-persist.
+    const recalled = await bubbleThenRecall(
+      () => {
+        if (opts?.isRecoveryRetry || opts?.reuseUserTurn) return null;
+        const userEl = this.addUserTurn(c, text, imgs);
+        // Flush the message now: it lives only in RAM until the turn's finally
+        // otherwise, and a crash mid-turn would lose the exchange from the UI.
+        this.persist();
+        return userEl;
+      },
+      () => (opts?.isRecoveryRetry ? null : this.turnRecall(c, text)),
+      { openPath: (p) => void this.app.workspace.openLinkText(p, "", "tab"), openChat: (id, i) => this.openConvoById(id, i) },
+    );
     // A previous turn's working row can outlive the `ctx` that owned it: its
     // finally (the only place that removes it) never ran if that turn's
     // promise chain never settled (stop-escalation dispose, or a concurrent

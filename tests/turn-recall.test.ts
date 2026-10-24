@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { TFile } from "obsidian";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   chatsFromIds,
   formatRecallBlock,
@@ -17,11 +20,11 @@ import {
   type ChatRecall,
   type NoteRecall,
 } from "../src/core/turn-recall";
-import { recallForTurn, SEMANTIC_BUDGET_MS } from "../src/obsidian/turn-recall";
-import { recallChatScores } from "../src/ui/chat-recall";
+import { indexNotes, recallForTurn, SEMANTIC_BUDGET_MS } from "../src/obsidian/turn-recall";
+import { recallChatScores } from "../src/obsidian/chat-recall";
 import { buildSupersedeIndex } from "../src/core/supersede";
 
-vi.mock("../src/ui/chat-recall", () => ({
+vi.mock("../src/obsidian/chat-recall", () => ({
   recallChatScores: vi.fn(() => Promise.resolve(null)),
   recallHost: (pluginDir: string) => ({ pluginDir, scriptPath: `${pluginDir}/chat-recall.mjs` }),
 }));
@@ -367,7 +370,7 @@ describe("recallForTurn", () => {
     expect(await recallForTurn(a, { message: "tell me about quantum gardening robots", convoId: "x", chats, now: NOW })).toBeNull();
   });
 
-  const withVault = (a: object) => ({ ...(a as object), vault: { getMarkdownFiles: () => [], adapter: { basePath: "/v" } } }) as never;
+  const withVault = (a: object) => ({ ...(a as object), vault: { getMarkdownFiles: () => [], adapter: { getBasePath: () => "/v" } } }) as never;
   const semantic = vi.mocked(recallChatScores);
   afterEach(() => {
     semantic.mockReset();
@@ -379,7 +382,7 @@ describe("recallForTurn", () => {
     const flat = Array.from({ length: 10 }, (_, i) => ({ id: `noise${i}`, score: 0.8 }));
     semantic.mockResolvedValue([{ id: "current", score: 0.9 }, { id: "old", score: 0.88 }, ...flat]);
     const r = await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats: [...chats, old], now: NOW, pluginDir: ".obsidian/plugins/exo-agent" });
-    expect(semantic).toHaveBeenCalledWith({ pluginDir: "/v/.obsidian/plugins/exo-agent", scriptPath: "/v/.obsidian/plugins/exo-agent/chat-recall.mjs" }, "what are the Exo pricing tiers", 12);
+    expect(semantic).toHaveBeenCalledWith({ pluginDir: "/v/.obsidian/plugins/exo-agent", scriptPath: "/v/.obsidian/plugins/exo-agent/chat-recall.mjs" }, "what are the Exo pricing tiers", 12, expect.any(AbortSignal));
     expect(r!.chats.map((c) => c.id)).toEqual(["c1", "old"]);
   });
 
@@ -390,6 +393,14 @@ describe("recallForTurn", () => {
     await vi.advanceTimersByTimeAsync(SEMANTIC_BUDGET_MS);
     const r = await pending;
     expect(r!.chats.map((c) => c.id)).toEqual(["c1"]);
+    // Giving up also stops the query: the subprocess is not left running.
+    expect(semantic.mock.calls[0][3]!.aborted).toBe(true);
+  });
+
+  it("a semantic lane inside its budget is not aborted", async () => {
+    semantic.mockResolvedValue([]);
+    await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW, pluginDir: "p" });
+    expect(semantic.mock.calls[0][3]!.aborted).toBe(false);
   });
 
   it("no plugin dir, no semantic lane", async () => {
@@ -423,7 +434,11 @@ describe("recallForTurn", () => {
     });
     const a = (enabled: boolean) =>
       ({
-        vault: { getMarkdownFiles: () => [old, cur] },
+        vault: {
+          getMarkdownFiles: () => [old, cur],
+          getAbstractFileByPath: (p: string) => (p === old.path ? Object.assign(new TFile(), old) : null),
+          cachedRead: async () => "---\nstatus: active\n---\nLean vault.\n",
+        },
         metadataCache: {
           getFileCache: (f: { path: string }) =>
             f.path === cur.path
@@ -449,7 +464,7 @@ describe("recallForTurn", () => {
     expect(appended[0].source).toMatchObject({ convoId: "current" });
     expect(appended[0].candidate).toMatchObject({
       kind: "correction",
-      payload: { kind: "correction", path: old.path, change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" } } },
+      payload: { kind: "correction", path: old.path, change: { type: "frontmatter", set: { status: "superseded", superseded_by: "[[2026-09-25-memoria]]" }, before: { status: "status: active" } } },
     });
 
     appended.length = 0;
@@ -463,5 +478,26 @@ describe("recallForTurn", () => {
     const old: ChatRecord = { id: "old", title: "Old", messages: [{ role: "user", text: "anything", at: NOW - 300 * DAY }] };
     const r = await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats: [...chats, old], now: NOW, pluginDir: "p" });
     expect(r!.chats.map((c) => c.id)).toEqual(["c1"]);
+  });
+});
+
+describe("indexNotes", () => {
+  it("names with aliases for the title lane, supersede markers for the index", () => {
+    const { names, supersede } = indexNotes([
+      { path: "D/old.md", basename: "old", frontmatter: { status: "active", aliases: ["Lean vault"] }, links: [] },
+      { path: "D/new.md", basename: "new", frontmatter: { status: "active" }, links: [{ key: "supersedes", target: "D/old.md" }] },
+    ]);
+    expect(names).toEqual([
+      { path: "D/old.md", basename: "old", aliases: ["Lean vault"] },
+      { path: "D/new.md", basename: "new", aliases: [] },
+    ]);
+    expect(supersede.index.successorOf("D/old.md")).toBe("D/new.md");
+  });
+});
+
+describe("turn-recall layering", () => {
+  it("the Obsidian adapter does not reach into the UI layer", () => {
+    const src = readFileSync(join(__dirname, "..", "src", "obsidian", "turn-recall.ts"), "utf8");
+    expect(src).not.toMatch(/from "\.\.\/ui\//);
   });
 });

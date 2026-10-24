@@ -13,9 +13,9 @@
  *
  * The adapter's own semantic call is not used here on purpose: it may refresh
  * the script it runs inside the plugin folder, and this run must not write.
- * For the same reason the supersede index is built here from the same
- * frontmatter the adapter reads, and the correction proposals recall would
- * make are only listed, never appended.
+ * For the same reason the supersede index is built here, by the turn's own
+ * `indexNotes`, from the same frontmatter the adapter reads, and the
+ * correction proposals recall would make are only listed, never appended.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -44,8 +44,9 @@ import {
   type CaseScore,
   type EvalCase,
 } from "../../src/core/recall-eval";
-import { buildSupersedeIndex, markersOf } from "../../src/core/supersede";
-import { parseFrontMatterAliases, type App } from "obsidian";
+import { indexNotes, SUPERSEDE_KEY } from "../../src/obsidian/turn-recall";
+import { parseChatScores } from "../../src/obsidian/chat-recall";
+import type { App } from "obsidian";
 
 const VAULT = "marioverse.ai";
 const PLUGIN_DIR = `/Users/mariomiletta/Vaults/${VAULT}/.obsidian/plugins/exo-agent`;
@@ -99,7 +100,7 @@ function liveVault(queries: string[]): LiveVault {
         const cache = app.metadataCache.getFileCache(f);
         const fm = cache?.frontmatter;
         const links = (cache?.frontmatterLinks ?? [])
-          .filter((l) => /^supersede(s|d_by)(\\.|$)/.test(l.key))
+          .filter((l) => new RegExp(${JSON.stringify(SUPERSEDE_KEY.source)}).test(l.key))
           .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
         const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by } : null;
         return { path: f.path, basename: f.basename, frontmatter: keep, links };
@@ -132,12 +133,7 @@ function semanticScores(question: string): { scored: { id: string; score: number
   const t0 = performance.now();
   try {
     const out = execFileSync("node", [script, "query", PLUGIN_DIR, question, "12"], { cwd: PLUGIN_DIR, encoding: "utf8", timeout: 30_000 });
-    const scored = out
-      .split("\n")
-      .map((l) => l.split("\t"))
-      .filter(([score, id]) => !!id?.trim() && !Number.isNaN(Number(score)))
-      .map(([score, id]) => ({ id: id.trim(), score: Number(score) }));
-    return { scored, ms: Math.round(performance.now() - t0) };
+    return { scored: parseChatScores(out), ms: Math.round(performance.now() - t0) };
   } catch {
     return { scored: null, ms: Math.round(performance.now() - t0) };
   }
@@ -159,10 +155,8 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
     const now = Date.now();
 
-    const kept = vault.names.filter((n) => !exclude(n.path));
-    const names = kept.map((n) => ({ path: n.path, basename: n.basename, aliases: parseFrontMatterAliases(n.frontmatter) ?? [] }));
-    // The supersede index the turn builds (obsidian/turn-recall `scanNotes`).
-    const supersede = buildSupersedeIndex(kept.map((n) => markersOf(n.path, n.frontmatter ?? undefined, n.links)));
+    // The title-lane names and supersede index exactly as the turn builds them.
+    const { names, supersede } = indexNotes(vault.names.filter((n) => !exclude(n.path)));
     const proposed = new Set<string>();
     const stampBefore = indexStamp();
 

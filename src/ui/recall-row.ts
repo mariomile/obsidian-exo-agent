@@ -56,3 +56,22 @@ export function renderRecallRow(
   header.setAttr("aria-expanded", "false");
   clickable(header, toggle);
 }
+
+/**
+ * Send order for one turn: render the user bubble, then start recall, then hang
+ * the "Recalled N" row under the bubble when recall resolves. The bubble never
+ * waits on recall (Sonar plus the semantic lane can take a second or more); the
+ * prompt still does, so the caller gets the recall back for its block.
+ * `bubble` returns null when the turn reuses an existing bubble; `recall`
+ * returns null when the turn skips recall.
+ */
+export async function bubbleThenRecall(
+  bubble: () => HTMLElement | null,
+  recall: () => Promise<TurnRecall | null> | null,
+  open: { openPath: (path: string) => void; openChat: (id: string, msgIndex: number | null) => void },
+): Promise<TurnRecall | null> {
+  const turnEl = bubble();
+  const recalled = await recall();
+  if (recalled && turnEl) renderRecallRow(turnEl, recalled, open);
+  return recalled;
+}

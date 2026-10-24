@@ -17,6 +17,7 @@
  * never shows a Related section again this session.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveCli } from "../cli";
@@ -78,13 +79,16 @@ function ensureScript(scriptPath: string): Promise<boolean> {
   return scriptReady;
 }
 
-async function run(host: RecallHost, args: string[], timeoutMs: number): Promise<string | null> {
-  if (unavailable) return null;
+/** `signal` lets a caller that stopped waiting stop the query too: an abort
+ *  kills the child instead of leaving it to run to its own timeout. */
+async function run(host: RecallHost, args: string[], timeoutMs: number, signal?: AbortSignal): Promise<string | null> {
+  if (unavailable || signal?.aborted) return null;
   const node = await nodeBin();
   if (!node || !(await ensureScript(host.scriptPath))) {
     unavailable = true;
     return null;
   }
+  if (signal?.aborted) return null;
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -103,12 +107,15 @@ async function run(host: RecallHost, args: string[], timeoutMs: number): Promise
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
       resolve(value);
     };
-    const timer = window.setTimeout(() => {
+    const stop = () => {
       child.kill();
       finish(null);
-    }, timeoutMs);
+    };
+    const timer = window.setTimeout(stop, timeoutMs);
+    signal?.addEventListener("abort", stop, { once: true });
     child.stdout?.on("data", (d: Buffer) => {
       out += d.toString();
     });
@@ -125,31 +132,33 @@ async function run(host: RecallHost, args: string[], timeoutMs: number): Promise
 /** Conversation ids most related to `query`, best first. `null` means the pass
  *  could not run — never an empty array, which would read as "nothing is
  *  related" and let the caller clear a perfectly good Related section. */
-export async function recallChats(
-  host: RecallHost,
-  query: string,
-  limit = 12,
-): Promise<string[] | null> {
+export async function recallChats(host: RecallHost, query: string, limit = 12): Promise<string[] | null> {
   const scored = await recallChatScores(host, query, limit);
   return scored && scored.map((s) => s.id);
 }
 
-/** {@link recallChats} with each chat's similarity score, for callers that
- *  must tell a match from the index's best guess. */
-export async function recallChatScores(
-  host: RecallHost,
-  query: string,
-  limit = 12,
-): Promise<{ id: string; score: number }[] | null> {
-  const q = query.trim();
-  if (!q) return null;
-  const out = await run(host, ["query", host.pluginDir, q, String(limit)], QUERY_TIMEOUT_MS);
-  if (out === null) return null;
+/** The script's `query` output: one `score<TAB>id` line per chat, best first. */
+export function parseChatScores(out: string): { id: string; score: number }[] {
   return out
     .split("\n")
     .map((line) => line.split("\t"))
     .filter(([score, id]) => !!id?.trim() && !Number.isNaN(Number(score)))
     .map(([score, id]) => ({ id: id.trim(), score: Number(score) }));
+}
+
+/** {@link recallChats} with each chat's similarity score, for callers that
+ *  must tell a match from the index's best guess. No index on disk means no
+ *  spawn: the script would only exit without one. */
+export async function recallChatScores(
+  host: RecallHost,
+  query: string,
+  limit = 12,
+  signal?: AbortSignal,
+): Promise<{ id: string; score: number }[] | null> {
+  const q = query.trim();
+  if (!q || !existsSync(join(host.pluginDir, "chat-index", "meta.json"))) return null;
+  const out = await run(host, ["query", host.pluginDir, q, String(limit)], QUERY_TIMEOUT_MS, signal);
+  return out === null ? null : parseChatScores(out);
 }
 
 /** Bring the index up to date. Cheap and pipeline-free when nothing changed, so

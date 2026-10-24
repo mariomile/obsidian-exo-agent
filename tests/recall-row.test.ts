@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderRecallRow } from "../src/ui/recall-row";
+import { bubbleThenRecall, renderRecallRow } from "../src/ui/recall-row";
 import type { TurnRecall } from "../src/obsidian/turn-recall";
 
 /** Just enough DOM for the recall row: element tree, classes, attributes and
@@ -124,5 +124,42 @@ describe("renderRecallRow", () => {
     expect(links.map((l) => [l.tag, l.text])).toEqual([["a", "D/2026-09-24-vault-lean.md"], ["a", "2026-09-25-memoria"]]);
     links[1].click();
     expect(opened).toEqual(["D/2026-09-25-memoria.md"]);
+  });
+});
+
+describe("bubbleThenRecall", () => {
+  const open = { openPath: () => {}, openChat: () => {} };
+
+  it("renders the bubble before recall starts, and does not wait on it", () => {
+    const order: string[] = [];
+    const turn = new El();
+    void bubbleThenRecall(
+      () => (order.push("bubble"), turn as unknown as HTMLElement),
+      () => (order.push("recall"), new Promise<TurnRecall | null>(() => {})),
+      open,
+    );
+    // Recall never resolves, yet the bubble is already there and the row is not.
+    expect(order).toEqual(["bubble", "recall"]);
+    expect(turn.find("mva-recall")).toEqual([]);
+  });
+
+  it("hangs the row under the bubble once recall resolves, and hands the recall back", async () => {
+    const turn = new El();
+    let resolve!: (r: TurnRecall | null) => void;
+    const pending = bubbleThenRecall(() => turn as unknown as HTMLElement, () => new Promise((r) => (resolve = r)), open);
+    expect(turn.find("mva-recall")).toEqual([]);
+    resolve(recall);
+    expect(await pending).toBe(recall);
+    expect(turn.find("mva-recall")).toHaveLength(1);
+  });
+
+  it("no bubble (a retry reusing one) still returns the recall for the prompt", async () => {
+    expect(await bubbleThenRecall(() => null, () => Promise.resolve(recall), open)).toBe(recall);
+  });
+
+  it("recall skipped: null, no row", async () => {
+    const turn = new El();
+    expect(await bubbleThenRecall(() => turn as unknown as HTMLElement, () => null, open)).toBeNull();
+    expect(turn.find("mva-recall")).toEqual([]);
   });
 });

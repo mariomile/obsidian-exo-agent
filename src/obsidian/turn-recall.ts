@@ -19,7 +19,8 @@ import {
 import { buildSupersedeIndex, markersOf, type MarkerFix, type SupersedeIndex } from "../core/supersede";
 import { proposeMarkerFixes } from "./corrections";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
-import { recallChatScores, recallHost } from "../ui/chat-recall";
+import { vaultBasePath } from "./tool-kit";
+import { recallChatScores, recallHost } from "./chat-recall";
 import type { PathFilter } from "../core/vault-exclusions";
 
 /** What recall found for one outbound message. */
@@ -36,11 +37,16 @@ export const SEMANTIC_BUDGET_MS = 1500;
 /** Chat ids asked of the semantic index. */
 const SEMANTIC_DEPTH = 12;
 
-/** `p`, or null once `ms` pass or it fails. */
-function withinBudget<T>(p: Promise<T>, ms: number): Promise<T | null> {
+/** `start`'s result, or null once `ms` pass or it fails. Giving up aborts the
+ *  signal `start` was handed, so the work stops with the wait. */
+function withinBudget<T>(start: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T | null> {
+  const ctrl = new AbortController();
   return new Promise((resolve) => {
-    const timer = window.setTimeout(() => resolve(null), ms);
-    p.then(
+    const timer = window.setTimeout(() => {
+      ctrl.abort();
+      resolve(null);
+    }, ms);
+    start(ctrl.signal).then(
       (v) => {
         window.clearTimeout(timer);
         resolve(v);
@@ -53,21 +59,38 @@ function withinBudget<T>(p: Promise<T>, ms: number): Promise<T | null> {
   });
 }
 
-/** One pass over the notes, minus excluded paths: names and aliases for the
- *  title lane, supersede markers (links resolved to paths) for the index. */
+/** Frontmatter keys that carry supersede links. */
+export const SUPERSEDE_KEY = /^supersede(s|d_by)(\.|$)/;
+
+/** What recall reads of one note: its names and its supersede links, resolved
+ *  to paths. */
+export interface ScannedNote {
+  path: string;
+  basename: string;
+  frontmatter: Record<string, unknown> | null | undefined;
+  links: { key: string; target: string }[];
+}
+
+/** Names and aliases for the title lane, supersede markers for the index. */
+export function indexNotes(notes: readonly ScannedNote[]) {
+  return {
+    names: notes.map((n) => ({ path: n.path, basename: n.basename, aliases: parseFrontMatterAliases(n.frontmatter) ?? [] })),
+    supersede: buildSupersedeIndex(notes.map((n) => markersOf(n.path, n.frontmatter ?? undefined, n.links))),
+  };
+}
+
+/** One pass over the notes, minus excluded paths. */
 function scanNotes(app: App, exclude: PathFilter) {
   const files = app.vault.getMarkdownFiles().filter((f) => !exclude(f.path));
-  const names = [];
-  const markers = [];
-  for (const f of files) {
-    const cache = app.metadataCache.getFileCache(f);
-    names.push({ path: f.path, basename: f.basename, aliases: parseFrontMatterAliases(cache?.frontmatter) ?? [] });
-    const links = (cache?.frontmatterLinks ?? [])
-      .filter((l) => /^supersede(s|d_by)(\.|$)/.test(l.key))
-      .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
-    markers.push(markersOf(f.path, cache?.frontmatter, links));
-  }
-  return { names, supersede: buildSupersedeIndex(markers) };
+  return indexNotes(
+    files.map((f) => {
+      const cache = app.metadataCache.getFileCache(f);
+      const links = (cache?.frontmatterLinks ?? [])
+        .filter((l) => SUPERSEDE_KEY.test(l.key))
+        .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
+      return { path: f.path, basename: f.basename, frontmatter: cache?.frontmatter, links };
+    }),
+  );
 }
 
 /**
@@ -84,10 +107,10 @@ export async function recallForTurn(
   if (!shouldRecall(input.message)) return null;
   const keywords = recallKeywords(input.message);
   if (!keywords.length) return null;
-  const basePath = (app.vault.adapter as { basePath?: string } | undefined)?.basePath;
+  const basePath = input.pluginDir ? vaultBasePath(app) : "";
   const semantic =
     input.pluginDir && basePath
-      ? withinBudget(recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH), SEMANTIC_BUDGET_MS)
+      ? withinBudget((signal) => recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH, signal), SEMANTIC_BUDGET_MS)
       : Promise.resolve(null);
   let sonar: NoteRecall[] = [];
   let title: TitleHit[] = [];
