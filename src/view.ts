@@ -82,6 +82,7 @@ import {
 import { LiveTaskRegistry } from "./ui/live-task-registry";
 import { Composer } from "./ui/composer";
 import { cutTranscriptAfter, cutTranscriptFrom, noteTranscriptReset, noteTurnEnd, reenterActive, renderResumeVerbs, turnMessageIndex, type ReentryHost } from "./ui/reentry";
+import { jumpToTurn, revealMessage } from "./ui/turn-jump";
 import type {
   AssistantCtx,
   Convo,
@@ -2692,7 +2693,7 @@ export class ChatView extends ItemView {
     }));
     // Exo's own reports and anything the user excluded never ride as recall.
     const exclude = vaultExclusion(this.app, [`${this.plugin.paths.reports}/`]);
-    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude });
+    const recall = await recallForTurn(this.app, { message: userText, convoId: c.id, chats, now: Date.now(), exclude, pluginDir: this.plugin.manifest.dir });
     if (recall) this.diag.push("recall", `injected ${recall.notes.length} notes, ${recall.chats.length} chats`);
     return recall;
   }
@@ -4319,10 +4320,10 @@ export class ChatView extends ItemView {
       const label = raw.length > 60 ? raw.slice(0, 59).trimEnd() + "…" : raw || "(empty message)";
       const tick = strip.createDiv({ cls: "mva-outline-tick" });
       tick.setAttribute("aria-hidden", "true");
-      tick.addEventListener("click", () => this.jumpToTurn(turn, reduce));
+      tick.addEventListener("click", () => jumpToTurn(turn, reduce));
       const row = panel.createDiv({ cls: "mva-outline-row", text: label });
       row.setAttribute("aria-label", `Jump to message: ${label}`);
-      this.clickable(row, () => this.jumpToTurn(turn, reduce));
+      this.clickable(row, () => jumpToTurn(turn, reduce));
     }
     // Expand/collapse with a collapse delay so crossing the strip→panel gap (during
     // the opacity swap) doesn't flicker the panel shut mid-interaction.
@@ -4360,16 +4361,6 @@ export class ChatView extends ItemView {
     }
     ticks.forEach((t, i) => t.toggleClass("is-active", i === activeIdx));
     rows.forEach((r, i) => r.toggleClass("is-active", i === activeIdx));
-  }
-
-  /** Smooth-scroll a user turn to near the top and flash it briefly. Instant
-   *  scroll + no motion when reduced-motion is requested. */
-  private jumpToTurn(turn: HTMLElement, reduce: boolean): void {
-    turn.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-    turn.removeClass("is-flash");
-    void turn.offsetWidth; // restart the fade if the same turn is clicked twice
-    turn.addClass("is-flash");
-    window.setTimeout(() => turn.removeClass("is-flash"), 1000);
   }
 
   /** Show/hide the floating jump-to-bottom pill based on pin state. */
@@ -4942,7 +4933,7 @@ export class ChatView extends ItemView {
       const userEl = this.addUserTurn(c, text, imgs);
       // Quiet "Recalled N" row under the bubble: the trust surface, so the
       // injection is never invisible. Only when there was any.
-      if (recalled) renderRecallRow(userEl, recalled, (p) => void this.app.workspace.openLinkText(p, "", "tab"));
+      if (recalled) renderRecallRow(userEl, recalled, { openPath: (p) => void this.app.workspace.openLinkText(p, "", "tab"), openChat: (id, i) => this.openConvoById(id, i) });
       // Flush the user's message to disk immediately: it lives only in RAM until
       // the turn's finally otherwise, so an Obsidian crash mid-turn would lose the
       // exchange from the UI. The atomic write keeps this cheap and safe.
@@ -5912,12 +5903,13 @@ export class ChatView extends ItemView {
     });
   }
 
-  /** Open a conversation by id (fork link, plan handoff). False when unknown. */
-  openConvoById(id: string): boolean {
+  /** Open a conversation by id (fork link, plan handoff, recall, exo-chat link), at `msgIndex` when given. False when unknown. */
+  openConvoById(id: string, msgIndex: number | null = null): boolean {
     const c = this.convos.find((x) => x.id === id);
     if (!c) return false;
     if (this.gallery.galleryEl) this.gallery.hideGallery();
     this.switchTo(c);
+    if (msgIndex !== null) revealMessage(c.listEl, msgIndex);
     return true;
   }
 

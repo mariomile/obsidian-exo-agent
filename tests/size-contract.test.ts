@@ -72,7 +72,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 3, Save to note): `insertIntoNote` e il
   // suo bottone cancellati, il pannello vive in `ui/save-panel.ts`.
   // 5939 -> 5929 righe reali, tetto 5929.
-  "src/view.ts": 5929,
+  // Abbassato il 2026-10-24 (Release 3, S1 recall apribile): `jumpToTurn` vive
+  // ora in `ui/turn-jump.ts` insieme a `revealMessage`. 5929 -> 5921 righe
+  // reali, tetto 5921.
+  "src/view.ts": 5921,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460

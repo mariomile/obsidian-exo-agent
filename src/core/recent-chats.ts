@@ -19,6 +19,9 @@ export interface ChatRecord {
 
 /** One message reduced to what a reader needs. */
 export interface ChatLine {
+  /** Position of the message in `messages`: auto lines are skipped, so the
+   *  line's own position is not it. */
+  index: number;
   role: "user" | "assistant";
   at: number | undefined;
   /** User text, or the assistant's FINAL text segment (what it concluded). */
@@ -38,12 +41,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function chatLines(messages: readonly ChatMessage[]): ChatLine[] {
   const out: ChatLine[] = [];
   let last: number | undefined;
-  for (const m of messages) {
+  messages.forEach((m, index) => {
     if (m.role === "user") {
       if (typeof m.at === "number") last = m.at;
-      if (m.auto) continue; // Exo's own line (a child's report waking its parent), not the user's words
-      out.push({ role: "user", at: last, text: m.text, artifacts: [] });
-      continue;
+      if (m.auto) return; // Exo's own line (a child's report waking its parent), not the user's words
+      out.push({ index, role: "user", at: last, text: m.text, artifacts: [] });
+      return;
     }
     let final = "";
     const artifacts: string[] = [];
@@ -51,8 +54,8 @@ export function chatLines(messages: readonly ChatMessage[]): ChatLine[] {
       if (seg.t === "text" && seg.md.trim()) final = seg.md;
       else if (seg.t === "artifact") artifacts.push(seg.path);
     }
-    out.push({ role: "assistant", at: last, text: final, artifacts });
-  }
+    out.push({ index, role: "assistant", at: last, text: final, artifacts });
+  });
   return out;
 }
 
