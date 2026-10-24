@@ -18,9 +18,10 @@
  */
 
 import type { Component } from "obsidian";
-import type { AgentSession, ContextUsage, ImageAttachment, ProviderId } from "../providers/types";
+import type { AgentSession, ContextUsage, ProviderId } from "../providers/types";
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
+import type { QueuedMessage } from "../core/queue";
 import type { SessionLane } from "../core/session-cards";
 import type { GoalState } from "../core/goal-loop";
 import type { LiveTask } from "../core/live-tasks";
@@ -227,17 +228,7 @@ export interface Convo {
    *  Runtime-only, never persisted (same discipline as `aiTitleAttempts`): after
    *  a reload there is nothing you "have not seen". */
   unread?: boolean;
-  queue: {
-    text: string;
-    images?: ImageAttachment[];
-    sendPrefix?: string;
-    isRecoveryRetry?: boolean;
-    researchMode?: ResearchModeState;
-    /** Agent slug bound to this queued message (`@agent` picked before send). */
-    agent?: string;
-    /** Written by Exo, not the user (core/model.ts `Message.auto`). */
-    auto?: true;
-  }[];
+  queue: QueuedMessage[];
   pendingEl: HTMLElement | null; // container for queued-message chips
   /** The in-flight assistant turn of THIS conversation (null when idle) — the
    *  target for its session's ask_user cards, so parallel conversations can't

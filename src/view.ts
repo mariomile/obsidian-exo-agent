@@ -159,6 +159,9 @@ import {
 } from "./core/workflow-signals";
 import { planInputParts, planStateText } from "./core/plan";
 import { caretHost } from "./core/caret-host";
+import { holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedContext } from "./core/queue";
+import { queueHandlers, renderQueueRows } from "./ui/queue-view";
+import { showCliReadiness } from "./ui/cli-readiness";
 import {
   buildResearchOutbound,
   initialResearchModeState,
@@ -549,6 +552,8 @@ export class ChatView extends ItemView {
   private applyWideMode(): void {
     const wide = this.isWideMain();
     this.contentEl.toggleClass("is-wide", wide);
+    // Chat tabs only in a sidebar: in the main area the Chats view navigates.
+    this.tabsRowEl.toggleClass("is-main-area", this.leaf.getRoot() === this.app.workspace.rootSplit);
     if (wide && !this.wasWide) this.updateRecap();
     else if (!wide) this.recapHost?.empty();
     this.wasWide = wide;
@@ -1012,6 +1017,7 @@ export class ChatView extends ItemView {
     // accents follow the theme (--mva-brand defaults to --interactive-accent).
     setProviderMark(this.brandDot, this.provider);
     this.composer.refreshModel();
+    showCliReadiness(this.composer.getComposerEl(), this.provider, this.plugin.settings, () => this.openSettings());
   }
 
   /* ------------------------- persistence ---------------------------- */
@@ -3025,7 +3031,9 @@ export class ChatView extends ItemView {
     if (!el) {
       el = createDiv({ cls: "mva-working" });
       setIcon(el.createSpan({ cls: "mva-working-star" }), EXO_ICON);
-      ctx.workingLabel = el.createSpan({ cls: "mva-working-label", text: "Thinking…" });
+      // "Starting…" until the provider's first event: CLI spawn and session
+      // setup are not the model thinking, and can take seconds on a cold start.
+      ctx.workingLabel = el.createSpan({ cls: "mva-working-label", text: "Starting…" });
       ctx.workingElapsed = el.createSpan({ cls: "mva-working-elapsed" });
       el.createSpan({ cls: "mva-working-hint", text: "esc to stop" });
       ctx.workingEl = el;
@@ -3503,10 +3511,11 @@ export class ChatView extends ItemView {
   ): void {
     if (touched.length === 0) return;
     const bar = turnEl.createDiv({ cls: "mva-sources" + (collapsed ? " is-collapsed" : "") });
-    // Collapsed by default for EVERY turn (03-07 feedback: the chip rows pile up
-    // and crowd the transcript; the agent also duplicates them in prose — see the
-    // house rule in providers/claude.ts). One quiet "N files" toggle row; the
-    // chips live in the DOM and CSS reveals them when the accordion opens.
+    // Collapsed by default (03-07 feedback: the chip rows pile up and crowd the
+    // transcript; the agent also duplicates them in prose — see the house rule in
+    // providers/claude.ts), except at the end of a live turn that wrote notes
+    // (2026-10-24: the edits are the result to check). One quiet "N files" toggle
+    // row; the chips live in the DOM and CSS reveals them when the accordion opens.
     const head = bar.createDiv({ cls: "mva-sources-head" });
     setIcon(head.createSpan({ cls: "mva-reason-chevron" }), "chevron-right");
     head.createSpan({ text: `${touched.length} file${touched.length === 1 ? "" : "s"}` });
@@ -4777,7 +4786,7 @@ export class ChatView extends ItemView {
     this.diag.push("stop", `${source} → ${action}`);
     if (!c.stopped) c.stopRequestedAt = Date.now();
     c.stopped = true;
-    c.queue = [];
+    c.queue = holdQueue(c.queue); // the user's queued messages stay, paused (core/queue)
     this.renderQueue(c);
     c.pendingPerm?.(); // cancel any open permission card
     c.pendingAsk?.(); // cancel any open ask card
@@ -4901,6 +4910,7 @@ export class ChatView extends ItemView {
             c.researchMode.enabled ? { ...c.researchMode } : undefined
           ),
           agent: agentForTurn,
+          context: { paths: this.composer.contextPaths(), selection: this.composer.contextSelection() },
         });
         this.renderQueue(c);
       }
@@ -5038,7 +5048,7 @@ export class ChatView extends ItemView {
   }
 
   /** Run a multi-step workflow by enqueuing its steps; the turn-drain loop runs
-   *  them in order. Stop (which clears the queue) aborts the remaining steps.
+   *  them in order. Stop holds the remaining steps (each runs only on Run).
    *  Owns the "run first step, enqueue the rest" turn orchestration on behalf of
    *  the composer (which just hands over the resolved steps). */
   submitWorkflow(c: Convo, steps: string[]): void {
@@ -5056,7 +5066,7 @@ export class ChatView extends ItemView {
     }
   }
 
-  /** Render queued (not-yet-sent) messages as removable chips. */
+  /** Render queued (not-yet-sent) messages as pills (ui/queue-view). */
   renderQueue(c: Convo): void {
     if (!c.queue.length) {
       c.pendingEl?.remove();
@@ -5064,21 +5074,7 @@ export class ChatView extends ItemView {
       return;
     }
     if (!c.pendingEl) c.pendingEl = this.transcript(c).createDiv({ cls: "mva-queue" });
-    c.pendingEl.empty();
-    c.queue.forEach((q, i) => {
-      const row = c.pendingEl!.createDiv({ cls: "mva-queued" });
-      setIcon(row.createSpan({ cls: "mva-queued-icon" }), "clock");
-      row.createSpan({
-        cls: "mva-queued-text",
-        text: q.text + (q.images?.length ? `  📎${q.images.length}` : ""),
-      });
-      const x = row.createSpan({ cls: "mva-chip-x", attr: { "aria-label": "Remove" } });
-      setIcon(x, "x");
-      this.clickable(x, () => {
-        c.queue.splice(i, 1);
-        this.renderQueue(c);
-      });
-    });
+    renderQueueRows(c.pendingEl, c.queue, queueHandlers(this, c));
     this.scrollConvo(c);
   }
 
@@ -5111,7 +5107,7 @@ export class ChatView extends ItemView {
       isRecoveryRetry?: boolean;
       reuseUserTurn?: boolean;
       researchMode?: ResearchModeState;
-      agent?: string; auto?: true;
+      agent?: string; auto?: true; context?: QueuedContext;
     }
   ): Promise<void> {
     if (c.turnClaimed) {
@@ -5139,6 +5135,8 @@ export class ChatView extends ItemView {
       researchMode?: ResearchModeState;
       /** Agent slug bound to THIS turn (a `@agent` pick), overriding `c.agent`. */
       agent?: string; auto?: true;
+      /** Context frozen when the message was queued (core/queue). */
+      context?: QueuedContext;
     }
   ): Promise<void> {
     const researchMode = opts?.researchMode ?? c.researchMode;
@@ -5158,10 +5156,11 @@ export class ChatView extends ItemView {
     // selection the chip is showing — both read from the same composer state the
     // UI renders from, so what the user sees is exactly what the model receives.
     // Optionally inline note bodies so open pages are read, not just referenced.
-    // Only the active convo owns the composer, so a background turn carries none.
+    // Only the active convo owns the composer, so a background turn carries none
+    // unless the message was queued: then it carries what it was written against.
     const isActiveConvo = c === this.active;
-    const paths = isActiveConvo ? this.composer.contextPaths() : [];
-    const selection = isActiveConvo ? this.composer.contextSelection() : null;
+    const paths = opts?.context?.paths ?? (isActiveConvo ? this.composer.contextPaths() : []);
+    const selection = opts?.context ? opts.context.selection : isActiveConvo ? this.composer.contextSelection() : null;
     const injectContent = this.plugin.settings.injectContextContent;
     let contents: Record<string, string> | undefined;
     const noteMtimes: Record<string, number> = {};
@@ -5288,7 +5287,12 @@ export class ChatView extends ItemView {
     // on the Workflow card.
     const workflowRuns = new Map<string, WorkflowRun>();
 
+    let sawEvent = false;
     const onEvent = (e: AgentEvent) => {
+      if (!sawEvent) {
+        sawEvent = true;
+        this.setWorkingLabel(ctx, "Thinking…"); // the session is up (see ensureWorking)
+      }
       switch (e.kind) {
         case "text-delta":
           if (!sawText) {
@@ -5763,7 +5767,8 @@ export class ChatView extends ItemView {
       // Touched-notes footer renders collapsed by default (03-07 feedback), so
       // there's nothing to fold on older turns — every footer is already a quiet
       // "N files" toggle that opens on click.
-      this.attachTouched(ctx.el, ctx.touched, checkpoint, true, turnCk);
+      // Open when this turn wrote notes: what changed is the result to check.
+      this.attachTouched(ctx.el, ctx.touched, checkpoint, !ctx.touched.some((t) => t.kind === "write"), turnCk);
       // The footer above now carries every note this turn touched — drop the
       // matching live tool-call rows so the same file isn't shown twice (the
       // #1 finding of the 2026-07-03 impeccable critique on this surface).
@@ -5833,9 +5838,10 @@ export class ChatView extends ItemView {
           this.renderError(ctx, msg, c, text);
           new Notice(msg);
           this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
-          // Don't replay queued messages into a broken session — they'd just re-fail.
+          // Don't replay queued messages into a broken session (they'd just
+          // re-fail): hold them, the user runs them once the chat works again.
           if (c.queue.length) {
-            c.queue = [];
+            c.queue = holdQueue(c.queue);
             this.renderQueue(c);
           }
         }
@@ -5997,18 +6003,10 @@ export class ChatView extends ItemView {
       // Drain the queue: run the next message in this conversation. A recovery
       // retry item carries sendPrefix/isRecoveryRetry — forward them so the recap
       // reaches the provider and no duplicate user bubble is rendered.
-      if (c.queue.length) {
-        const next = c.queue.shift()!;
+      const next = takeAt(c.queue, nextRunnable(c.queue)); // held messages wait for Run
+      if (next) {
         this.renderQueue(c);
-        const retryOpts =
-          next.isRecoveryRetry || next.sendPrefix || next.researchMode || next.agent || next.auto
-            ? {
-                sendPrefix: next.sendPrefix,
-                isRecoveryRetry: next.isRecoveryRetry,
-                researchMode: next.researchMode,
-                agent: next.agent, auto: next.auto,
-              }
-            : undefined;
+        const retryOpts = turnOptsFor(next);
         // Hand the claim to the continuation (release + immediate re-claim
         // inside runTurn's own guard) — see turnClaimGen for why this call's
         // own finally won't then clear a reservation it no longer owns.
