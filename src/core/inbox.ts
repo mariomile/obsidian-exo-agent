@@ -1,5 +1,5 @@
 /**
- * Inbox — the one model of "what waits for you" (Release 2). Pure, no
+ * Inbox: the one model of "what waits for you" (Release 2). Pure, no
  * `obsidian` import: the sidebar and the Cockpit render the same `Inbox`, and
  * every count anywhere is `buildInbox().count`, so two surfaces can never
  * disagree about how many things need you.

@@ -143,7 +143,7 @@ export interface ChatRow {
 /**
  * How the list is carved up.
  *
- *  - `activity` — T3's inbox: pinned, active, snoozed, settled. Answers "what
+ *  - `activity`: the T3 shelves, pinned, active, snoozed, settled. Answers "what
  *    is my situation".
  *  - `days` — pure chronology by last message, with no promotion at all.
  *    Answers "what did I do on Tuesday", which the activity view cannot: there,

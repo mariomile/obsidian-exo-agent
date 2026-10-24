@@ -162,7 +162,7 @@ describe("buildChatList — state sections", () => {
 
   /**
    * The precedence, stated once and whole. Every row here qualifies for
-   * several shelves at once — pinned beats snoozed beats settled beats active,
+   * several shelves at once: pinned beats snoozed beats settled beats active,
    * and the first one it earns is the only one it gets.
    */
   it("lands every row on exactly one shelf, in precedence order", () => {
@@ -211,7 +211,7 @@ describe("buildChatList — state sections", () => {
     expect(rows(vm, "active")[0].badge).toBe("error");
   });
 
-  it("keeps a stopped row on Active as well — a halted turn is yours to resume", () => {
+  it("keeps a stopped row on Active as well: a halted turn is yours to resume", () => {
     const vm = build([src({ id: "a", stopped: true })]);
     expect(ids(vm, "active")).toEqual(["a"]);
     expect(ids(vm, "settled")).toEqual([]);
