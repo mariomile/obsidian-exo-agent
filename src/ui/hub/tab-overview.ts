@@ -2,6 +2,7 @@ import { defaultModel } from "../../settings-schema";
 import { autonomyStatuses, autonomyActions, systemStatuses } from "../../core/actions-hub";
 import { defaultRows, thisChatRows, type SummaryRow } from "../../core/session-summary";
 import * as convoBridge from "../convo-bridge";
+import { clickable } from "../dom";
 import { buildGroupHeader, buildStatusRow, buildRowScaffold, openExoSettings, runCommand, type HubTabContext } from "./shared";
 
 /**
@@ -53,8 +54,8 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
   });
   for (const st of sys) {
     const row = buildStatusRow(st.label, st.value, st.enabled);
-    const btn = row.querySelector(".mva-conn-actions")!.createEl("button", { cls: "mva-btn", text: "Settings" });
-    btn.onclick = () => openExoSettings(ctx);
+    const btn = row.querySelector(".mva-conn-actions")!.createSpan({ cls: "mva-btn", text: "Settings" });
+    clickable(btn, () => openExoSettings(ctx));
     host.appendChild(row);
   }
 
@@ -79,9 +80,12 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
   for (const a of autonomyActions(autonomyInput)) {
     if (a.id === "automations") continue; // its own tab
     const { row, right } = buildRowScaffold(a.label, undefined, a.hint);
-    const btn = right.createEl("button", { cls: "mva-btn", text: a.badge ? `Run · ${a.badge}` : "Run" });
-    if (a.enabled) btn.onclick = handler[a.id];
-    else btn.setAttr("disabled", "true");
+    const btn = right.createSpan({ cls: "mva-btn", text: a.badge ? `Run · ${a.badge}` : "Run" });
+    if (a.enabled) clickable(btn, handler[a.id]);
+    else {
+      btn.addClass("is-disabled");
+      btn.setAttr("aria-disabled", "true");
+    }
     host.appendChild(row);
   }
 }

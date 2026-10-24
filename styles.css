@@ -3391,6 +3391,11 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-btn:hover {
   background: var(--background-modifier-active-hover, var(--background-modifier-hover));
 }
+/* A span button that cannot act right now (a button's `disabled`, for a span). */
+.mva-btn.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
 /* The primary action: the second of the three sanctioned accent spends. */
 .mva-btn-primary {
   color: var(--text-on-accent);
