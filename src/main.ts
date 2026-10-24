@@ -2118,9 +2118,9 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   readConversationStore(): Promise<ChatRecord[]> { return convoBridge.readConversationStore(this); }
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }> { return undoMemoryWrite(this, this.harvestLog, sha); }
 
-  refreshHub(): void {
+  refreshHub(only?: HubTab): void {
     for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
-      if (leaf.view instanceof HubView) leaf.view.refresh();
+      if (leaf.view instanceof HubView) leaf.view.refresh(only);
     }
   }
 

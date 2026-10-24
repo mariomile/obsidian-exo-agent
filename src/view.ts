@@ -802,6 +802,7 @@ export class ChatView extends ItemView {
     // and the Capabilities panel; older CLIs simply never fire this (no gate).
     session.onCaps = (caps) => {
       this.sessionCaps = caps;
+      c.caps = caps; // the Capabilities "This chat" rows read the chat's own
       // Settings MCP manager + cockpit read live status here; the persisted copy
       // seeds menus/panels on the next app run, before any session has spawned.
       this.plugin.lastSessionCaps = caps;
@@ -1452,6 +1453,7 @@ export class ChatView extends ItemView {
     this.refreshAgentIndicators();
     this.renderAgentPopover();
     this.renderQueue(c);
+    this.plugin.refreshHub("overview"); // "This chat" follows the active chat
   }
 
   /* ----------------------------- tab bar ---------------------------- */

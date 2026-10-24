@@ -103,6 +103,13 @@ describe("sessionSnapshot", () => {
   it("reports the effort the chat's model actually runs with, and its own allow count", () => {
     const active = { provider: "claude", model: "claude-haiku-4-5", allow: new Set(["Read", "Bash(git)"]) } as unknown as Convo;
     const view = { active, plugin: { settings: { effort: "high" } } } as unknown as ChatView;
-    expect(sessionSnapshot(view)).toEqual({ provider: "claude", model: "claude-haiku-4-5", effort: "default", allowed: 2 });
+    expect(sessionSnapshot(view)).toEqual({ provider: "claude", model: "claude-haiku-4-5", effort: "default", allowed: 2, mcp: null });
+  });
+
+  it("reports MCP status from the chat's own session, not another chat's", () => {
+    const caps = { mcpServers: [{ name: "vault", status: "connected" }] };
+    const active = { provider: "claude", model: "", allow: new Set(), caps } as unknown as Convo;
+    const view = { active, plugin: { settings: { effort: "high" }, lastSessionCaps: { mcpServers: [] } } } as unknown as ChatView;
+    expect(sessionSnapshot(view).mcp).toEqual([{ name: "vault", status: "connected" }]);
   });
 });

@@ -101,8 +101,10 @@ export class HubView extends ItemView {
   }
 
   /** Re-render the current tab — called on manual refresh, after tab actions,
-   *  and by the plugin when a new SessionCaps snapshot arrives. */
-  refresh(): void {
+   *  and by the plugin when a new SessionCaps snapshot arrives. With `only`,
+   *  a no-op unless that tab is the one showing. */
+  refresh(only?: HubTab): void {
+    if (only && only !== this.tab) return;
     void this.render();
   }
 

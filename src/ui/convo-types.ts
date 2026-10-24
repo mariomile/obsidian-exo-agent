@@ -18,7 +18,7 @@
  */
 
 import type { Component } from "obsidian";
-import type { AgentSession, ContextUsage, ProviderId } from "../providers/types";
+import type { AgentSession, ContextUsage, ProviderId, SessionCaps } from "../providers/types";
 import type { Message, PersistedMessage, Segment } from "../core/model";
 import type { ResearchModeState } from "../core/research";
 import type { QueuedContext, QueuedMessage } from "../core/queue";
@@ -164,6 +164,9 @@ export interface Convo {
   messages: Message[];
   // Per-conversation runtime (enables parallel conversations).
   session: AgentSession | null;
+  /** What this chat's own session reported at init (MCP status, inventories):
+   *  the Capabilities "This chat" rows. Runtime only, never persisted. */
+  caps?: SessionCaps;
   sessionSig: string;
   streaming: boolean;
   /** Reservation flag ONLY, claimed synchronously the instant runTurn is

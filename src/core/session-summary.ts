@@ -21,6 +21,9 @@ export interface ChatSession {
   effort: string;
   /** Tools "Always allow"-ed in this chat only. */
   allowed: number;
+  /** MCP servers as this chat's own session reported them; null until it has
+   *  one (a chat restored from disk has not spawned yet). */
+  mcp: readonly McpStatus[] | null;
 }
 
 export interface McpStatus {
@@ -47,9 +50,10 @@ export function countRules(rules: string): number {
   }).length;
 }
 
-/** "This chat". `mcp` is null before any session reported its servers: the
- *  row is left out rather than shown as "0 connected". */
-export function thisChatRows(chat: ChatSession, mcp: readonly McpStatus[] | null): SummaryRow[] {
+/** "This chat". Before the chat's session reported its servers the MCP row is
+ *  left out rather than shown as "0 connected". */
+export function thisChatRows(chat: ChatSession): SummaryRow[] {
+  const { mcp } = chat;
   const rows: SummaryRow[] = [
     { label: "Provider", value: chat.provider },
     { label: "Model", value: chat.model || "default" },

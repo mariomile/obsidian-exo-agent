@@ -13,7 +13,6 @@ import { buildGroupHeader, buildStatusRow, buildRowScaffold, openExoSettings, ru
 export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): Promise<void> {
   host.empty();
   const s = ctx.plugin.settings;
-  const caps = ctx.plugin.lastSessionCaps;
   const now = Date.now();
 
   const [queuePending, lastCommit] = await Promise.all([
@@ -25,11 +24,11 @@ export async function renderOverviewTab(host: HTMLElement, ctx: HubTabContext): 
     for (const r of list) host.appendChild(buildStatusRow(r.label, r.value, r.ok));
   };
 
-  // This chat: the open chat's own session. MCP status is the live caps the
-  // chat view writes on every session init.
+  // This chat: the open chat's own session, MCP status included (the caps its
+  // session reported at init). The chat view repaints this tab on a switch.
   host.appendChild(buildGroupHeader("This chat"));
   const chat = convoBridge.sessionSnapshot(ctx.app);
-  if (chat) rows(thisChatRows(chat, caps?.mcpServers ?? null));
+  if (chat) rows(thisChatRows(chat));
   else host.createDiv({ cls: "mva-conn-empty", text: "Open a chat to see its session." });
 
   // Defaults: what a new chat starts from.

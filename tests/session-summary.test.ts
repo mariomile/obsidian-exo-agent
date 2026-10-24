@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { countRules, defaultRows, thisChatRows, type ChatSession } from "../src/core/session-summary";
 
-const chat: ChatSession = { provider: "claude", model: "claude-opus-4-1", effort: "high", allowed: 2 };
+const chat: ChatSession = { provider: "claude", model: "claude-opus-4-1", effort: "high", allowed: 2, mcp: null };
 
 describe("thisChatRows", () => {
   it("shows what the chat runs with, including its own allow count", () => {
-    const rows = thisChatRows(chat, null);
+    const rows = thisChatRows(chat);
     expect(rows.map((r) => [r.label, r.value])).toEqual([
       ["Provider", "claude"],
       ["Model", "claude-opus-4-1"],
@@ -15,16 +15,19 @@ describe("thisChatRows", () => {
   });
 
   it("adds MCP status only once a session reported it", () => {
-    const rows = thisChatRows(chat, [
-      { name: "a", status: "connected" },
-      { name: "b", status: "failed" },
-    ]);
+    const rows = thisChatRows({
+      ...chat,
+      mcp: [
+        { name: "a", status: "connected" },
+        { name: "b", status: "failed" },
+      ],
+    });
     expect(rows.at(-1)).toEqual({ label: "MCP servers", value: "1 connected · 1 need attention", ok: false });
-    expect(thisChatRows(chat, [{ name: "a", status: "connected" }]).at(-1)?.ok).toBe(true);
+    expect(thisChatRows({ ...chat, mcp: [{ name: "a", status: "connected" }] }).at(-1)?.ok).toBe(true);
   });
 
   it("says default for an unset model", () => {
-    expect(thisChatRows({ ...chat, model: "" }, null)[1].value).toBe("default");
+    expect(thisChatRows({ ...chat, model: "" })[1].value).toBe("default");
   });
 });
 

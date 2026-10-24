@@ -120,6 +120,7 @@ export function sessionSnapshot(view: ChatView): ChatSession {
     model: c.model,
     effort: effortFor(c.provider, c.model, view.plugin.settings.effort),
     allowed: c.allow.size,
+    mcp: c.caps?.mcpServers ?? null,
   };
 }
 
