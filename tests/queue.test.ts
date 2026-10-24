@@ -1,31 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { canSteer, hasPending, holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedMessage } from "../src/core/queue";
+import { canSteer, hasPending, holdQueue, nextRunnable, takeAt, type QueuedMessage } from "../src/core/queue";
 
 const img = { mediaType: "image/png", data: "x" } as unknown as NonNullable<QueuedMessage["images"]>[number];
 
 describe("holdQueue (Stop / broken session)", () => {
-  it("keeps the user's messages, held, with text, images and frozen context", () => {
+  it("keeps every message, held, with text, images and frozen context", () => {
     const ctx = { paths: ["Notes/A.md"], selection: { text: "sel", path: "Notes/A.md" } };
     const q: QueuedMessage[] = [{ text: "one", images: [img], context: ctx }, { text: "two" }];
-    const held = holdQueue(q);
-    expect(held).toEqual([
+    holdQueue(q);
+    expect(q).toEqual([
       { text: "one", images: [img], context: ctx, held: true },
       { text: "two", held: true },
     ]);
   });
 
-  it("drops Exo's own items: they belonged to the stopped turn", () => {
-    expect(holdQueue([{ text: "wake", auto: true }, { text: "mine" }])).toEqual([{ text: "mine", held: true }]);
-  });
-
-  it("keeps the same objects, so a pill open in the editor keeps its edit", () => {
+  it("holds in place, so a pill open in the editor keeps its edit", () => {
     const mine: QueuedMessage = { text: "a", editing: true };
-    const held = holdQueue([mine]);
-    expect(held[0]).toBe(mine);
+    const q = [mine];
+    holdQueue(q);
     mine.text = "edited";
     delete mine.editing;
-    expect(held[0]).toEqual({ text: "edited", held: true });
-    expect(nextRunnable(held)).toBe(-1); // saving the edit does not un-hold it
+    expect(q[0]).toEqual({ text: "edited", held: true });
+    expect(nextRunnable(q)).toBe(-1); // saving the edit does not un-hold it
   });
 });
 
@@ -39,7 +35,8 @@ describe("drain", () => {
   });
 
   it("runs nothing when everything is held (no double send after Stop)", () => {
-    const q: QueuedMessage[] = holdQueue([{ text: "a" }, { text: "b" }]);
+    const q: QueuedMessage[] = [{ text: "a" }, { text: "b" }];
+    holdQueue(q);
     expect(nextRunnable(q)).toBe(-1);
     expect(hasPending(q)).toBe(false);
     expect(takeAt(q, -1)).toBeUndefined();
@@ -59,24 +56,6 @@ describe("a pill being edited", () => {
   });
 });
 
-describe("turnOptsFor", () => {
-  it("is undefined for a plain follow-up", () => {
-    expect(turnOptsFor({ text: "hi" })).toBeUndefined();
-  });
-
-  it("carries the frozen context into the turn", () => {
-    const context = { paths: ["A.md"], selection: null };
-    expect(turnOptsFor({ text: "hi", context })).toEqual({
-      sendPrefix: undefined,
-      isRecoveryRetry: undefined,
-      researchMode: undefined,
-      agent: undefined,
-      auto: undefined,
-      context,
-    });
-  });
-});
-
 describe("canSteer", () => {
   const live = { streaming: true, researchOn: false, hasSteer: true };
   it("only while streaming, with a provider that steers, outside Research Mode", () => {
@@ -93,5 +72,14 @@ describe("canSteer", () => {
 
   it("never with images: both providers refuse them mid-turn", () => {
     expect(canSteer({ text: "a", images: [img] }, live)).toBe(false);
+  });
+
+  it("never when the message carries more than its text: steer would drop it", () => {
+    expect(canSteer({ text: "a", context: { paths: ["A.md"], selection: null } }, live)).toBe(false);
+    expect(canSteer({ text: "a", context: { paths: [], selection: { text: "s", path: "A.md" } } }, live)).toBe(false);
+    expect(canSteer({ text: "a", agent: "researcher" }, live)).toBe(false);
+    expect(canSteer({ text: "a", sendPrefix: "handoff" }, live)).toBe(false);
+    // An empty frozen context is nothing to lose.
+    expect(canSteer({ text: "a", context: { paths: [], selection: null } }, live)).toBe(true);
   });
 });

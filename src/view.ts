@@ -147,7 +147,7 @@ import {
 } from "./core/workflow-signals";
 import { planInputParts, planStateText } from "./core/plan";
 import { caretHost } from "./core/caret-host";
-import { hasPending, holdQueue, nextRunnable, takeAt, turnOptsFor, type QueuedContext } from "./core/queue";
+import { hasPending, holdQueue, nextRunnable, takeAt, type TurnOpts } from "./core/queue";
 import { queueHandlers, renderQueueRows } from "./ui/queue-view";
 import { showCliReadiness } from "./ui/cli-readiness";
 import {
@@ -285,6 +285,8 @@ export class ChatView extends ItemView {
    *  currently open (its own subagents + background tasks). Always visible while
    *  that chat has background work, even when the working row scrolls off. */
   private agentChipEl: HTMLElement | null = null;
+  /** The open chat's queued messages, pinned above the composer (ui/queue-view). */
+  private queueEl!: HTMLElement;
   /** The enumerable list popover for `agentChipEl`, when open. */
   private agentPopoverEl: HTMLElement | null = null;
   /** Sole owner of every conversation's live-task map. Repaints both agent
@@ -423,6 +425,7 @@ export class ChatView extends ItemView {
         window.open(external, "_blank");
       }
     });
+    this.queueEl = this.listWrap.createDiv({ cls: "mva-queue" });
     // Per-chat agents chip: in-flow sibling of listWrap, created BEFORE the composer
     // so it pins directly above it. Reflects only the OPEN chat's own background work.
     this.agentChipEl = this.listWrap.createDiv({ cls: "mva-agents is-hidden" });
@@ -1066,7 +1069,6 @@ export class ChatView extends ItemView {
         pendingPerm: null,
         pendingAsk: null,
         queue: [],
-        pendingEl: null,
         currentCtx: null,
         liveTasks: new Map(),
         tailSurfaceEl: null,
@@ -1290,7 +1292,6 @@ export class ChatView extends ItemView {
       pendingAsk: null,
       queue: [],
       researchMode: initialResearchModeState(),
-      pendingEl: null,
       currentCtx: null,
       liveTasks: new Map(),
       tailSurfaceEl: null,
@@ -1449,6 +1450,7 @@ export class ChatView extends ItemView {
     // transition it has to observe; the popover re-renders or closes with it.
     this.refreshAgentIndicators();
     this.renderAgentPopover();
+    this.renderQueue(c);
   }
 
   /* ----------------------------- tab bar ---------------------------- */
@@ -1881,7 +1883,6 @@ export class ChatView extends ItemView {
     c.title = "New chat";
     c.updatedAt = Date.now();
     c.listEl.empty();
-    c.pendingEl = null;
     this.renderEmptyState();
     c.usage = undefined;
     this.composer.updateUsage(null);
@@ -2693,7 +2694,7 @@ export class ChatView extends ItemView {
     return recall;
   }
 
-  addUserTurn(c: Convo, text: string, images?: ImageAttachment[], auto?: true): HTMLElement {
+  addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): HTMLElement {
     this.clearEmptyState(c);
     // Derive the tab title from the first message; canAutoTitle (core/title-ownership) decides what's untitled and whether it's locked.
     if (canAutoTitle(c, "first-message")) {
@@ -2702,8 +2703,8 @@ export class ChatView extends ItemView {
       this.refreshTabs(); // the title is a rendered fact: a state transition
     }
     const at = Date.now();
-    c.messages.push(auto ? { role: "user", text, at, auto } : { role: "user", text, at });
-    const el = this.transcript(c).createDiv({ cls: auto ? "mva-turn mva-user is-auto" : "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
+    c.messages.push({ role: "user", text, at });
+    const el = this.transcript(c).createDiv({ cls: "mva-turn mva-user", attr: { "data-msg": c.messages.length - 1 } });
     const bubble = el.createDiv({ cls: "mva-bubble mva-type-body" });
     if (images?.length) {
       const strip = bubble.createDiv({ cls: "mva-bubble-images" });
@@ -4571,7 +4572,7 @@ export class ChatView extends ItemView {
     this.diag.push("stop", `${source} → ${action}`);
     if (!c.stopped) c.stopRequestedAt = Date.now();
     c.stopped = true;
-    c.queue = holdQueue(c.queue); // the user's queued messages stay, paused (core/queue)
+    holdQueue(c.queue); // the user's queued messages stay, paused (core/queue)
     this.renderQueue(c);
     c.pendingPerm?.(); // cancel any open permission card
     c.pendingAsk?.(); // cancel any open ask card
@@ -4699,10 +4700,7 @@ export class ChatView extends ItemView {
         this.renderQueue(c);
       }
     } else {
-      const turnOpts = handoff || researchModeForTurn || agentForTurn
-        ? { sendPrefix: handoff, researchMode: researchModeForTurn, agent: agentForTurn }
-        : undefined;
-      void this.runTurn(c, text, images, turnOpts);
+      void this.runTurn(c, text, images, { sendPrefix: handoff, researchMode: researchModeForTurn, agent: agentForTurn });
     }
   }
 
@@ -4852,14 +4850,7 @@ export class ChatView extends ItemView {
 
   /** Render queued (not-yet-sent) messages as pills (ui/queue-view). */
   renderQueue(c: Convo): void {
-    if (!c.queue.length) {
-      c.pendingEl?.remove();
-      c.pendingEl = null;
-      return;
-    }
-    if (!c.pendingEl) c.pendingEl = this.transcript(c).createDiv({ cls: "mva-queue" });
-    renderQueueRows(c.pendingEl, c.queue, queueHandlers(this, c));
-    this.scrollConvo(c);
+    if (c === this.active) renderQueueRows(this.queueEl, c.queue, queueHandlers(this, c));
   }
 
   /** TUI parity: the CLI only expands /commands that OPEN the message, so a
@@ -4886,13 +4877,7 @@ export class ChatView extends ItemView {
     c: Convo,
     text: string,
     images?: ImageAttachment[],
-    opts?: {
-      sendPrefix?: string;
-      isRecoveryRetry?: boolean;
-      reuseUserTurn?: boolean;
-      researchMode?: ResearchModeState;
-      agent?: string; auto?: true; context?: QueuedContext;
-    }
+    opts?: TurnOpts & { reuseUserTurn?: boolean }
   ): Promise<void> {
     if (c.turnClaimed) {
       this.diag.push("turn", "declined: already claimed (concurrent runTurn on this convo)");
@@ -4912,16 +4897,7 @@ export class ChatView extends ItemView {
     c: Convo,
     text: string,
     images?: ImageAttachment[],
-    opts?: {
-      sendPrefix?: string;
-      isRecoveryRetry?: boolean;
-      reuseUserTurn?: boolean;
-      researchMode?: ResearchModeState;
-      /** Agent slug bound to THIS turn (a `@agent` pick), overriding `c.agent`. */
-      agent?: string; auto?: true;
-      /** Context frozen when the message was queued (core/queue). */
-      context?: QueuedContext;
-    }
+    opts?: TurnOpts & { reuseUserTurn?: boolean }
   ): Promise<void> {
     const researchMode = opts?.researchMode ?? c.researchMode;
     // Resolved before the session work below so a missing/renamed agent simply
@@ -4994,7 +4970,7 @@ export class ChatView extends ItemView {
     // only "user" entry in c.messages for this turn.
     const turnFrom = c.messages.length; // where THIS turn starts; the stretch before it is not its to mark read
     if (!opts?.isRecoveryRetry && !opts?.reuseUserTurn) {
-      const userEl = this.addUserTurn(c, text, imgs, opts?.auto);
+      const userEl = this.addUserTurn(c, text, imgs);
       // Quiet "Recalled N" row under the bubble: the trust surface, so the
       // injection is never invisible. Only when there was any.
       if (recalled) renderRecallRow(userEl, recalled, (p) => void this.app.workspace.openLinkText(p, "", "tab"));
@@ -5058,6 +5034,7 @@ export class ChatView extends ItemView {
     // re-errors. Track it here and reset the session at turn end.
     let poisoned = false;
     let authFailed = false;
+    let failed = false; // threw past the recovery ladder: the queue is held (core/recovery)
 
     // Diagnostics: first-delta latency markers (logged once per turn, deltas are
     // otherwise never logged — noise) + tool-id → name so result lines read well.
@@ -5616,15 +5593,10 @@ export class ChatView extends ItemView {
           this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
         } else {
           authFailed = isCliAuthFailure(msg);
+          failed = true;
           this.renderError(ctx, msg, c, text);
           new Notice(msg);
           this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
-          // Don't replay queued messages into a broken session (they'd just
-          // re-fail): hold them, the user runs them once the chat works again.
-          if (c.queue.length) {
-            c.queue = holdQueue(c.queue);
-            this.renderQueue(c);
-          }
         }
       }
     } finally {
@@ -5707,8 +5679,9 @@ export class ChatView extends ItemView {
         isRecoveryRetry: !!opts?.isRecoveryRetry,
         resumeRisky: !!c.resumeRisky,
         authFailed,
+        failed,
       });
-      if (authFailed && c.queue.length) c.queue = holdQueue(c.queue); // a logged-out CLI fails every queued message
+      if (plan.holdQueue) holdQueue(c.queue);
       if (plan.session !== "none") this.dropSession(c, `recovery-${plan.session}`);
       if (plan.session === "drop-clear-id") c.sessionId = undefined;
       c.resumeRisky = plan.nextResumeRisky;
@@ -5782,18 +5755,17 @@ export class ChatView extends ItemView {
       // Goal loop: decide continue/pause/met before draining. On "continue" this
       // pushes the next re-prompt onto c.queue, which the drain below runs.
       if (!poisoned && !c.stopped) this.advanceGoal(c, ctx.fullText);
-      // Drain the queue: run the next message in this conversation. A recovery
-      // retry item carries sendPrefix/isRecoveryRetry — forward them so the recap
-      // reaches the provider and no duplicate user bubble is rendered.
+      // Drain the queue: run the next message in this conversation. The item is
+      // its own TurnOpts, so a recovery retry's sendPrefix/isRecoveryRetry and a
+      // queued message's frozen context and agent ride along unchanged.
       const next = takeAt(c.queue, nextRunnable(c.queue)); // held messages wait for Run
       if (next) {
         this.renderQueue(c);
-        const retryOpts = turnOptsFor(next);
         // Hand the claim to the continuation (release + immediate re-claim
         // inside runTurn's own guard) — see turnClaimGen for why this call's
         // own finally won't then clear a reservation it no longer owns.
         c.turnClaimed = false;
-        void this.runTurn(c, next.text, next.images, retryOpts);
+        void this.runTurn(c, next.text, next.images, next);
       } else {
         this.renderQueue(c); // held pills drop the steer action now the turn is over
         // Turn (and any queue) is fully settled — safe to surface related notes again.

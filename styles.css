@@ -2135,19 +2135,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mva-chip-x {
-  display: inline-flex;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity var(--mva-t);
-}
-.mva-chip-x:hover {
-  opacity: 1;
-}
-.mva-chip-x .svg-icon {
-  width: 12px;
-  height: 12px;
-}
 /* --------------------------- message actions -------------------------- */
 .mva-actions {
   display: flex;
@@ -4462,12 +4449,20 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 
 /* ------------------------------- queue -------------------------------- */
+/* Queued messages, pinned above the composer on the transcript's column. */
 .mva-queue {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-top: 4px;
+  max-width: var(--mva-content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 4px 14px;
+  box-sizing: border-box;
   opacity: 0.7;
+}
+.mva-queue:empty {
+  display: none;
 }
 .mva-queued {
   display: flex;

@@ -217,9 +217,9 @@ export function turnMessageIndex(turnEl: HTMLElement | null): number | null {
  * Cut the transcript back at a turn: every LATER turn element goes, and the
  * read position moves onto the messages the caller has just sliced.
  *
- * Only `.mva-turn` elements are removed. `listEl` also hosts the queue node
- * (`pendingEl`, held by field), the compact divider and the band, and sweeping
- * siblings would detach a node the view still points at.
+ * Only `.mva-turn` elements are removed. `listEl` also hosts the compact
+ * divider and the band, and sweeping siblings would detach a node the view
+ * still points at.
  */
 export function cutTranscriptAfter(c: Convo, turnEl: HTMLElement): void {
   const turns = Array.from(c.listEl.querySelectorAll(".mva-turn"));

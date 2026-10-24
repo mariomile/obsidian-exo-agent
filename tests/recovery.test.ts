@@ -176,6 +176,7 @@ describe("resolveRecovery", () => {
       session: "drop-keep-id",
       nextResumeRisky: true,
       enqueueRecapRetry: false,
+      holdQueue: false,
     });
   });
 
@@ -187,6 +188,7 @@ describe("resolveRecovery", () => {
       session: "drop-clear-id",
       nextResumeRisky: false,
       enqueueRecapRetry: true,
+      holdQueue: false,
     });
   });
 
@@ -199,6 +201,7 @@ describe("resolveRecovery", () => {
       session: "drop-clear-id",
       nextResumeRisky: false,
       enqueueRecapRetry: false,
+      holdQueue: false,
     });
   });
 
@@ -210,6 +213,7 @@ describe("resolveRecovery", () => {
       session: "drop-clear-id",
       nextResumeRisky: false,
       enqueueRecapRetry: false,
+      holdQueue: false,
     });
   });
 
@@ -221,6 +225,7 @@ describe("resolveRecovery", () => {
       session: "none",
       nextResumeRisky: false,
       enqueueRecapRetry: false,
+      holdQueue: false,
     });
   });
 
@@ -232,6 +237,7 @@ describe("resolveRecovery", () => {
       session: "none",
       nextResumeRisky: false,
       enqueueRecapRetry: false,
+      holdQueue: false,
     });
   });
 
@@ -240,10 +246,19 @@ describe("resolveRecovery", () => {
     // flag stays whatever it was. Assert both values pass through unchanged.
     expect(
       resolveRecovery({ poisoned: true, stopped: true, isRecoveryRetry: false, resumeRisky: true })
-    ).toEqual({ footer: null, session: "none", nextResumeRisky: true, enqueueRecapRetry: false });
+    ).toEqual({ footer: null, session: "none", nextResumeRisky: true, enqueueRecapRetry: false, holdQueue: false });
     expect(
       resolveRecovery({ poisoned: true, stopped: true, isRecoveryRetry: false, resumeRisky: false })
-    ).toEqual({ footer: null, session: "none", nextResumeRisky: false, enqueueRecapRetry: false });
+    ).toEqual({ footer: null, session: "none", nextResumeRisky: false, enqueueRecapRetry: false, holdQueue: false });
+  });
+
+  it("holds the queue after a failure that would fail the next message too, never after a Stop", () => {
+    const base = { poisoned: false, stopped: false, isRecoveryRetry: false, resumeRisky: false };
+    expect(resolveRecovery({ ...base, authFailed: true }).holdQueue).toBe(true);
+    expect(resolveRecovery({ ...base, failed: true }).holdQueue).toBe(true);
+    expect(resolveRecovery({ ...base, failed: true, stopped: true }).holdQueue).toBe(false);
+    // A session death resumes on the next message: the queue keeps draining.
+    expect(resolveRecovery({ ...base, poisoned: true }).holdQueue).toBe(false);
   });
 });
 
@@ -314,7 +329,7 @@ describe("expired CLI login", () => {
       for (const isRecoveryRetry of [false, true]) {
         expect(
           resolveRecovery({ poisoned: true, stopped: false, isRecoveryRetry, resumeRisky, authFailed: true })
-        ).toEqual({ footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false });
+        ).toEqual({ footer: null, session: "drop-keep-id", nextResumeRisky: false, enqueueRecapRetry: false, holdQueue: true });
       }
     }
   });

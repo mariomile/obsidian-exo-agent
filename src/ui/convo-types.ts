@@ -200,7 +200,6 @@ export interface Convo {
    *  a reload there is nothing you "have not seen". */
   unread?: boolean;
   queue: QueuedMessage[];
-  pendingEl: HTMLElement | null; // container for queued-message chips
   /** The in-flight assistant turn of THIS conversation (null when idle) — the
    *  target for its session's ask_user cards, so parallel conversations can't
    *  cross-render into each other's transcripts. */
