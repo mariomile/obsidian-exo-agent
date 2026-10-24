@@ -39,7 +39,7 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 - **Interactive UI previews.** HTML and SVG blocks in replies have **Preview**, **Code**, reload and expand controls. Generated `.html`, `.htm` and `.svg` files preview in the chat and refresh when edited. Use self-contained markup with inline CSS and JavaScript; external assets, API requests and framework imports are unavailable in the sandbox.
 
 **Obsidian-native** (all toggleable in settings)
-- **Vault tools**: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note`, `append_to_note`, `update_frontmatter`, `add_links`, `open_note`. `search_vault` uses the [Sonar](https://github.com/mariomile/obsidian-sonar) index when installed. Codex reaches the same tools through a local MCP bridge.
+- **Vault tools**: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note`, `save_to_note`, `update_frontmatter`, `add_links`, `open_note`. `search_vault` uses the [Sonar](https://github.com/mariomile/obsidian-sonar) index when installed. Codex reaches the same tools through a local MCP bridge.
 - **Touched notes**: after each turn, a footer lists what the agent edited (with diff and revert) and read. Replies link the notes they mention.
 - **Memory**: your vault is Exo's memory. See [Memory](#memory).
 - **Capabilities hub**: skills, MCP servers, playbooks, automations and memory in one pane, also callable by the agent.

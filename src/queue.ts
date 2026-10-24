@@ -162,3 +162,20 @@ export async function drainExoQueue(
   }
   return done;
 }
+
+/** "New Queue request": create an empty request note in the queue folder and
+ *  open it: the same note a phone capture would write; the next drain
+ *  (5 min poll or "Drain now") answers it in place. */
+export async function createQueueRequest(app: App, folder: string): Promise<void> {
+  try {
+    if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+    const stamp = new Date();
+    const p = (x: number) => String(x).padStart(2, "0");
+    const name = `Richiesta ${stamp.getFullYear()}-${p(stamp.getMonth() + 1)}-${p(stamp.getDate())} ${p(stamp.getHours())}${p(stamp.getMinutes())}${p(stamp.getSeconds())}`;
+    const file = await app.vault.create(`${folder}/${name}.md`, "");
+    await app.workspace.getLeaf("tab").openFile(file);
+    new Notice("Write the request in the note body. Exo answers on the next drain.");
+  } catch (err) {
+    new Notice(`Couldn't create the queue request: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}

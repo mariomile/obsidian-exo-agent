@@ -94,7 +94,7 @@ export async function revertHarvestCommit(git: GitRun, sha: string): Promise<Und
 
 /** Index of the one place `block` occurs as consecutive lines, or -1 when it
  *  is missing or ambiguous. */
-function uniqueRun(lines: readonly string[], block: readonly string[]): number {
+export function uniqueRun(lines: readonly string[], block: readonly string[]): number {
   let found = -1;
   for (let i = 0; i + block.length <= lines.length; i++) {
     if (block.every((b, k) => lines[i + k] === b)) {

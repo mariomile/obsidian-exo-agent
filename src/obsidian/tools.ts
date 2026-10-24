@@ -34,7 +34,9 @@ import {
   DEFAULT_AUTOMATION_COOLDOWN_MS,
 } from "../core/automation-model";
 import { automationSlug } from "./automation-store";
-import { ok, err, getExo, pluginInstance, type Result } from "./tool-kit";
+import { ok, err, ensureParentFolder, getExo, pluginInstance, today, type Result } from "./tool-kit";
+import { buildSaveTool } from "./save-tool";
+import type { SaveReceipt } from "../core/save-undo";
 import { buildCapabilityTools, CAPABILITY_READ_TOOLS } from "./capability-tools";
 import { buildBrowserTools, BROWSER_READ_TOOLS, type BrowserBridge } from "./browser-tools";
 import { buildCollaboTools, COLLABO_READ_TOOLS, collaboBridgeFrom } from "./collabo-tools";
@@ -139,24 +141,6 @@ function slugify(s: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60) || "untitled";
 }
-function today(): string {
-  // Local date (not UTC) — toISOString() would roll to tomorrow late at night in +TZ.
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Create any missing parent folders for a vault path (vault.create won't). */
-async function ensureParentFolder(app: App, path: string): Promise<void> {
-  const slash = path.lastIndexOf("/");
-  if (slash <= 0) return;
-  const dir = path.slice(0, slash);
-  if (app.vault.getAbstractFileByPath(dir)) return;
-  try {
-    await app.vault.createFolder(dir);
-  } catch {
-    /* already exists (race) — fine */
-  }
-}
 
 /** Options bag for {@link buildObsidianTools} and {@link createObsidianToolServer}:
  *  one field per gating/bridge input. */
@@ -182,6 +166,8 @@ export interface ObsidianToolOpts {
   paths?: ExoPaths;
   /** Identity `invoke_agent` delegates as. Absent → Exo itself (chat). */
   agentCaller?: AgentCaller;
+  /** View-side: show a `save_to_note` receipt under the running turn. */
+  onSaved?: (r: SaveReceipt) => void;
 }
 
 /**
@@ -211,6 +197,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
     rethinkBridge,
     paths = exoPaths(LEGACY_MEMORY_ROOT),
     agentCaller = EXO_CALLER,
+    onSaved,
   } = opts ?? {};
   const need = (target: string): TFile => {
     const f = resolveLink(app, target);
@@ -490,17 +477,6 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
         ...(hasTags ? {} : { tags: ["type/note"] }),
       }));
       return ok(`Created [[${path}]]`);
-    }
-  );
-
-  const appendToNote = tool(
-    "append_to_note",
-    "Append text to the end of an existing note.",
-    { target: z.string(), text: z.string() },
-    async (args) => {
-      const file = need(args.target);
-      await app.vault.append(file, `\n${args.text}\n`);
-      return ok(`Appended to [[${file.path}]]`);
     }
   );
 
@@ -1127,7 +1103,7 @@ export function buildObsidianTools(app: App, opts?: ObsidianToolOpts): AnyTool[]
   return [
     searchVault, readNote, getBacklinks, getNeighborhood, getConnections, listNotes, listTags, getActiveContext,
     listAnnotations, listSonarActions, askUser, listLoops,
-    createNote, appendToNote, updateFrontmatter, addLinks, linkMentions, ignoreMentionTool, openNote,
+    createNote, buildSaveTool(app, convoId, onSaved), updateFrontmatter, addLinks, linkMentions, ignoreMentionTool, openNote,
     editNote, insertAtCursor, renameNote, resolveAnnotation, runSonarAction,
     listAgents, invokeAgent, manageAgent,
     listAutomations, savePlaybook, manageAutomation, reviewAutomationRun,

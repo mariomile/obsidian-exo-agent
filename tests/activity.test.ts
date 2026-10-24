@@ -29,6 +29,9 @@ describe("describeActivity — writes", () => {
   it("Edit → basename", () => {
     expect(describeActivity("Edit", { file_path: "Atlas/GTM.md" })).toBe("Writing GTM");
   });
+  it("mcp__obsidian__save_to_note reads as a write", () => {
+    expect(describeActivity("mcp__obsidian__save_to_note", { path: "Projects/Pricing.md" })).toBe("Writing Pricing");
+  });
   it("mcp__obsidian__create_note → path basename", () => {
     expect(describeActivity("mcp__obsidian__create_note", { path: "Inbox/New Idea.md" })).toBe(
       "Writing New Idea"
