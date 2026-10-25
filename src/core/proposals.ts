@@ -3,19 +3,20 @@
  *
  * This module deliberately has no Obsidian imports and performs no IO. Model
  * output enters through `parseProposalCandidates`; only validated records may
- * later be routed to a side-effecting store. Memory kinds (loop, decision) are
- * routed as soon as they are validated and deduped; the action kinds
- * (playbook, correction) are routed only once the user accepts them.
+ * later be routed to a side-effecting store. Vault kinds (loop, decision,
+ * correction) are routed as soon as they are validated and deduped; a playbook
+ * is routed only once the user accepts it.
  */
 
 export type ProposalKind = "loop" | "decision" | "playbook" | "correction";
 /**
- * Memory kinds (open-loops ledger, decisions) are written the moment they are
- * validated and deduped: review happens after the fact, never before. Actions
- * (`playbook`, `correction`) stay pending until the user accepts.
+ * Vault kinds (open-loops ledger, decisions, corrections to a note) are written
+ * the moment they are validated and deduped, each with its undo: review happens
+ * after the fact, never before. A `playbook` changes Exo's own settings, so it
+ * stays pending until the user accepts.
  */
 export function isMemoryProposalKind(kind: ProposalKind): boolean {
-  return kind === "loop" || kind === "decision";
+  return kind !== "playbook";
 }
 
 export type ProposalStatus = "pending" | "accepted" | "dismissed";
@@ -463,6 +464,16 @@ export function evaluateProposal(
   if (duplicate) return { status: "duplicate", value: candidate, duplicateOf: duplicate };
   if (candidate.kind === "correction" && closed.includes(fingerprint)) return { status: "duplicate", value: candidate };
   return { status: "ok", value: candidate };
+}
+
+/**
+ * Model output (the post-turn extractor, an agent run's block) is untrusted
+ * text: it may propose loops, decisions and playbooks, never a correction,
+ * which is written on append. Corrections come only from recall's markers and
+ * the `propose_correction` tool, which quote the note as it reads now.
+ */
+export function fromModelOutput(candidates: readonly ProposalCandidate[]): ProposalCandidate[] {
+  return candidates.filter((candidate) => candidate.kind !== "correction");
 }
 
 /** Closed correction fingerprints kept past pruning: far more than recall

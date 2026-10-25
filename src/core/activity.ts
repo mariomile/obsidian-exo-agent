@@ -56,7 +56,7 @@ export function describeActivity(name: string, input: unknown): string {
     }
     case "mcp__obsidian__propose_correction": {
       const p = base(asStr(i.path));
-      return p ? `Proposing a correction to ${p}` : "Proposing a correction";
+      return p ? `Correcting ${p}` : "Correcting a note";
     }
     case "WebSearch": {
       const q = asStr(i.query).trim();

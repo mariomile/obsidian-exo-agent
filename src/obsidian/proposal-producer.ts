@@ -1,4 +1,5 @@
 import {
+  fromModelOutput,
   parseProposalCandidates,
   type ProposalRecord,
 } from "../core/proposals";
@@ -224,9 +225,10 @@ export async function produceTurnProposals(
     return { status: "failed", reason: "invalid_output" };
   }
 
+  const candidates = fromModelOutput(parsed.value);
   const totals: AppendTotals = { appended: 0, saved: [], duplicates: 0, invalid: 0 };
   try {
-    for (const candidate of parsed.value) {
+    for (const candidate of candidates) {
       countAppend(await deps.store.append(candidate, input.source), totals);
     }
   } catch (error) {
@@ -236,7 +238,7 @@ export async function produceTurnProposals(
 
   return {
     status: "generated",
-    candidates: parsed.value.length,
+    candidates: candidates.length,
     ...totals,
   };
 }
