@@ -93,6 +93,14 @@ describe("planCorrection: frontmatter", () => {
     expect("error" in r ? r.error : "ok").toBe("ok");
   });
 
+  it("a key followed by a blank line and a comment keeps both, and undo gives back the exact bytes", () => {
+    const spaced = "---\nstatus: active\n\n# links\nsupersedes: \"[[older]]\"\n---\nBody.\n";
+    const { next, receipt } = done(planCorrection(spaced, { type: "frontmatter", set: { status: "superseded" }, before: { status: "status: active" } }, META));
+    expect(next).toBe("---\nstatus: \"superseded\"\n\n# links\nsupersedes: \"[[older]]\"\n---\nBody.\n");
+    expect(receipt).toMatchObject({ keys: [{ key: "status", before: ["status: active"] }] });
+    expect(undone(next, receipt)).toBe(spaced);
+  });
+
   it("keeps CRLF line endings", () => {
     const crlf = note.replace(/\n/g, "\r\n");
     const { next, receipt } = done(planCorrection(crlf, { type: "frontmatter", set, before }, META));

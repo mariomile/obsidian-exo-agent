@@ -6,6 +6,7 @@ import { SaveLog } from "../src/obsidian/save-log";
 import { buildObsidianTools } from "../src/obsidian/tools";
 import { renderSaveReceipt } from "../src/ui/save-receipt";
 import type { Provenance } from "../src/core/block-patch";
+import { CorrectionFailure } from "../src/core/correction";
 import type { SaveReceipt } from "../src/core/save-undo";
 import { FakeEl, asEl } from "./fake-dom";
 
@@ -335,6 +336,7 @@ describe("noteCorrections (corrections written on proposal)", () => {
     const msg = "old changed since this correction was proposed. Nothing was written: open the note to fix it by hand.";
     const shown = Notice.last;
     await expect(target.apply({ ...input, path: "D/old.md", change })).rejects.toThrow(msg);
+    await expect(target.apply({ ...input, path: "D/old.md", change })).rejects.toMatchObject({ code: "stale" });
     expect(Notice.last).toBe(shown);
     expect(notes.get("D/old.md")).toBe(note);
     expect(await log.list()).toEqual([]);
@@ -351,6 +353,9 @@ describe("noteCorrections (corrections written on proposal)", () => {
       .rejects.toThrow("The outdated line is no longer in N. Open the note to fix it by hand.");
     await expect(target.apply({ ...input, path: "Two.md", change: { type: "line", oldLine: "- x", newLine: "- y" } }))
       .rejects.toThrow("The outdated line appears more than once in Two. Open the note to fix it by hand.");
+    const failure = await target.apply({ ...input, path: "Two.md", change: { type: "line", oldLine: "- x", newLine: "- y" } }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(CorrectionFailure);
+    expect((failure as CorrectionFailure).code).toBe("line-ambiguous");
     await expect(target.apply({ ...input, path: "Gone.md", change: { type: "line", oldLine: "- x", newLine: "- y" } }))
       .rejects.toThrow("Note not found: Gone.md");
     expect(notes.get("Two.md")).toBe("- x\n- x\n");

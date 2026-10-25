@@ -730,7 +730,7 @@ describe("recallForTurn", () => {
         vault: {
           getMarkdownFiles: () => [old, cur],
           getAbstractFileByPath: (p: string) => (p === old.path ? Object.assign(new TFile(), old) : null),
-          cachedRead: async () => "---\nstatus: active\n---\nLean vault.\n",
+          read: async () => "---\nstatus: active\n---\nLean vault.\n",
         },
         metadataCache: {
           getFileCache: (f: { path: string }) =>

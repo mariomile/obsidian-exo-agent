@@ -33,12 +33,15 @@ function topLevelKey(line: string): string | null {
   return raw;
 }
 
-/** Where `key`'s block (its line plus indented continuation lines) sits. */
+/** Where `key`'s block (its line plus indented continuation lines) sits.
+ *  Blank and comment lines after the value belong to what follows, not to the
+ *  key: replacing, removing and restoring a key leave them where they are. */
 function keySpan(lines: readonly string[], key: string): { start: number; end: number } | null {
   const start = lines.findIndex((candidate) => topLevelKey(candidate) === key);
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length && topLevelKey(lines[end]) === null) end++;
+  while (end > start + 1 && /^\s*(?:#.*)?$/.test(lines[end - 1])) end--;
   return { start, end };
 }
 

@@ -441,11 +441,13 @@ function resolutionTime(record: ProposalRecord): number {
 }
 
 /**
- * Pending records always deduplicate. Accepted records deduplicate through the
+ * Pending records deduplicate. Accepted records deduplicate through the
  * inclusive 30-day window; dismissed and older accepted records do not, except
  * a correction: recall finds the same fix every turn, so one Mario accepted or
  * turned down never comes back. `closed` holds those corrections'
- * fingerprints past pruning (`closeCorrection`).
+ * fingerprints past pruning (`closeCorrection`). A pending correction is a
+ * write that failed (the note was missing, say) and does not block: the next
+ * sweep tries again, and the store replaces the stale record.
  */
 export function evaluateProposal(
   candidate: ProposalCandidate,
@@ -457,9 +459,9 @@ export function evaluateProposal(
   const cutoff = now - PROPOSAL_LIMITS.resolvedRetentionDays * DAY_MS;
   const duplicate = existing.find((record) =>
     record.fingerprint === fingerprint
-    && (record.status === "pending"
-      || record.kind === "correction"
-      || (record.status === "accepted" && resolutionTime(record) >= cutoff))
+    && (record.kind === "correction"
+      ? record.status !== "pending"
+      : record.status === "pending" || (record.status === "accepted" && resolutionTime(record) >= cutoff))
   );
   if (duplicate) return { status: "duplicate", value: candidate, duplicateOf: duplicate };
   if (candidate.kind === "correction" && closed.includes(fingerprint)) return { status: "duplicate", value: candidate };

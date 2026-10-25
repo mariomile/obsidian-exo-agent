@@ -74,3 +74,42 @@ describe("SaveLog", () => {
     expect(box.corrupt).toEqual(["{not json"]);
   });
 });
+
+describe("SaveLog: the cap is per kind", () => {
+  const correction = (id: string): SaveReceipt => ({ ...receipt(id), op: "frontmatter", lines: ['status: "superseded"'] });
+  const replaced = (id: string): SaveReceipt => ({ ...receipt(id), op: "replace", replaced: "old" });
+
+  it("60 corrections do not push out the newest 50 saves", async () => {
+    const { file } = memFile();
+    const log = new SaveLog(file);
+    for (let i = 0; i < MAX_SAVES; i++) await log.record(receipt(`save-${i}`));
+    for (let i = 0; i < 60; i++) await log.record(i % 2 ? correction(`fix-${i}`) : replaced(`fix-${i}`));
+    const all = await log.list();
+    expect(all.filter((r) => r.op === "insert")).toHaveLength(MAX_SAVES);
+    expect(all.filter((r) => r.op !== "insert")).toHaveLength(MAX_SAVES);
+    expect(all.some((r) => r.id === "save-0")).toBe(true);
+    expect(all.some((r) => r.id === "fix-59")).toBe(true);
+    expect(all.some((r) => r.id === "fix-9")).toBe(false);
+  });
+
+  it("60 saves do not push out the newest 50 corrections", async () => {
+    const { file } = memFile();
+    const log = new SaveLog(file);
+    for (let i = 0; i < MAX_SAVES; i++) await log.record(correction(`fix-${i}`));
+    for (let i = 0; i < 60; i++) await log.record(receipt(`save-${i}`));
+    const all = await log.list();
+    expect(all.filter((r) => r.op === "frontmatter")).toHaveLength(MAX_SAVES);
+    expect(all.filter((r) => r.op === "insert")).toHaveLength(MAX_SAVES);
+    expect(all.some((r) => r.id === "fix-0")).toBe(true);
+    expect(all.some((r) => r.id === "save-9")).toBe(false);
+  });
+
+  it("keeps newest first across both kinds", async () => {
+    const { file } = memFile();
+    const log = new SaveLog(file);
+    await log.record(receipt("a"));
+    await log.record(correction("b"));
+    await log.record(receipt("c"));
+    expect((await log.undoable()).map((r) => r.id)).toEqual(["c", "b", "a"]);
+  });
+});

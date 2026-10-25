@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { applySupersede, buildSupersedeIndex, formatSupersede, markersOf, type NoteMarkers } from "../src/core/supersede";
+import { applySupersede, buildSupersedeIndex, formatSupersede, markerKeys, markersOf, type MarkerFix, type NoteMarkers } from "../src/core/supersede";
+import { correctionCandidate, parseProposalCandidates, PROPOSAL_LIMITS } from "../src/core/proposals";
 
 const D = "_system/memory/decisions";
 const p = (name: string): string => `${D}/${name}.md`;
@@ -228,5 +229,59 @@ describe("formatSupersede", () => {
       "  - Pro tier is 39 euro (dal 2026-10-24; prima Pro tier is 29 euro)",
     );
     expect(formatSupersede("- [ ] ship at 29", "ship at 39", "2026-10-24")).toBe("- [ ] ship at 39 (dal 2026-10-24; prima ship at 29)");
+  });
+});
+
+describe("markerKeys: never overwrite what the note already says", () => {
+  const fix: MarkerFix = { path: p("a"), set: { status: "superseded", superseded_by: "[[C]]" }, because: "c lists a." };
+  const note = (fm: string) => `---\n${fm}\n---\nBody\n`;
+
+  it("without the note's text it is the whole fix", () => {
+    expect(markerKeys(fix)).toEqual({ status: "superseded", superseded_by: "[[C]]" });
+  });
+
+  it("an empty or absent superseded_by is written", () => {
+    for (const fm of ["status: active", "status: active\nsuperseded_by:", 'status: active\nsuperseded_by: ""', "status: active\nsuperseded_by: null", "status: active\nsuperseded_by: []"]) {
+      expect(markerKeys(fix, note(fm))).toEqual({ status: "superseded", superseded_by: "[[C]]" });
+    }
+  });
+
+  it("any non-empty superseded_by is left alone: quoted, unquoted wikilink, bare list, plain text, block list", () => {
+    for (const value of ['"[[B]]"', "[[B]]", "[B]", "B", "'[[B]]'"]) {
+      expect(markerKeys(fix, note(`status: active\nsuperseded_by: ${value}`))).toEqual({ status: "superseded" });
+    }
+    expect(markerKeys(fix, note("status: active\nsuperseded_by:\n  - \"[[B]]\""))).toEqual({ status: "superseded" });
+  });
+
+  it("a status that already says superseded is left alone, in any quoting", () => {
+    for (const value of ["superseded", '"superseded"', "'superseded'", "superseded # why"]) {
+      expect(markerKeys(fix, note(`status: ${value}`))).toEqual({ superseded_by: "[[C]]" });
+    }
+  });
+
+  it("nothing is left when both are already there", () => {
+    expect(markerKeys(fix, note("status: superseded\nsuperseded_by: [[B]]"))).toEqual({});
+  });
+});
+
+describe("a fix's explanation always validates", () => {
+  it("many broken links are cut, the structural reason stays first", () => {
+    const names = Array.from({ length: 40 }, (_, i) => `2025-01-${String(i + 10)}-gone-note-with-a-long-name`);
+    const { fixes } = buildSupersedeIndex([
+      note("2026-01-01-a", { supersededBy: names.map(p) }),
+      note("2026-02-01-b", { supersedes: [p("2026-01-01-a")] }),
+    ]);
+    expect(fixes).toHaveLength(1);
+    const because = fixes[0].because;
+    expect(because.length).toBeLessThanOrEqual(PROPOSAL_LIMITS.rationale);
+    expect(because.startsWith("2026-02-01-b lists this note in supersedes")).toBe(true);
+    expect(because.endsWith("…")).toBe(true);
+    const c = correctionCandidate(fixes[0].path, { type: "frontmatter", set: markerKeys(fixes[0]), before: {} }, because);
+    expect(parseProposalCandidates(JSON.stringify([{ ...c.payload, rationale: c.rationale }])).status).toBe("ok");
+  });
+
+  it("a short explanation is untouched", () => {
+    const { fixes } = buildSupersedeIndex([note("2026-01-01-a"), note("2026-02-01-b", { supersedes: [p("2026-01-01-a")] })]);
+    expect(fixes[0].because).toBe("2026-02-01-b lists this note in supersedes, but it is not marked as superseded.");
   });
 });

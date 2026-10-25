@@ -6,7 +6,7 @@
  */
 import { Notice, TFile, type App } from "obsidian";
 import type ExoPlugin from "../main";
-import { planCorrection, type CorrectionError } from "../core/correction";
+import { CorrectionFailure, planCorrection, type CorrectionError } from "../core/correction";
 import { formatSaveBlock, newAnchor, planInsert, type PatchPlan, type Provenance, type SaveBlock } from "../core/block-patch";
 import { sectionIsList, type SaveTarget } from "../core/save-target";
 import { planUndo, receiptFor, type SaveReceipt, type UndoPlan } from "../core/save-undo";
@@ -83,7 +83,7 @@ export function noteCorrections(
       });
       if (!made) throw new Error(`Note not found: ${path}`);
       if ("error" in made) {
-        throw new Error(CORRECTION_ERROR[made.error](file.basename));
+        throw new CorrectionFailure(made.error, CORRECTION_ERROR[made.error](file.basename));
       }
       await log().record(made.receipt);
       noteWrite([path]);

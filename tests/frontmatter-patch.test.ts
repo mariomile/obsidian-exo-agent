@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { patchFrontmatter, setFrontmatterKeyLines } from "../src/core/frontmatter-patch";
+import { frontmatterKeyLines, patchFrontmatter, setFrontmatterKeyLines } from "../src/core/frontmatter-patch";
 
 describe("patchFrontmatter", () => {
   it("preserves unrelated unquoted wikilinks byte-for-byte", () => {
@@ -48,5 +48,32 @@ describe("patchFrontmatter", () => {
       `---\r\nstatus: "superseded"\r\nsuperseded_by: "[[B]]"\r\n---\r\n# Note\r\nBody\r\n`
     );
     expect(setFrontmatterKeyLines("# Note\r\n", "status", ["status: active"])).toBe("---\r\nstatus: active\r\n---\r\n# Note\r\n");
+  });
+});
+
+describe("a key's span ends at its value", () => {
+  const input = "---\nstatus: active\n\n# group two\nsuperseded_by: \"[[A]]\"\n\n  # indented note\ntags:\n  - vault\n  # kept inside the list\n  - x\n\n# trailing\n---\nBody\n";
+
+  it("replacing a key leaves the blank and comment lines after it where they are", () => {
+    expect(patchFrontmatter(input, { status: "superseded" })).toBe(input.replace("status: active", 'status: "superseded"'));
+    expect(patchFrontmatter(input, { superseded_by: "[[B]]" })).toBe(input.replace('"[[A]]"', '"[[B]]"'));
+  });
+
+  it("a block value keeps a comment inside the list but not the ones after it", () => {
+    expect(frontmatterKeyLines(input, "tags")).toEqual(["tags:", "  - vault", "  # kept inside the list", "  - x"]);
+    expect(frontmatterKeyLines(input, "status")).toEqual(["status: active"]);
+    expect(patchFrontmatter(input, { tags: ["y"] })).toBe(input.replace("tags:\n  - vault\n  # kept inside the list\n  - x", 'tags: ["y"]'));
+  });
+
+  it("removing a key keeps the lines after it", () => {
+    expect(patchFrontmatter(input, {}, ["status"])).toBe(input.replace("status: active\n", ""));
+  });
+
+  it("read, write and undo agree: putting the key's lines back restores every byte", () => {
+    for (const key of ["status", "superseded_by", "tags"]) {
+      const before = frontmatterKeyLines(input, key);
+      const next = patchFrontmatter(input, { [key]: "new" });
+      expect(setFrontmatterKeyLines(next, key, before)).toBe(input);
+    }
   });
 });

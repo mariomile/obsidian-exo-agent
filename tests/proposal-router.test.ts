@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { CorrectionFailure } from "../src/core/correction";
 import type { ProposalPayload, ProposalRecord } from "../src/core/proposals";
 import {
   routeAcceptedProposal,
@@ -114,6 +115,16 @@ describe("routeAcceptedProposal", () => {
       });
     }
   );
+
+  it("hands a correction that no longer applies back with its code", async () => {
+    const d = deps();
+    vi.mocked(d.corrections.apply).mockRejectedValue(new CorrectionFailure("stale", "old changed since this correction was proposed."));
+    await expect(routeAcceptedProposal(record("correction"), d)).resolves.toEqual({
+      ok: false,
+      error: "old changed since this correction was proposed.",
+      code: "stale",
+    });
+  });
 
   it("rejects a runtime-corrupt kind/payload mismatch before invoking dependencies", async () => {
     const d = deps();

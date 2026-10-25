@@ -10,6 +10,7 @@ import {
   type ProposalRecord,
   type ProposalValidationError,
 } from "../core/proposals";
+import { isGoneCorrection, type CorrectionError } from "../core/correction";
 import { WriteQueue } from "../core/write-queue";
 
 export const PROPOSALS_FILE = "proposals.json";
@@ -61,12 +62,15 @@ export type AppendProposalResult =
   /** A memory kind (loop, decision) already written to its target. */
   | { status: "applied"; record: ProposalRecord; target: string; path: string }
   | { status: "duplicate"; duplicateOf?: ProposalRecord }
+  /** A correction that could not apply (the note moved on): removed, fingerprint not closed. */
+  | { status: "dropped"; error: string }
   | { status: "invalid"; errors: ProposalValidationError[] };
 
 export type ProposalRouteResult =
   /** `path` is the note the write landed in, when it differs from `target`. */
   | { ok: true; target: string; path?: string }
-  | { ok: false; error: string };
+  /** `code` says why a correction was refused (see `isGoneCorrection`). */
+  | { ok: false; error: string; code?: CorrectionError };
 
 export type ProposalAcceptResult =
   | { ok: true; target: string; record: ProposalRecord; alreadyAccepted?: boolean }
@@ -292,6 +296,11 @@ export class ProposalStore {
         data.metrics.duplicates += 1;
         return { status: "duplicate", duplicateOf: duplicate.duplicateOf };
       }
+      // A failed earlier write of this correction is replaced by this attempt.
+      const fingerprint = fingerprintProposal(clean.payload);
+      if (clean.kind === "correction") {
+        data.records = data.records.filter((r) => !(r.kind === "correction" && r.status === "pending" && r.fingerprint === fingerprint));
+      }
       const record: ProposalRecord = {
         id: proposalId(clean, source, data.records),
         kind: clean.kind,
@@ -299,7 +308,7 @@ export class ProposalStore {
         title: clean.title,
         payload: clean.payload,
         rationale: clean.rationale,
-        fingerprint: fingerprintProposal(clean.payload),
+        fingerprint,
         source: { ...source },
       };
       data.records.push(record);
@@ -307,9 +316,8 @@ export class ProposalStore {
       // pending with its error, so the inbox still offers Retry.
       if (!isMemoryProposalKind(record.kind)) return { status: "appended", record };
       const routed = await this.applyRoute(data, record);
-      return routed.ok
-        ? { status: "applied", record, target: routed.target, path: routed.path ?? routed.target }
-        : { status: "appended", record };
+      if (routed.ok) return { status: "applied", record, target: routed.target, path: routed.path ?? routed.target };
+      return routed.dropped ? { status: "dropped", error: routed.error } : { status: "appended", record };
     });
   }
 
@@ -338,7 +346,7 @@ export class ProposalStore {
   }
 
   /** Route one record and book the outcome. Runs inside the caller's queue turn. */
-  private async applyRoute(data: ProposalStoreData, record: ProposalRecord): Promise<ProposalRouteResult> {
+  private async applyRoute(data: ProposalStoreData, record: ProposalRecord): Promise<ProposalRouteResult & { dropped?: boolean }> {
     let routed: ProposalRouteResult;
     try {
       routed = await this.route(record);
@@ -348,7 +356,12 @@ export class ProposalStore {
     if (!routed.ok) {
       data.metrics.routeErrors += 1;
       record.lastError = routed.error;
-      return routed;
+      // A correction whose note moved on can never apply as proposed and
+      // Mario cannot act on it: it leaves the Inbox. Its fingerprint stays
+      // open, so a later derivation from fresh content can retry.
+      const dropped = record.kind === "correction" && isGoneCorrection(routed.code);
+      if (dropped) data.records = data.records.filter((r) => r !== record);
+      return { ...routed, dropped };
     }
     record.status = "accepted";
     record.resolvedAt = Date.now();
