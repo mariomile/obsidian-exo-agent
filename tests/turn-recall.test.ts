@@ -12,7 +12,6 @@ import {
   recallKeywords,
   recallQueries,
   recallTurn,
-  turnKeywords,
   semanticHits,
   shouldRecall,
   titleLane,
@@ -263,6 +262,25 @@ describe("titleLane", () => {
     expect(lane(["claude"], [claude], "apri [[Claude|il file]] adesso")[0].explicit).toBe(true);
     expect(lane(["claude"], [claude], "ask Claude to rewrite")[0].explicit).toBe(false);
   });
+  it("a link marks the note explicit only when it ends the name: [[Open Core]] does not write out a note named Open", () => {
+    const open = note("T/Open.md");
+    expect(lane(["open"], [open], "leggi [[Open Core]] adesso")[0].explicit).toBe(false);
+    expect(lane(["open"], [open], "leggi [[Open]] adesso")[0].explicit).toBe(true);
+    expect(lane(["open"], [open], "leggi [[Open#Piani]] adesso")[0].explicit).toBe(true);
+    expect(lane(["open"], [open], "leggi [[Open|il file]] adesso")[0].explicit).toBe(true);
+  });
+  it("a file name marks the note explicit only when it is the whole name: subagents.md does not write out a note named agents", () => {
+    const agents = note("T/agents.md");
+    expect(lane(["agents"], [agents], "controlla subagents.md adesso")[0].explicit).toBe(false);
+    expect(lane(["agents"], [agents], "controlla agents.md adesso")[0].explicit).toBe(true);
+    expect(lane(["agents"], [agents], "controlla (agents.md) adesso")[0].explicit).toBe(true);
+    expect(lane(["agents"], [agents], "agents.md dice")[0].explicit).toBe(true);
+  });
+  it("a basename with regex characters is matched literally", () => {
+    const cpp = note("T/C++ (guida).md");
+    expect(lane(["guida", "c"], [cpp], "apri [[C++ (guida)]] ora")[0].explicit).toBe(true);
+    expect(lane(["guida", "c"], [cpp], "apri C++ guida ora")[0].explicit).toBe(false);
+  });
   it("every non-stopword 3-char word of a name counts in its coverage: 'win this deal' is not How to Win in the Ai Age", () => {
     expect(lane(["win", "deal"], [note("R/How to Win in the Ai Age.md")])).toEqual([]);
     expect(lane(["win", "age"], [note("R/How to Win in the Ai Age.md")])).toEqual([{ path: "R/How to Win in the Ai Age.md", shared: 2, whole: true, short: true, explicit: false }]);
@@ -349,6 +367,17 @@ describe("rankRecall fusion", () => {
     expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
     expect(rankRecall({ sonar: [n("Turno Open Core.md"), n("CLAUDE.md")], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("CLAUDE.md");
   });
+  it("with a head (a long message) a title hit beyond it needs the search or an explicit mention; the head's own names stand on their name", () => {
+    const named = { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true, explicit: false };
+    const chance = { path: "Knowledge/Product Manager.md", shared: 2, whole: true, explicit: false };
+    const written = { path: "Knowledge/Roadmap Q4.md", shared: 2, whole: true, explicit: true };
+    const head = new Set([named.path]);
+    const paths = (sonar: NoteRecall[], withHead?: ReadonlySet<string>) =>
+      rankRecall({ sonar, title: [named, chance, written], lexicalChats: [], semanticChats: null }, { ...opts, head: withHead }).notes.map((x) => x.path);
+    expect(paths([], head)).toEqual([named.path, written.path]);
+    expect(paths([n(chance.path)], head)).toEqual([chance.path, named.path, written.path]);
+    expect(paths([], undefined)).toEqual([named.path, chance.path, written.path]);
+  });
   it("a note in two lanes still beats a title-only hub", () => {
     const sonar = ["Companies/Exo.md"].map(n);
     const title = [
@@ -421,7 +450,7 @@ describe("recallTurn", () => {
     const search = vi.fn(() => Promise.resolve([]));
     await recallTurn({ ...base, names: names.slice(2), message: "what is the status of Exo today", search });
     expect(search).toHaveBeenCalledWith("status today");
-    expect(turnKeywords("what is the status of Exo today", names)).toEqual(["status", "exo", "today"]);
+    expect(recallKeywords("what is the status of Exo today", nameVocab(names))).toEqual(["status", "exo", "today"]);
   });
   it("the project hub keeps its lead over the same-named company card when Sonar found both", async () => {
     const search = () => Promise.resolve([hit("Projects/Exo/Exo.md"), hit("Companies/Exo.md")]);
@@ -488,12 +517,20 @@ describe("recallTurn", () => {
     const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
     const withNames = [...names, { path: "D/Open Core.md", basename: "Open Core", aliases: [] }];
     const long = await recallTurn({ ...base, names: withNames, message: `${filler} open core` });
-    expect(long!.lanes.title).toEqual([]);
+    expect(long!.lanes.title.map((t) => t.path)).toEqual(["D/Open Core.md"]);
     expect(long!.notes).toEqual([]);
     const written = await recallTurn({ ...base, names: withNames, message: `${filler} leggi [[open core]]` });
     expect(written!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
     const short = await recallTurn({ ...base, names: withNames, message: "cosa dice open core" });
     expect(short!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
+  });
+  it("a name inside the first ten keywords comes in on its name alone however long the message gets: no cliff at the eleventh keyword", async () => {
+    const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const withNames = [...names, { path: "D/Open Core.md", basename: "Open Core", aliases: [] }];
+    const short = await recallTurn({ ...base, names: withNames, message: "cosa dice open core oggi" });
+    const long = await recallTurn({ ...base, names: withNames, message: `cosa dice open core oggi ${filler}` });
+    expect(short!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
+    expect(long!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
   });
   it("past chats are still matched on the first ten keywords only", async () => {
     const chat: ChatRecord = { id: "c", title: "t", messages: [{ role: "user", text: "tardiva zeta tardiva zeta", at: NOW - DAY }] };
@@ -519,7 +556,7 @@ describe("recallQueries", () => {
   const none = new Set<string>();
   it("a message of ten keywords or fewer is one query, the same words recall always searched", () => {
     const msg = `cosa abbiamo deciso su ${nums(6)} ieri`;
-    expect(recallQueries(msg, none)).toEqual([turnKeywords(msg, []).join(" ")]);
+    expect(recallQueries(msg, none)).toEqual([recallKeywords(msg, none).join(" ")]);
     expect(recallQueries(`mmm ${nums(10)}`, none)).toEqual([nums(10)]);
     expect(recallQueries("mmm", none)).toEqual([]);
   });

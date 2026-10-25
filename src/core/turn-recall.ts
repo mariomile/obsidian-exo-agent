@@ -33,11 +33,10 @@ const MIN_WORDS = 4;
 const MAX_KEYWORDS = 10;
 /** A message longer than {@link MAX_KEYWORDS} keywords is searched in chunks of
  *  this many (a long OR query lets the many common words outvote the few that
- *  name the note), at most {@link MAX_QUERY_KEYWORDS} keywords in all. */
+ *  name the note). */
 const QUERY_CHUNK = 8;
+/** How many keywords of a long message the vault search and the title lane read. */
 const MAX_QUERY_KEYWORDS = 24;
-/** The title lane reads this many keywords: a name costs nothing to look up. */
-const MAX_TITLE_KEYWORDS = 48;
 
 /** Short messages ("ok", "go on") and slash commands carry nothing to recall on. */
 export function shouldRecall(message: string): boolean {
@@ -223,10 +222,19 @@ export interface TitleHit {
   /** Set when every shared word has three letters: too weak to inject a note
    *  unless the vault search found it too ({@link rankRecall}). */
   short?: true;
-  /** The message writes the note out: `<basename>.md` or `[[<basename>`. That
-   *  is a reference, not a word that happens to be a name, so it needs no
-   *  vault-search hit ({@link rankRecall}). */
+  /** The message writes the note out: `<basename>.md` or a `[[<basename>]]`
+   *  link (also `|` or `#` after the name). That is a reference, not a word
+   *  that happens to be a name, so it needs no vault-search hit
+   *  ({@link rankRecall}). */
   explicit: boolean;
+}
+
+/** Whether the message writes the note out: a link to it (`[[name]]`,
+ *  `[[name|alias]]`, `[[name#heading]]`) or its file name (`name.md`, not the
+ *  tail of `subagents.md`). `text` is lower-cased. */
+function writesOut(text: string, base: string): boolean {
+  const name = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\[\\[${name}(\\]\\]|\\||#)|(^|[^\\p{L}\\p{N}])${name}\\.md`, "u").test(text);
 }
 
 /**
@@ -257,7 +265,7 @@ export function titleLane(
     }
     if (!best) continue;
     const base = note.basename.toLowerCase();
-    hits.push({ path: note.path, ...best, explicit: text.includes(`${base}.md`) || text.includes(`[[${base}`) });
+    hits.push({ path: note.path, ...best, explicit: writesOut(text, base) });
   }
   return hits
     .sort(
@@ -337,6 +345,11 @@ export const RECALL_CHAT_MIN_RARE_HITS = 3;
  *    only reorder the notes the search would inject anyway ("Orchestration
  *    Board" for "Orchestration Board Ideas" must not push out the decision
  *    about it).
+ *  - A long message (`opts.head` set) shares words with many names by chance,
+ *    so a title hit beyond the names its first {@link MAX_KEYWORDS} keywords
+ *    already give (`head`, the paths those name) comes in only if the vault
+ *    search found the note too, or the message writes it out. The names in the
+ *    first ten words count as they would in a short message.
  *  - With `supersede`, a superseded note gives its slot to the current one and
  *    stays right below it, labelled.
  *  - A lexical chat is injected only if the semantic lane stands behind it; with
@@ -346,12 +359,13 @@ export const RECALL_CHAT_MIN_RARE_HITS = 3;
  *    `semanticChats`). */
 export function rankRecall(
   lanes: RecallLanes,
-  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex },
+  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex; head?: ReadonlySet<string> },
 ): { notes: NoteRecall[]; chats: ChatRecall[] } {
   const found = new Set(lanes.sonar.map((n) => n.path));
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
   const title = lanes.title
     .filter((t) => {
+      if (opts.head && !opts.head.has(t.path) && !t.explicit && !found.has(t.path)) return false;
       if (!t.explicit && (t.short || (t.shared < 2 && !isHub(t.path))) && !found.has(t.path)) return false;
       return t.whole || (t.shared >= 3 ? found : injected).has(t.path);
     })
@@ -397,15 +411,9 @@ export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly 
   return block;
 }
 
-/** The keywords of a turn: {@link recallKeywords} with the 3-letter words the
- *  vault names ({@link nameVocab}). */
-export function turnKeywords(message: string, names: readonly { basename: string; aliases: readonly string[] }[]): string[] {
-  return recallKeywords(message, nameVocab(names));
-}
-
 /** The vault searches of a turn, shared by the adapter and the eval: one query
- *  of the {@link turnKeywords} when the message has ten keywords or fewer, else
- *  near-equal chunks of at most {@link QUERY_CHUNK} over its first
+ *  of the {@link recallKeywords} when the message has ten keywords or fewer,
+ *  else near-equal chunks of at most {@link QUERY_CHUNK} over its first
  *  {@link MAX_QUERY_KEYWORDS} (17 keywords are 6, 6 and 5, never 8, 8 and 1: a
  *  one-word query would rank its first hit level with a full chunk's). */
 export function recallQueries(message: string, vocab: ReadonlySet<string>): string[] {
@@ -451,16 +459,14 @@ export async function recallTurn(input: {
   const keywords = recallKeywords(input.message, vocab);
   if (!keywords.length) return null;
   const scores = input.semantic();
-  const wide = recallKeywords(input.message, vocab, MAX_TITLE_KEYWORDS);
+  const wide = recallKeywords(input.message, vocab, MAX_QUERY_KEYWORDS);
   // A failed search leaves the other queries, the chats and the title lane.
   const searched = await Promise.all(recallQueries(input.message, vocab).map((q) => input.search(q).catch((): NoteRecall[] => [])));
   // Cut to the lane depth after fusing: `found` ({@link rankRecall}) must not widen with the chunks.
   const sonar = (searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path)).slice(0, RECALL_LANE_DEPTH);
-  // A long message shares words with many names by chance, so its title hits
-  // count only where the search found the note too, or the message writes it out.
-  const found = new Set(sonar.map((n) => n.path));
-  const named = titleLane(wide, input.names, input.message);
-  const title = (wide.length > MAX_KEYWORDS ? named.filter((t) => t.explicit || found.has(t.path)) : named).slice(0, RECALL_LANE_DEPTH);
+  const title = titleLane(wide, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
+  // Only what the widening added is gated ({@link rankRecall}): the names the first ten keywords give stand as they always did.
+  const head = wide.length > MAX_KEYWORDS ? new Set(titleLane(keywords, input.names, input.message).map((t) => t.path)) : undefined;
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
   const scored = await scores;
   const hits = scored && semanticHits(scored);
@@ -470,5 +476,5 @@ export async function recallTurn(input: {
     lexicalChats,
     semanticChats: hits && chatsFromIds(hits, input.chats, { excludeId: input.convoId }),
   };
-  return { ...rankRecall(lanes, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: input.supersede }), lanes };
+  return { ...rankRecall(lanes, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: input.supersede, head }), lanes };
 }

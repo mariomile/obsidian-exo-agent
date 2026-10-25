@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { searchVaultNotes, type NoteHit } from "../../src/obsidian/vault-search";
 import { makeExclusion } from "../../src/core/vault-exclusions";
 import type { ChatRecord } from "../../src/core/recent-chats";
-import { nameVocab, recallQueries, recallTurn, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
+import { nameVocab, recallKeywords, recallQueries, recallTurn, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
 import { generateCases, type GenNote } from "../../src/core/recall-eval-gen";
 import {
   formatSummary,
@@ -188,14 +188,15 @@ const pad = (s: string, n: number) => (s.length >= n ? s : s + " ".repeat(n - s.
  *  meaning a note: the title lane alone must inject nothing for them. */
 const SHORT_NAME_PROMPTS = ["ask Claude to rewrite this paragraph", "puoi controllare il log del bot oggi", "how do we win this deal"];
 /** Ordinary requests of more than sixteen keywords, so the wide title lane and
- *  the chunked search are both in play: they mention a profession, an event, an
- *  invoice, a memory habit, none of them a note. The title lane alone must
- *  inject nothing for them either. */
+ *  the chunked search are both in play. They are about taxes, an invoice, a
+ *  trip, a dinner, a workshop: none names a note of the vault, so a long
+ *  message must not inject a note on a chance overlap of words. */
 const LONG_PROMPTS = [
-  "Ho un colloquio con una startup domani e vorrei che mi aiutassi a preparare le risposte sulle mie esperienze da product manager, in particolare su come ho gestito la roadmap, le priorità e il rapporto con gli sviluppatori durante gli ultimi anni di lavoro",
-  "Sto preparando una masterclass di Product Heroes su come usare Claude Code e Obsidian per costruire prodotti con gli agenti: scrivimi una scaletta con introduzione, tre esempi pratici e una sezione finale per le domande dei partecipanti",
+  "Domani mattina ho una riunione con il commercialista per sistemare la dichiarazione dei redditi e vorrei una lista ordinata dei documenti da portare, delle scadenze fiscali più vicine e delle domande che conviene fare prima di firmare",
   "Devo scrivere una email al cliente per spiegare che la fatturazione elettronica ha avuto un ritardo questa settimana e che stiamo sistemando il problema insieme al commercialista, tieni un tono cordiale ma professionale e chiaro",
-  "Ripensando alla memoria del vault e a come aggiornarla in automatico dopo ogni sessione di lavoro, vorrei capire se conviene tenere le informazioni nelle note del progetto oppure in un file separato condiviso da tutti gli agenti",
+  "Mi serve un itinerario di quattro giorni a Lisbona a fine novembre con musei, ristoranti di pesce vicino al fiume e un paio di serate tranquille, tenendo il budget sotto i mille euro per due persone compresi voli e hotel",
+  "Sto cercando una ricetta per una cena con sei amici che comprenda un antipasto freddo, un primo di pasta fresca fatta in casa e un dolce senza forno, considerando che due ospiti sono vegetariani e uno è allergico alle noci",
+  "Vorrei una scaletta per un workshop interno di mezza giornata sulla gestione delle priorità, con un'introduzione, tre esercizi pratici in piccoli gruppi e un momento finale di discussione aperta con tutti i partecipanti",
 ];
 /** Prompts that name a project: its hub note must lead. */
 const HUB_PROMPTS = [
@@ -271,6 +272,14 @@ function bestRank(searches: NoteHit[][], exclude: (path: string) => boolean, pat
 const titleOnly = (r: RecallResult | null): string[] =>
   r ? r.notes.map((n) => n.path).filter((p) => r.lanes.title.some((t) => t.path === p) && !r.lanes.sonar.some((s) => s.path === p)) : [];
 
+/** How many of the prompt's keywords an injected note shares through its name and
+ *  the excerpt the vault search gave: a note a long message injected on a chance
+ *  overlap shares one at most. */
+const sharedWithPrompt = (n: { path: string; excerpt: string }, keywords: readonly string[]): number => {
+  const text = `${n.path.replace(/^.*\//, "")} ${n.excerpt}`.toLowerCase();
+  return keywords.filter((k) => text.includes(k)).length;
+};
+
 describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault", () => {
   it("serves the expected sources for the 10 questions", async () => {
     const fixture = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "recall-eval.json"), "utf8")) as { cases: EvalCase[]; ordinary: string[] };
@@ -330,6 +339,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const fixtureOrdinary = group(fixture.ordinary);
     const shortOrdinary = group(SHORT_NAME_PROMPTS);
     const longOrdinary = group(LONG_PROMPTS);
+    const longKeywords = (prompt: string) => recallKeywords(prompt, nameVocab(ctx.names), 24);
     const hubRanks = HUB_PROMPTS.map((h) => {
       const r = ordinary.find((o) => o.prompt === h.prompt)!.result;
       const rank = r ? r.notes.findIndex((n) => n.path === h.hub) + 1 : 0;
@@ -361,7 +371,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         `short-name prompts (${shortOrdinary.length}): ${shortOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${shortOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
         ...shortOrdinary.map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
         `long prompts (${longOrdinary.length}): ${longOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${longOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
-        ...longOrdinary.map((o) => `  "${o.prompt.slice(0, 60)}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}, notes ${JSON.stringify(o.result?.notes.map((n) => n.path.split("/").pop()) ?? [])}`),
+        ...longOrdinary.map((o) => `  "${o.prompt.slice(0, 60)}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title lane ${o.result?.lanes.title.length ?? 0}, notes ${JSON.stringify(o.result?.notes.map((n) => `${n.path.split("/").pop()} (${sharedWithPrompt(n, longKeywords(o.prompt))})`) ?? [])}`),
         `named note "${NAMED_PROMPT.prompt}": ${NAMED_PROMPT.note} rank ${namedRank || "-"} (Sonar ${named && named.lanes.sonar.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 || "-"})`,
         ...hubRanks.map((h) => `hub ${h.hub}: rank ${h.rank || "-"} (Sonar ${h.sonarFound || "-"}) for "${h.prompt}"`),
       ].join("\n"),
