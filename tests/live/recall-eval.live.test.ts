@@ -16,6 +16,13 @@
  * For the same reason the supersede index is built here, by the turn's own
  * `indexNotes`, from the same frontmatter the adapter reads, and the
  * correction proposals recall would make are only listed, never appended.
+ *
+ * Two sets run: the 10 hand questions (regression gate, 10/10 and no trap) and
+ * the generated set (`core/recall-eval-gen`, derived from the vault's own links
+ * and paths at each run; prints per-family rates and the ids of the misses,
+ * asserts only that no superseded note leads). `EXO_EVAL_GEN=0` skips the
+ * generated set. The generated cases expect notes only, so their chat lanes
+ * are left out: they cannot change which notes a turn injects.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -35,6 +42,7 @@ import {
   RECALL_MAX_CHATS,
   RECALL_MAX_NOTES,
 } from "../../src/core/turn-recall";
+import { generateCases, type GenNote } from "../../src/core/recall-eval-gen";
 import {
   formatSummary,
   recallItems,
@@ -50,8 +58,8 @@ import type { App } from "obsidian";
 
 const VAULT = "marioverse.ai";
 const PLUGIN_DIR = `/Users/mariomiletta/Vaults/${VAULT}/.obsidian/plugins/exo-agent`;
-/** Sonar hits fetched per question: enough to report ranks past the cut. */
-const PROBE_DEPTH = 50;
+/** Sonar hits fetched per question: what a real turn asks Sonar for when it filters exclusions (`searchVaultNotes`). */
+const PROBE_DEPTH = RECALL_LANE_DEPTH * 3;
 
 function obsidianEval<T>(code: string): T {
   let out = "";
@@ -102,12 +110,55 @@ function liveVault(queries: string[]): LiveVault {
         const links = (cache?.frontmatterLinks ?? [])
           .filter((l) => new RegExp(${JSON.stringify(SUPERSEDE_KEY.source)}).test(l.key))
           .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
-        const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by } : null;
+        const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by, description: fm.description } : null;
         return { path: f.path, basename: f.basename, frontmatter: keep, links };
       }),
     });
   })()`;
   return obsidianEval<LiveVault>(code);
+}
+
+/** Sonar hits per query, `PROBE_DEPTH` deep, a few queries per round trip. A
+ *  blank query gets no hits. Only reads. */
+function liveSonar(queries: string[]): NoteHit[][] {
+  const out: NoteHit[][] = [];
+  for (let i = 0; i < queries.length; i += 25) {
+    const code = `(async () => {
+      const sonar = app.plugins.plugins["sonar"];
+      const hits = [];
+      for (const q of ${JSON.stringify(queries.slice(i, i + 25))}) {
+        const hs = q.trim() ? await sonar.search(q, { limit: ${PROBE_DEPTH} }) : [];
+        hits.push(hs.map((h) => ({ path: h.path, title: h.title, score: h.score, excerpt: h.excerpt ?? "" })));
+      }
+      return JSON.stringify(hits);
+    })()`;
+    out.push(...obsidianEval<NoteHit[][]>(code));
+  }
+  return out;
+}
+
+/** Body lines (frontmatter stripped) and the wikilink targets on each, for the
+ *  given notes. Only reads (`cachedRead`, the metadata cache). */
+function liveBodies(paths: string[]): { path: string; lines: string[]; links: { line: number; target: string }[] }[] {
+  const code = `(async () => {
+    const out = [];
+    for (const path of ${JSON.stringify(paths)}) {
+      const file = app.vault.getAbstractFileByPath(path);
+      if (!file) continue;
+      const text = await app.vault.cachedRead(file);
+      const cache = app.metadataCache.getFileCache(file);
+      const start = cache?.frontmatterPosition ? cache.frontmatterPosition.end.line + 1 : 0;
+      const links = (cache?.links ?? [])
+        .filter((l) => l.position.start.line >= start)
+        .map((l) => ({
+          line: l.position.start.line - start,
+          target: app.metadataCache.getFirstLinkpathDest(l.link.split("#")[0], path)?.path ?? l.link,
+        }));
+      out.push({ path, lines: text.split("\\n").slice(start), links });
+    }
+    return JSON.stringify(out);
+  })()`;
+  return obsidianEval(code);
 }
 
 /** The conversation store as the view hands it to recall: live and archived. */
@@ -142,6 +193,10 @@ function semanticScores(question: string): { scored: { id: string; score: number
 /** An App whose only capability is Sonar answering from the live hits. */
 const sonarApp = (hits: NoteHit[]): App =>
   ({ plugins: { plugins: { sonar: { search: (_q: string, o?: { limit?: number }) => Promise.resolve(hits.slice(0, o?.limit ?? 10)) } } } }) as unknown as App;
+
+/** The notes the vault itself treats as the source of current facts. */
+const isCanonical = (path: string): boolean =>
+  path === "_system/agent/NOW.md" || path === "_system/memory/open-loops.md" || path.startsWith("Active/Projects/");
 
 const pad = (s: string, n: number) => (s.length >= n ? s : s + " ".repeat(n - s.length));
 
@@ -233,6 +288,53 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     // S6 exit check (plan 5): every question finds a source it needs, and no
     // superseded note leads unlabelled.
     expect(summary.hitAt5).toBe(10);
+    expect(summary.traps).toBe(0);
+  }, 300_000);
+
+  it.skipIf(process.env.EXO_EVAL_GEN === "0")("serves the generated question set without a superseded note leading", async () => {
+    const vault = liveVault([]);
+    const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
+    const live = vault.names.filter((n) => !exclude(n.path));
+    const { names, supersede } = indexNotes(live);
+    const canonicalPaths = live.map((n) => n.path).filter(isCanonical);
+    const bodies = new Map(liveBodies(canonicalPaths).map((b) => [b.path, b]));
+    const notes: GenNote[] = live.map((n) => ({
+      path: n.path,
+      basename: n.basename,
+      frontmatter: n.frontmatter ?? {},
+      lines: bodies.get(n.path)?.lines ?? [],
+      links: bodies.get(n.path)?.links ?? [],
+    }));
+    const cases = generateCases({ notes, canonicalPaths, supersede: supersede.index, decisionsFolder: "_system/memory/decisions", peopleFolder: "CRM/People", projectsFolder: "Active/Projects" });
+    const keywords = cases.map((c) => recallKeywords(c.question));
+    const sonarHits = liveSonar(keywords.map((k) => k.join(" ")));
+
+    const scored: { id: string; question: string; score: CaseScore }[] = [];
+    for (const [i, c] of cases.entries()) {
+      const { hits } = await searchVaultNotes(sonarApp(sonarHits[i]), keywords[i].join(" "), RECALL_LANE_DEPTH, exclude);
+      const sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
+      const title = titleLane(keywords[i], names).slice(0, RECALL_LANE_DEPTH);
+      const ranked = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede.index });
+      scored.push({ id: c.id, question: c.question, score: { ...scoreCase(recallItems(ranked), c), family: c.family } });
+    }
+    const summary = summarize(scored.map((s) => s.score));
+    const misses = scored.filter((s) => !s.score.hit);
+    const traps = scored.filter((s) => s.score.trapLeads);
+    console.log(
+      [
+        `generated set: ${cases.length} cases derived from ${canonicalPaths.length} canonical notes`,
+        formatSummary(summary),
+        `misses (${misses.length}), id and best rank:`,
+        ...misses.map((m) => `  ${m.id}  ${m.score.firstRank ?? "-"}`),
+        `traps (${traps.length}):`,
+        ...traps.map((t) => `  ${t.id}`),
+        `supersede: ${supersede.fixes.length} notes with disagreeing markers, ${supersede.broken.length} broken links`,
+        ...supersede.broken.map((b) => `  ${b.path}: ${b.field} -> ${b.target}`),
+      ].join("\n"),
+    );
+
+    // The rates are read from the report, not asserted: a vault edit must not turn this red.
+    expect(cases.length).toBeGreaterThan(0);
     expect(summary.traps).toBe(0);
   }, 300_000);
 });

@@ -64,6 +64,30 @@ describe("summarize", () => {
   });
 });
 
+describe("summarize: per family", () => {
+  const s = summarize([
+    { hit: true, full: true, firstRank: 1, rr: 1, trapLeads: false, family: "link" },
+    { hit: false, full: false, firstRank: null, rr: 0, trapLeads: false, family: "link" },
+    { hit: true, full: true, firstRank: 2, rr: 0.5, trapLeads: true, family: "supersede" },
+  ]);
+
+  it("breaks the totals down by family, in order of first appearance", () => {
+    expect(s.cases).toBe(3);
+    expect(s.families).toEqual([
+      { family: "link", cases: 2, hitAt5: 1, fullAt5: 1, mrr: 0.5, traps: 0 },
+      { family: "supersede", cases: 1, hitAt5: 1, fullAt5: 1, mrr: 0.5, traps: 1 },
+    ]);
+  });
+
+  it("prints a table with one row per family under the total line", () => {
+    const lines = formatSummary(s).split("\n");
+    expect(lines[0]).toBe("hit@5 2/3 · full@5 2/3 · MRR 0.50 · traps 1");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toBe("  link       hit@5 1/2 (50%) · MRR 0.50 · traps 0");
+    expect(lines[2]).toBe("  supersede  hit@5 1/1 (100%) · MRR 0.50 · traps 1");
+  });
+});
+
 describe("resolveChats", () => {
   const day = (iso: string): number => new Date(`${iso}T12:00:00`).getTime();
   const rec = (id: string, title: string, at: string): ChatRecord => ({
