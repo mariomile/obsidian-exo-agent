@@ -267,8 +267,9 @@ describe("correction proposals", () => {
     for (const value of bad) expect(parseProposalCandidates(JSON.stringify([value])).status).toBe("invalid");
   });
 
-  it("is not a memory kind: it waits for Mario's accept", () => {
-    expect(isMemoryProposalKind("correction")).toBe(false);
+  it("is written straight away, like loops and decisions; only a playbook waits for an accept", () => {
+    expect(isMemoryProposalKind("correction")).toBe(true);
+    expect(isMemoryProposalKind("playbook")).toBe(false);
   });
 
   it("fingerprints on path and change, not on the reason or the expected before, and set key order does not matter", () => {

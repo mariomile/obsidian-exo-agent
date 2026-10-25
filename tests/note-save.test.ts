@@ -306,7 +306,7 @@ describe("renderSaveReceipt", () => {
   });
 });
 
-describe("noteCorrections (accepted correction proposals)", () => {
+describe("noteCorrections (corrections written on proposal)", () => {
   const input = { proposalId: "p1", title: "Correct old", convoId: "c1" };
 
   it("writes frontmatter through the receipt log, tells git autocommit, and undoes like a save", async () => {
@@ -319,21 +319,23 @@ describe("noteCorrections (accepted correction proposals)", () => {
       .resolves.toEqual({ path: "D/old.md" });
     expect(notes.get("D/old.md")).toBe('---\nstatus: "superseded"\ntype: decision\nsuperseded_by: "[[new]]"\n---\nBody.\n');
     expect(wrote).toEqual([["D/old.md"]]);
+    expect(Notice.last).toBe('Exo corrected old. "Undo a save to note" reverts it.');
     const [r] = await log.list();
     expect(r).toMatchObject({ op: "frontmatter", path: "D/old.md", provenance: { convoId: "c1", chatTitle: "Correct old" } });
     expect((await undoSave(app, log, r.id))?.ok).toBe(true);
     expect(notes.get("D/old.md")).toBe(before);
   });
 
-  it("refuses a stale frontmatter fix with a clear Notice and never overwrites Mario's value", async () => {
+  it("refuses a stale frontmatter fix with a readable reason and never overwrites Mario's value", async () => {
     const note = "---\nstatus: archived\n---\nBody.\n";
     const { app, notes } = vault({ "D/old.md": note });
     const log = memLog();
     const target = noteCorrections(app, () => log, () => {});
     const change = { type: "frontmatter" as const, set: { status: "superseded" }, before: { status: "status: active" } };
     const msg = "old changed since this correction was proposed. Nothing was written: open the note to fix it by hand.";
+    const shown = Notice.last;
     await expect(target.apply({ ...input, path: "D/old.md", change })).rejects.toThrow(msg);
-    expect(Notice.last).toBe(msg);
+    expect(Notice.last).toBe(shown);
     expect(notes.get("D/old.md")).toBe(note);
     expect(await log.list()).toEqual([]);
   });
@@ -357,7 +359,7 @@ describe("noteCorrections (accepted correction proposals)", () => {
 });
 
 describe("propose_correction tool", () => {
-  function withHost(files: Record<string, string>, enabled = true) {
+  function withHost(files: Record<string, string>, enabled = true, written = true) {
     const v = vault(files);
     const appended: { candidate: { payload: unknown }; source: { convoId: string } }[] = [];
     let refreshed = 0;
@@ -371,7 +373,7 @@ describe("propose_correction tool", () => {
             append: async (candidate: { payload: unknown }, source: { convoId: string }) => {
               const dup = appended.some((a) => JSON.stringify(a.candidate.payload) === JSON.stringify(candidate.payload));
               if (!dup) appended.push({ candidate, source });
-              return { status: dup ? "duplicate" : "appended" };
+              return { status: dup ? "duplicate" : written ? "applied" : "appended" };
             },
           },
           inbox: { refresh: async () => void refreshed++ },
@@ -386,10 +388,10 @@ describe("propose_correction tool", () => {
     return { ...v, appended, run, refreshed: () => refreshed };
   }
 
-  it("proposes the line in the vault's changed-fact format and never touches the note", async () => {
+  it("hands the line to the store in the vault's changed-fact format, which writes it", async () => {
     const { notes, appended, run, refreshed } = withHost({ "Pricing.md": "# Pricing\n- Pro is 29 euro\n" });
     const res = await run({ path: "Pricing.md", old_line: "Pro is 29 euro", new_text: "Pro is 39 euro" });
-    expect(res).toEqual({ text: "Correction proposed for Pricing. Mario accepts it in the Inbox.", isError: false });
+    expect(res).toEqual({ text: 'Corrected Pricing. Mario can undo it with "Undo a save to note".', isError: false });
     expect(notes.get("Pricing.md")).toBe("# Pricing\n- Pro is 29 euro\n");
     expect(appended).toHaveLength(1);
     expect(appended[0].source).toMatchObject({ convoId: "c1" });
@@ -398,9 +400,18 @@ describe("propose_correction tool", () => {
       path: "Pricing.md",
       change: { type: "line", oldLine: "- Pro is 29 euro", newLine: expect.stringMatching(/^- Pro is 39 euro \(dal \d{4}-\d{2}-\d{2}; prima Pro is 29 euro\)$/) },
     });
-    expect(refreshed()).toBe(1);
+    expect(refreshed()).toBe(0);
     expect((await run({ path: "Pricing.md", old_line: "Pro is 29 euro", new_text: "Pro is 39 euro" })).isError).toBe(false);
     expect(appended).toHaveLength(1);
+  });
+
+  it("a correction the store could not write waits in the Inbox, and the model is told", async () => {
+    const { run, refreshed } = withHost({ "N.md": "- a\n" }, true, false);
+    expect(await run({ path: "N.md", old_line: "- a", new_text: "b" })).toEqual({
+      text: "Could not write the correction to N; it waits in the Inbox with the reason.",
+      isError: true,
+    });
+    expect(refreshed()).toBe(1);
   });
 
   it("errors the model can act on: unknown note, missing or ambiguous line, suggestions off", async () => {
@@ -409,7 +420,7 @@ describe("propose_correction tool", () => {
     expect((await run({ path: "N.md", old_line: "zzz", new_text: "b" })).text).toBe("Line not found in N. Quote the outdated line exactly as it is in the note.");
     expect((await run({ path: "N.md", old_line: "- a", new_text: "b" })).text).toBe("That line appears more than once in N. Quote a longer, unique line.");
     const off = withHost({ "N.md": "- a\n" }, false);
-    expect(await off.run({ path: "N.md", old_line: "- a", new_text: "b" })).toEqual({ text: "Suggestions are off, so no correction can be proposed.", isError: true });
+    expect(await off.run({ path: "N.md", old_line: "- a", new_text: "b" })).toEqual({ text: "Suggestions are off, so no correction can be made.", isError: true });
   });
 
   it("a multi-line new_text or old_line is refused: a correction is one line", async () => {

@@ -1,7 +1,8 @@
 /**
- * Correction proposals: recall's marker fixes and the agent's
- * `propose_correction`. Both only append to the proposal inbox; nothing is
- * written to a note until Mario accepts (obsidian/note-save `noteCorrections`).
+ * Corrections: recall's marker fixes and the agent's `propose_correction`.
+ * Both go through the proposal store, which writes them straight into the note
+ * with an undo receipt (obsidian/note-save `noteCorrections`). Only a fix that
+ * no longer applies stays in the Inbox, with its reason.
  */
 import * as z from "zod";
 import { TFile, type App } from "obsidian";
@@ -13,8 +14,9 @@ import { formatSupersede, type MarkerFix } from "../core/supersede";
 import { resolveLink } from "./graph";
 import { err, getExo, ok, today } from "./tool-kit";
 
-/** Append each candidate; refresh the Inbox when one is new. Null when
- *  suggestions are off or the plugin is absent. Never throws. */
+/** Append each candidate (a correction is written on append); refresh the
+ *  Inbox when one could not be written and waits there. Null when suggestions
+ *  are off or the plugin is absent. Never throws. */
 async function propose(app: App, candidates: readonly ProposalCandidate[], convoId: string, turnId: string): Promise<string[] | null> {
   const exo = getExo(app);
   if (!exo?.settings.proposalKernelEnabled) return null;
@@ -26,8 +28,8 @@ async function propose(app: App, candidates: readonly ProposalCandidate[], convo
   return statuses;
 }
 
-/** Recall found notes whose supersede markers disagree: propose the fix,
- *  with each key as it reads now so a later accept can tell it went stale. */
+/** Recall found notes whose supersede markers disagree: write the fix, with
+ *  each key as it reads now so a write that races an edit can tell it went stale. */
 export async function proposeMarkerFixes(app: App, fixes: readonly MarkerFix[], convoId: string): Promise<void> {
   const candidates: ProposalCandidate[] = [];
   for (const f of fixes) {
@@ -48,21 +50,21 @@ export async function proposeMarkerFixes(app: App, fixes: readonly MarkerFix[], 
 
 const basename = (path: string): string => path.replace(/^.*\//, "").replace(/\.md$/, "");
 
-/** The agent flags an outdated line: a proposal, never a write. */
+/** The agent flags an outdated line: corrected in place, with an undo receipt. */
 export function buildCorrectionTool(app: App, convoId: string) {
   const { tool } = claudeSdk();
   return tool(
     "propose_correction",
-    "Propose replacing an outdated line in a note with the current fact. Nothing is written: Mario accepts or dismisses it in the Inbox. " +
+    "Replace an outdated line in a note with the current fact. It is written at once, with a receipt Mario can undo. " +
       "Quote `old_line` exactly as it is in the note (the list marker may be left out); `new_text` is the current fact only. " +
-      "The accepted line keeps the old one in the vault's format: `<new> (dal YYYY-MM-DD; prima <old>)`.",
+      "The written line keeps the old one in the vault's format: `<new> (dal YYYY-MM-DD; prima <old>)`.",
     { path: z.string().describe("Vault path or note name"), old_line: z.string(), new_text: z.string() },
     async (args) => {
       const file = resolveLink(app, args.path);
       if (!(file instanceof TFile)) return err(`Note not found: ${args.path}`);
       if (/[\r\n]/.test(args.old_line.trim())) return err("old_line must be a single line. Quote one line of the note.");
       if (/[\r\n]/.test(args.new_text.trim())) return err("new_text must be a single line. Propose one correction per line.");
-      if (!getExo(app)?.settings.proposalKernelEnabled) return err("Suggestions are off, so no correction can be proposed.");
+      if (!getExo(app)?.settings.proposalKernelEnabled) return err("Suggestions are off, so no correction can be made.");
       const name = basename(file.path);
       const line = quotedLine(await app.vault.cachedRead(file), args.old_line);
       if (typeof line !== "string") {
@@ -73,9 +75,10 @@ export function buildCorrectionTool(app: App, convoId: string) {
       if (!args.new_text.trim()) return err("new_text is empty.");
       const change = { type: "line" as const, oldLine: line, newLine: formatSupersede(line, args.new_text, today()) };
       const [status] = (await propose(app, [correctionCandidate(file.path, change, "Flagged as outdated in chat.")], convoId, `tool-${Date.now()}`)) ?? [];
-      if (status === "appended") return ok(`Correction proposed for ${name}. Mario accepts it in the Inbox.`);
-      if (status === "duplicate") return ok(`The same correction for ${name} is already in the Inbox.`);
-      return err(`Could not propose the correction (${status ?? "suggestions off"}).`);
+      if (status === "applied") return ok(`Corrected ${name}. Mario can undo it with "Undo a save to note".`);
+      if (status === "duplicate") return ok(`The same correction for ${name} was already made or turned down.`);
+      if (status === "appended") return err(`Could not write the correction to ${name}; it waits in the Inbox with the reason.`);
+      return err(`Could not make the correction (${status ?? "suggestions off"}).`);
     },
   );
 }

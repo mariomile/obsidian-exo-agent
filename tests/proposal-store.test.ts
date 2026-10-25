@@ -442,21 +442,20 @@ describe("ProposalStore", () => {
     it("a dismissed correction is not re-proposed after pruning drops its record", async () => {
       const { adapter, files } = fakeFiles();
       const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
-      const first = await store.append(fix(), source());
-      if (first.status !== "appended") throw new Error("expected append");
+      const held = new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "line changed" }));
+      const first = await held.append(fix(), source());
+      if (first.status !== "appended") throw new Error("expected a failed write to stay pending");
       await store.dismiss(first.record.id);
       prune(files);
       expect((await store.load()).data.records).toEqual([]);
       expect((await store.append(fix(), { ...source(), turnId: "later" })).status).toBe("duplicate");
-      expect((await store.append(fix("D/other.md"), { ...source(), turnId: "later" })).status).toBe("appended");
+      expect((await store.append(fix("D/other.md"), { ...source(), turnId: "later" })).status).toBe("applied");
     });
 
-    it("an accepted correction is not re-proposed either, after pruning", async () => {
+    it("a correction is written on append, and is not re-proposed after pruning", async () => {
       const { adapter, files } = fakeFiles();
       const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
-      const first = await store.append(fix(), source());
-      if (first.status !== "appended") throw new Error("expected append");
-      expect((await store.accept(first.record.id)).ok).toBe(true);
+      expect((await store.append(fix(), source())).status).toBe("applied");
       prune(files);
       expect((await store.append(fix(), { ...source(), turnId: "later" })).status).toBe("duplicate");
     });

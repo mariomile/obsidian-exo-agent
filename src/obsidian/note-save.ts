@@ -62,10 +62,10 @@ const CORRECTION_ERROR: Record<CorrectionError, (name: string) => string> = {
   "multi-line": (n) => `This correction spans more than one line, so nothing was written to ${n}.`,
 };
 
-/** Where an accepted correction proposal is written: in place, through
+/** Where a correction is written, as soon as it is proposed: in place, through
  *  `vault.process`, with a receipt in the save log so "Undo a save to note"
- *  reverts it like any save. A fix that no longer applies writes nothing,
- *  says why in a Notice and throws the same readable reason. */
+ *  reverts it like any save, and a Notice that says so. A fix that no longer
+ *  applies writes nothing and throws a readable reason, which the Inbox shows. */
 export function noteCorrections(
   app: App,
   log: () => SaveLog,
@@ -83,12 +83,11 @@ export function noteCorrections(
       });
       if (!made) throw new Error(`Note not found: ${path}`);
       if ("error" in made) {
-        const reason = CORRECTION_ERROR[made.error](file.basename);
-        new Notice(reason);
-        throw new Error(reason);
+        throw new Error(CORRECTION_ERROR[made.error](file.basename));
       }
       await log().record(made.receipt);
       noteWrite([path]);
+      new Notice(`Exo corrected ${file.basename}. "Undo a save to note" reverts it.`);
       return { path };
     },
   };

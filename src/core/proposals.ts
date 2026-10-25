@@ -3,19 +3,20 @@
  *
  * This module deliberately has no Obsidian imports and performs no IO. Model
  * output enters through `parseProposalCandidates`; only validated records may
- * later be routed to a side-effecting store. Memory kinds (loop, decision) are
- * routed as soon as they are validated and deduped; the action kinds
- * (playbook, correction) are routed only once the user accepts them.
+ * later be routed to a side-effecting store. Vault kinds (loop, decision,
+ * correction) are routed as soon as they are validated and deduped; a playbook
+ * is routed only once the user accepts it.
  */
 
 export type ProposalKind = "loop" | "decision" | "playbook" | "correction";
 /**
- * Memory kinds (open-loops ledger, decisions) are written the moment they are
- * validated and deduped: review happens after the fact, never before. Actions
- * (`playbook`, `correction`) stay pending until the user accepts.
+ * Vault kinds (open-loops ledger, decisions, corrections to a note) are written
+ * the moment they are validated and deduped, each with its undo: review happens
+ * after the fact, never before. A `playbook` changes Exo's own settings, so it
+ * stays pending until the user accepts.
  */
 export function isMemoryProposalKind(kind: ProposalKind): boolean {
-  return kind === "loop" || kind === "decision";
+  return kind !== "playbook";
 }
 
 export type ProposalStatus = "pending" | "accepted" | "dismissed";

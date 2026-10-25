@@ -29,7 +29,7 @@ export interface ExoToolHost {
     collaboUrl: string;
     collaboApiKey: string;
     collaboShares: Record<string, { slug: string; ownerSecret: string; accessToken: string; role: string }>;
-    /** Suggestions (the Proposal Kernel) on: corrections are proposals, so off means none. */
+    /** Suggestions (the Proposal Kernel) on: corrections go through it, so off means none. */
     proposalKernelEnabled: boolean;
   };
   saveSettings(): Promise<void>;
@@ -83,7 +83,7 @@ export interface ExoToolHost {
   undoMemoryWrite(sha?: string): Promise<{ ok: boolean; message: string }>;
   /** Receipts of "Save to note" (obsidian/note-save). */
   noteSaves: SaveLog;
-  /** The proposal inbox: corrections wait here for Mario's accept. */
+  /** The proposal store: writes a correction on append; one it cannot write waits in the Inbox. */
   proposalStore: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string }> };
   inbox: { refresh(): Promise<void> };
 }

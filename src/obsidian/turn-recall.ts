@@ -131,7 +131,7 @@ export async function recallForTurn(
     { sonar, title, lexicalChats, semanticChats: scored && chatsFromIds(semanticHits(scored), input.chats, { excludeId: input.convoId }) },
     { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede?.index },
   );
-  // A recalled note whose markers disagree becomes a correction proposal.
+  // A recalled note whose markers disagree is corrected (with an undo receipt).
   const recalled = new Set(notes.map((n) => n.path));
   const fixes = supersede?.fixes.filter((f) => recalled.has(f.path)) ?? [];
   if (fixes.length) void proposeMarkerFixes(app, fixes, input.convoId).catch(() => {});
