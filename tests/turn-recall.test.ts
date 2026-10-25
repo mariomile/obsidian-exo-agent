@@ -174,15 +174,23 @@ describe("matchPastChats", () => {
 
 describe("formatRecallBlock", () => {
   it("is empty with nothing to recall", () => {
-    expect(formatRecallBlock([], [])).toBe("");
+    expect(formatRecallBlock([], [])).toEqual({ block: "", notes: [] });
   });
   it("marks the block as background and clips excerpts to 300 chars", () => {
-    const block = formatRecallBlock([{ path: "Notes/Pricing.md", excerpt: "p".repeat(900) }], []);
+    const { block } = formatRecallBlock([{ path: "Notes/Pricing.md", excerpt: "p".repeat(900) }], []);
     expect(block.startsWith(RECALL_OPEN)).toBe(true);
     expect(block.endsWith(RECALL_CLOSE)).toBe(true);
     expect(block).toMatch(/NOT the current conversation/);
     const line = block.split("\n").find((l) => l.startsWith("- Notes/Pricing.md"))!;
     expect(line.length).toBeLessThanOrEqual("- Notes/Pricing.md: ".length + 300);
+  });
+  it("tells the model to cite what it relies on and to prefer a successor, once", () => {
+    const { block } = formatRecallBlock([{ path: "Notes/Pricing.md", excerpt: "x" }], []);
+    const rule = "When you rely on a recalled note, cite it as [[Note]]. If you use a note marked superseded, cite its successor instead.";
+    expect(block.split(rule)).toHaveLength(2);
+    expect(block.indexOf(rule)).toBeLessThan(block.indexOf("Notes:"));
+    // chat-only blocks carry it too: the header is shared
+    expect(formatRecallBlock([], [{ id: "t", title: "T", date: "2026-09-20", snippet: "s", msgIndex: 0 }]).block).toContain(rule);
   });
   it("keeps at most 5 notes and 2 chats, and the whole block within 2000 chars", () => {
     const notes = Array.from({ length: 8 }, (_, i) => ({ path: `N/${i}.md`, excerpt: "e".repeat(300) }));
@@ -193,10 +201,21 @@ describe("formatRecallBlock", () => {
       snippet: "s".repeat(300),
       msgIndex: 0,
     }));
-    const block = formatRecallBlock(notes, past);
+    const { block } = formatRecallBlock(notes, past);
     expect(block.length).toBeLessThanOrEqual(RECALL_MAX_CHARS);
     expect((block.match(/^- N\//gm) ?? []).length).toBeLessThanOrEqual(5);
     expect((block.match(/^- "T/gm) ?? []).length).toBeLessThanOrEqual(2);
+  });
+  it("returns the notes whose line is in the block: the ones the cap dropped are not", () => {
+    const notes = Array.from({ length: 5 }, (_, i) => ({ path: `Knowledge/${"deep/".repeat(18)}N${i}.md`, excerpt: "e".repeat(300) }));
+    const { block, notes: shown } = formatRecallBlock(notes, []);
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.length).toBeLessThan(5);
+    expect(shown).toEqual(notes.slice(0, shown.length));
+    for (const n of notes) expect(block.includes(`- ${n.path}:`)).toBe(shown.includes(n));
+    // chats go first, so a block that fits once they are dropped keeps every note
+    const chat = { id: "t", title: "T", date: "2026-09-20", snippet: "s".repeat(900), msgIndex: 0 };
+    expect(formatRecallBlock(notes.slice(0, 2), [chat, chat]).notes).toEqual(notes.slice(0, 2));
   });
 });
 
@@ -490,7 +509,7 @@ describe("rankRecall with superseded notes", () => {
 
   it("the block tells the model which note to use instead", () => {
     const r = rankRecall(lanes([n("D/2026-09-24-vault-lean.md")]), opts);
-    const block = formatRecallBlock(r.notes, []);
+    const { block } = formatRecallBlock(r.notes, []);
     expect(block).toContain("- D/2026-09-25-memoria.md\n");
     expect(block).toContain("- D/2026-09-24-vault-lean.md: about D/2026-09-24-vault-lean.md (superseded by 2026-09-25-memoria, use that)");
   });
@@ -565,6 +584,47 @@ describe("recallForTurn", () => {
     expect(r!.notes).toEqual([{ path: "Notes/Pricing.md", excerpt: "Pro is 29 euro" }]);
     expect(r!.chats.map((c) => c.title)).toEqual(["Pricing call"]);
     expect(r!.block).toContain("- Notes/Pricing.md: Pro is 29 euro");
+  });
+
+  it("logs what it injected for the grounding eval: paths only, pointing at the user message just pushed", async () => {
+    const written: Record<string, string> = {};
+    const adapter = {
+      getBasePath: () => "/v",
+      exists: async (p: string) => p in written,
+      read: async (p: string) => written[p],
+      write: async (p: string, c: string) => {
+        written[p] = c;
+      },
+    };
+    const a = { ...(app([{ path: "Notes/Pricing.md", title: "Pricing", score: 3, excerpt: "Pro is 29 euro" }]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "plug/exo" });
+    expect(r).not.toBeNull();
+    await vi.waitFor(() => expect(written["plug/exo/recall-log.json"]).toBeDefined());
+    const log = JSON.parse(written["plug/exo/recall-log.json"]);
+    // `current` holds one message, the user's: index 0
+    expect(log).toEqual([{ convoId: "current", msgIndex: 0, userAt: NOW, at: NOW, notes: [{ path: "Notes/Pricing.md" }] }]);
+    expect(written["plug/exo/recall-log.json"]).not.toContain("29 euro");
+  });
+
+  it("warns, and does not throw, when the log cannot be written", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const adapter = { getBasePath: () => "/v", exists: async () => false, read: async () => "", write: async () => Promise.reject(new Error("disk full")) };
+    const a = { ...(app([{ path: "Notes/Pricing.md", title: "Pricing", score: 3, excerpt: "Pro" }]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "plug/exo" });
+    expect(r).not.toBeNull();
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[exo] recall log write failed", expect.any(Error)));
+    warn.mockRestore();
+  });
+
+  it("logs nothing when only chats were recalled, or without a plugin folder", async () => {
+    const written: Record<string, string> = {};
+    const adapter = { getBasePath: () => "/v", exists: async () => false, read: async () => "", write: async (p: string, c: string) => void (written[p] = c) };
+    const a = { ...(app([]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "plug/exo" });
+    const b = { ...(app([{ path: "Notes/P.md", title: "P", score: 1, excerpt: "e" }]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    await recallForTurn(b, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(written).toEqual({});
   });
 
   it("skips short messages and slash commands without searching", async () => {

@@ -15,6 +15,7 @@
 		"test": "vitest run",
 		"eval:recall": "EXO_LIVE_EVAL=1 vitest run tests/live/recall-eval.live.test.ts",
 		"eval:harvest": "node scripts/eval-harvest.mjs",
+		"eval:grounding": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/eval-grounding.mjs",
 		"smoke": "node scripts/smoke.mjs",
 		"bump": "node scripts/bump.mjs"
 	},

@@ -364,10 +364,15 @@ export function rankRecall(
 /**
  * The block that rides the outbound message, or "" when there is nothing.
  * Entries are dropped from the end (chats first, then the weakest notes) until
- * the whole block fits {@link RECALL_MAX_CHARS}.
+ * the whole block fits {@link RECALL_MAX_CHARS}. `notes` are the ones whose line
+ * made it into the block: what the model actually saw.
  */
-export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly ChatRecall[]): string {
-  const noteLines = notes.slice(0, RECALL_MAX_NOTES).map((n) => {
+export function formatRecallBlock(
+  notes: readonly NoteRecall[],
+  chats: readonly ChatRecall[],
+): { block: string; notes: NoteRecall[] } {
+  const shown = notes.slice(0, RECALL_MAX_NOTES);
+  const noteLines = shown.map((n) => {
     const excerpt = flat(n.excerpt, RECALL_EXCERPT_CHARS);
     const label = n.supersededBy ? ` (superseded by ${n.supersededBy.replace(/^.*\//, "").replace(/\.md$/, "")}, use that)` : "";
     return `${excerpt ? `- ${n.path}: ${excerpt}` : `- ${n.path}`}${label}`;
@@ -375,7 +380,7 @@ export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly 
   const chatLinesOut = chats.slice(0, RECALL_MAX_CHATS).map((c) => `- "${flat(c.title, 80)}" (${c.date}): ${c.snippet}`);
   const render = (): string => {
     if (!noteLines.length && !chatLinesOut.length) return "";
-    const parts = [RECALL_OPEN, "Background context recalled from the vault and past chats, NOT the current conversation. Use it only if relevant."];
+    const parts = [RECALL_OPEN, "Background context recalled from the vault and past chats, NOT the current conversation. Use it only if relevant. When you rely on a recalled note, cite it as [[Note]]. If you use a note marked superseded, cite its successor instead."];
     if (noteLines.length) parts.push("Notes:", ...noteLines);
     if (chatLinesOut.length) parts.push("Past chats:", ...chatLinesOut);
     parts.push(RECALL_CLOSE);
@@ -387,7 +392,7 @@ export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly 
     else noteLines.pop();
     block = render();
   }
-  return block;
+  return { block, notes: shown.slice(0, noteLines.length) };
 }
 
 /** The keywords of a turn: {@link recallKeywords} with the 3-letter words the
