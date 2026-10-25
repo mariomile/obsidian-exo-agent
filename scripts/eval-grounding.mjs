@@ -8,7 +8,7 @@
 // Vault: EXO_VAULT, default Mario's vault. For every logged turn it finds the
 // assistant reply that followed the logged user message, resolves the
 // [[wikilinks]] in it against the vault, and prints:
-//   turns scored, turns that recalled notes, citation rate (reply links a
+//   turns scored, citation rate (reply links a
 //   recalled note), and superseded notes cited as current (reply links a
 //   superseded note without linking its successor; target 0).
 // Needs Node 22.18+ (it loads src/core/grounding.ts as it is).
@@ -63,7 +63,7 @@ const mentioned = new Set(entries.flatMap((e) => e.notes.flatMap((n) => [n.path,
 for (const f of files) if (mentioned.has(f.path)) f.aliases = aliasesOf(f.path);
 const resolve = makeResolver(files);
 
-const answerOf = (e) => answerAfter(convos.get(e.convoId)?.messages ?? [], e.msgIndex);
+const answerOf = (e) => answerAfter(convos.get(e.convoId)?.messages ?? [], e);
 const score = scoreGrounding(entries, answerOf, resolve);
 const lost = entries.filter((e) => answerOf(e) === null);
 
@@ -71,6 +71,5 @@ console.log(`conversations read:       ${convos.size}`);
 console.log(`logged turns:             ${entries.length} (${lost.length} without a reply to join: deleted, rewound or still running)`);
 console.log("");
 console.log(`turns scored:             ${score.turns}`);
-console.log(`turns with recalled notes: ${score.withRecall}`);
-console.log(`citation rate:            ${ratio(score.citingRecalled, score.withRecall)}   replies linking a recalled note`);
+console.log(`citation rate:            ${ratio(score.citingRecalled, score.turns)}   replies linking a recalled note`);
 console.log(`superseded as current:    ${score.supersededCitedAsCurrent}   replies linking a superseded note without its successor (target 0)`);

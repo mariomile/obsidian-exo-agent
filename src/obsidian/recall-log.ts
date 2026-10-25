@@ -8,23 +8,15 @@ export const MAX_RECALL_ENTRIES = 500;
 
 /**
  * What each turn's recall injected, in the plugin folder (`recall-log.json`):
- * Exo's bookkeeping, never synced. Paths only, no note bodies. Serialized
- * through one queue; a log that no longer parses is moved aside first.
+ * Exo's bookkeeping, which Obsidian Sync does not carry (it syncs only a
+ * plugin's main.js, manifest.json, styles.css and data.json). Paths only, no
+ * note bodies. Serialized through one queue; a log that no longer parses is
+ * moved aside first.
  */
 export class RecallLog {
   private readonly queue = new WriteQueue();
 
   constructor(private readonly file: LogFile) {}
-
-  async list(): Promise<RecallLogEntry[]> {
-    try {
-      const raw = await this.file.read();
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? (parsed as RecallLogEntry[]) : [];
-    } catch {
-      return [];
-    }
-  }
 
   private async load(): Promise<RecallLogEntry[]> {
     const raw = await this.file.read();

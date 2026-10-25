@@ -100,7 +100,7 @@ export async function recallForTurn(
 ): Promise<TurnRecall | null> {
   if (!shouldRecall(input.message)) return null;
   // The user message is already pushed (bubbleThenRecall), so it is the last one.
-  const messageCount = input.chats.find((c) => c.id === input.convoId)?.messages.length ?? 0;
+  const messages = input.chats.find((c) => c.id === input.convoId)?.messages ?? [];
   // The one pass over the notes feeds the title lane, the supersede index and
   // the name vocabulary that lets a 3-letter name ("Exo") be a keyword.
   let exclude: PathFilter | undefined;
@@ -135,10 +135,15 @@ export async function recallForTurn(
   const recalled = new Set(notes.map((n) => n.path));
   const fixes = scan?.supersede.fixes.filter((f) => recalled.has(f.path)) ?? [];
   if (fixes.length) void proposeMarkerFixes(app, fixes, input.convoId).catch(() => {});
-  const block = formatRecallBlock(notes, chats);
+  const { block, notes: shown } = formatRecallBlock(notes, chats);
   if (block && input.pluginDir) {
-    const entry = recallLogEntry({ convoId: input.convoId, messageCount, at: input.now, notes });
-    if (entry) void Promise.resolve().then(() => recallLogFor(app, input.pluginDir!).append(entry)).catch(() => {});
+    // Only the notes whose line made it into the block: what the model saw.
+    const entry = recallLogEntry({ convoId: input.convoId, messages, at: input.now, notes: shown });
+    if (entry) {
+      void Promise.resolve()
+        .then(() => recallLogFor(app, input.pluginDir!).append(entry))
+        .catch((err) => console.warn("[exo] recall log write failed", err));
+    }
   }
   return block ? { block, notes, chats } : null;
 }

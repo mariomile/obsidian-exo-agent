@@ -6,7 +6,7 @@ describe("autoMemoryNote", () => {
   it("asks for [[Note]] citations and successors when recall is on, in one sentence", () => {
     const note = autoMemoryNote({ recall: true, chats: false });
     expect(note).toContain(rule);
-    expect(note).toContain("a note marked superseded is not current, cite its successor");
+    expect(note).toContain("if you use a note marked superseded, cite its successor instead");
     expect(note.split(rule)).toHaveLength(2);
   });
   it("says nothing about recalled notes when recall is off", () => {
