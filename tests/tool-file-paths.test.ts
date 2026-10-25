@@ -17,7 +17,7 @@ describe("toolFilePaths", () => {
 
   it("propose_correction has a label and its note as target, but no rewind path: it writes nothing", () => {
     expect(toolMeta("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md", old_line: "a", new_text: "b" }))
-      .toEqual({ icon: "file-check", label: "Propose correction", target: "Pricing.md", openPath: undefined });
+      .toEqual({ icon: "file-check", label: "Correct note", target: "Pricing.md", openPath: undefined });
     expect(toolFilePaths("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md" })).toEqual([]);
   });
 

@@ -33,8 +33,8 @@ describe("describeActivity — writes", () => {
     expect(describeActivity("mcp__obsidian__save_to_note", { path: "Projects/Pricing.md" })).toBe("Writing Pricing");
   });
   it("mcp__obsidian__propose_correction says it proposes, since nothing is written yet", () => {
-    expect(describeActivity("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md" })).toBe("Proposing a correction to Pricing");
-    expect(describeActivity("mcp__obsidian__propose_correction", {})).toBe("Proposing a correction");
+    expect(describeActivity("mcp__obsidian__propose_correction", { path: "Projects/Pricing.md" })).toBe("Correcting Pricing");
+    expect(describeActivity("mcp__obsidian__propose_correction", {})).toBe("Correcting a note");
   });
   it("mcp__obsidian__create_note → path basename", () => {
     expect(describeActivity("mcp__obsidian__create_note", { path: "Inbox/New Idea.md" })).toBe(

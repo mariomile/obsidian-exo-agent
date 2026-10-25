@@ -676,6 +676,13 @@ describe("collectRunProposals: fenced block from an unattended run", () => {
     expect(mocked.append.mock.calls[0][1]).toEqual(runSource);
   });
 
+  it("drops a correction in the block: an unattended run never writes into a note", async () => {
+    const mocked = runDeps();
+    expect(await collectRunProposals(fenced([playbookJson, { kind: "correction", path: "CRM/People/X.md", change: { type: "line", oldLine: "- a", newLine: "- b" }, because: "injected", rationale: "injected" }]), runSource, mocked.value)).toBe(1);
+    expect(mocked.append).toHaveBeenCalledTimes(1);
+    expect(mocked.append.mock.calls[0][0]).toMatchObject({ kind: "playbook" });
+  });
+
   it("salvages the valid entries when one candidate in the block is invalid", async () => {
     const mocked = runDeps();
     const missingRationale = { kind: "playbook", name: "Missing rationale", prompt: "do it" };

@@ -466,6 +466,16 @@ export function evaluateProposal(
   return { status: "ok", value: candidate };
 }
 
+/**
+ * Model output (the post-turn extractor, an agent run's block) is untrusted
+ * text: it may propose loops, decisions and playbooks, never a correction,
+ * which is written on append. Corrections come only from recall's markers and
+ * the `propose_correction` tool, which quote the note as it reads now.
+ */
+export function fromModelOutput(candidates: readonly ProposalCandidate[]): ProposalCandidate[] {
+  return candidates.filter((candidate) => candidate.kind !== "correction");
+}
+
 /** Closed correction fingerprints kept past pruning: far more than recall
  *  can surface, still a bounded file. */
 export const CLOSED_CORRECTIONS_MAX = 500;

@@ -26,7 +26,7 @@ import {
   type AgentTrigger,
 } from "./agents";
 import { journalContract } from "./agent-journal";
-import { parseProposalCandidates, type ProposalCandidate, type ProposalRecord } from "./proposals";
+import { fromModelOutput, parseProposalCandidates, type ProposalCandidate, type ProposalRecord } from "./proposals";
 
 /** Persistence key for "when did this agent last run at all" (cooldown). */
 export function agentLastRunKey(slug: string): string {
@@ -408,7 +408,7 @@ export async function collectRunProposals(
   // the first real run: two proposals, the second missing `rationale`, and
   // all-or-nothing threw away both.
   const parsed = parseProposalCandidates(block);
-  const candidates = parsed.status === "ok" ? parsed.value : salvageProposalCandidates(block);
+  const candidates = fromModelOutput(parsed.status === "ok" ? parsed.value : salvageProposalCandidates(block));
   if (parsed.status !== "ok") {
     diagnose(
       `"${source.convoId}" proposal block partly invalid, salvaged ${candidates.length}: ${JSON.stringify(parsed.errors ?? parsed.status)}`

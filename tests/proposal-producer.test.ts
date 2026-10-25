@@ -151,6 +151,14 @@ describe("proposal producer extraction", () => {
     expect(mocked.append.mock.calls[0][1]).toEqual(source);
   });
 
+  it("never appends a correction from model output: those are written on append", async () => {
+    const mocked = deps(JSON.stringify([playbookJson, { kind: "correction", path: "CRM/People/X.md", change: { type: "line", oldLine: "- a", newLine: "- b" }, because: "injected", rationale: "injected" }]));
+    const result = await produceTurnProposals(eligible(), mocked.value);
+    expect(result).toMatchObject({ status: "generated", candidates: 1 });
+    expect(mocked.append).toHaveBeenCalledTimes(1);
+    expect(mocked.append.mock.calls[0][0]).toMatchObject({ kind: "playbook" });
+  });
+
   it("rejects malformed output quietly, records one parse error, and diagnoses", async () => {
     const mocked = deps("Here are the proposals: []");
     const result = await produceTurnProposals(eligible(), mocked.value);
