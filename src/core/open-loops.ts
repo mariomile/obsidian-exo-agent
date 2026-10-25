@@ -1,14 +1,14 @@
 /**
- * Open-Loops Ledger — pure logic (no Obsidian imports).
+ * Open-Loops Ledger, pure logic (no Obsidian imports).
  *
- * A "loop" is a durable open thread the user asked to be reminded about later —
+ * A "loop" is a durable open thread the user asked to be reminded about later:
  * a follow-up, a promise, a thing to circle back on. Unlike the Memory Union
  * Store (verbatim facts/preferences/decisions), a loop has a lifecycle: it
  * opens, optionally carries a tickler ("resurface") date, and closes with an
- * append-only outcome note. Closing NEVER deletes the entry — the ledger is
+ * append-only outcome note. Closing NEVER deletes the entry, the ledger is
  * append-only in spirit.
  *
- * On-disk shape — a single markdown file (the `paths.openLoops` ledger),
+ * On-disk shape, a single markdown file (the `paths.openLoops` ledger),
  * one block per entry:
  *
  *   ## loop-<epochMs>
@@ -19,11 +19,11 @@
  *   - closed: <ISO-8601>        (line omitted while open)
  *   - tags: tag1, tag2          (line omitted when no tags)
  *
- *   <verbatim note — may be multi-line markdown; outcome text is appended here
+ *   <verbatim note, may be multi-line markdown; outcome text is appended here
  *    on close, the opening context is never overwritten>
  *
  * `parseLoopsFile` tolerates arbitrary junk between blocks (a human may
- * hand-edit the file) and never throws — garbage lines are skipped, not
+ * hand-edit the file) and never throws, garbage lines are skipped, not
  * fatal. `formatLoop` ∘ `parseLoopsFile` round-trips for entries whose note
  * carries no leading/trailing blank lines (internal newlines are preserved).
  */
@@ -31,7 +31,7 @@
 export type LoopStatus = "open" | "closed";
 
 export interface LoopEntry {
-  /** Stable id, shaped `loop-<epochMs>`. */
+  /** Stable id: `loop-<epochMs>` when generated, `loop-<slug>` when hand-written. */
   id: string;
   title: string;
   /** The opening context, stored verbatim. Outcome text is appended (never overwritten) on close. */
@@ -46,8 +46,8 @@ export interface LoopEntry {
   tags?: string[];
 }
 
-/** Block header, e.g. `## loop-1720000000000`. No `g` flag: safe for `.test`. */
-const HEADER = /^##\s+(loop-\d+)\s*$/;
+/** Block header, e.g. `## loop-1720000000000` or a hand-written slug `## loop-2026-10-03-turno-init`. No `g` flag: safe for `.test`. */
+const HEADER = /^##\s+(loop-[\w-]+)\s*$/;
 /** A metadata line inside a block, e.g. `- title: Follow up with Marco`. */
 const META = /^-\s+(title|opened|resurface|status|closed|tags):\s*(.*)$/;
 
@@ -93,7 +93,7 @@ export function parseLoopsFile(content: string): LoopEntry[] {
       if (key === "title") title = val;
       else if (key === "opened") openedAt = Date.parse(val);
       else if (key === "resurface") resurface = val || undefined;
-      // Any value other than the literal "closed" is tolerated as "open" — hand-edited
+      // Any value other than the literal "closed" is tolerated as "open", hand-edited
       // junk in this field must never break the rest of the parse.
       else if (key === "status") status = val === "closed" ? "closed" : "open";
       else if (key === "closed") {
@@ -129,7 +129,7 @@ export function parseLoopsFile(content: string): LoopEntry[] {
   return entries;
 }
 
-/** Local calendar date (`YYYY-MM-DD`) for a timestamp — NOT UTC. Mirrors the `today()`
+/** Local calendar date (`YYYY-MM-DD`) for a timestamp, NOT UTC. Mirrors the `today()`
  *  convention used across the codebase (e.g. `src/obsidian/tools.ts`): toISOString()
  *  would roll to tomorrow late at night in a positive-offset timezone. */
 function localDateString(at: number | Date): string {
@@ -146,7 +146,7 @@ export function activeLoops(entries: LoopEntry[]): LoopEntry[] {
  * Open loops that are due to resurface: no `resurface` date (due immediately),
  * or a `resurface` date on/before `now`'s local calendar day. Comparison is by
  * local date string (`YYYY-MM-DD`, lexicographic == chronological), so it is
- * timezone-safe and time-of-day-independent — only the calendar day matters.
+ * timezone-safe and time-of-day-independent, only the calendar day matters.
  */
 export function dueLoops(entries: LoopEntry[], now: number | Date = Date.now()): LoopEntry[] {
   const today = localDateString(now);
@@ -154,8 +154,8 @@ export function dueLoops(entries: LoopEntry[], now: number | Date = Date.now()):
 }
 
 /**
- * Close a loop: flips status to `closed`, sets `closedAt`, and — if `outcome`
- * is given — appends it to the note. The opening note is NEVER overwritten or
+ * Close a loop: flips status to `closed`, sets `closedAt`, and, if `outcome`
+ * is given, appends it to the note. The opening note is NEVER overwritten or
  * removed, only appended to (append-only spirit, mirrors `memory-store.ts`).
  * Every other entry in `entries` is returned unchanged. Throws if `id` isn't
  * present, since a close that silently no-ops would look like success but
