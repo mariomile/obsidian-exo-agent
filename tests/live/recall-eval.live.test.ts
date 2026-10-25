@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { searchVaultNotes, type NoteHit } from "../../src/obsidian/vault-search";
 import { makeExclusion } from "../../src/core/vault-exclusions";
 import type { ChatRecord } from "../../src/core/recent-chats";
-import { recallTurn, turnKeywords, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
+import { recallQueries, recallTurn, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
 import { generateCases, type GenNote } from "../../src/core/recall-eval-gen";
 import {
   formatSummary,
@@ -233,9 +233,22 @@ async function runTurn(
 
 /** Live Sonar hits for what each message's turn would search for. */
 function fetchSonar(ctx: ReturnType<typeof liveContext>, messages: string[], timed = false) {
-  const queries = messages.map((m) => turnKeywords(m, ctx.names).join(" "));
+  const perMessage = messages.map((m) => recallQueries(m, ctx.names));
+  const queries = perMessage.flat();
   const { hits, ms } = liveSonar(queries, timed);
-  return { map: new Map(queries.map((q, i) => [q, hits[i]])), probe: hits, ms };
+  const at: number[] = [];
+  let next = 0;
+  for (const qs of perMessage) {
+    at.push(next);
+    next += qs.length;
+  }
+  return {
+    map: new Map(queries.map((q, i) => [q, hits[i]])),
+    /** The hits of each message's first query. */
+    probe: perMessage.map((_, i) => hits[at[i]] ?? []),
+    /** What a turn pays for its searches: the sum, they share one thread. */
+    ms: timed ? perMessage.map((qs, i) => ms.slice(at[i], at[i] + qs.length).reduce((a, b) => a + b, 0)) : ms,
+  };
 }
 
 /** Notes a turn injected on the title lane alone: named by the message, not found by the vault search. */

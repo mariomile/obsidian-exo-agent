@@ -31,6 +31,13 @@ export const RECALL_CHAT_WINDOW_DAYS = 60;
 export const RECALL_CHAT_KEYWORDS = 4;
 const MIN_WORDS = 4;
 const MAX_KEYWORDS = 10;
+/** A message longer than {@link MAX_KEYWORDS} keywords is searched in chunks of
+ *  this many (a long OR query lets the many common words outvote the few that
+ *  name the note), at most {@link MAX_QUERY_KEYWORDS} keywords in all. */
+const QUERY_CHUNK = 8;
+const MAX_QUERY_KEYWORDS = 24;
+/** The title lane reads this many keywords: a name costs nothing to look up. */
+const MAX_TITLE_KEYWORDS = 48;
 
 /** Short messages ("ok", "go on") and slash commands carry nothing to recall on. */
 export function shouldRecall(message: string): boolean {
@@ -83,14 +90,14 @@ export function nameVocab(notes: readonly { basename: string; aliases: readonly 
  *  `vocab` ({@link nameVocab}), which is how "Exo" becomes searchable without
  *  "the" and "per" coming back. Operators (`-x`, `path:`) never survive, so a
  *  message can't steer the search engine's syntax by accident. */
-export function recallKeywords(message: string, vocab?: ReadonlySet<string>): string[] {
+export function recallKeywords(message: string, vocab?: ReadonlySet<string>, cap = MAX_KEYWORDS): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const w of words(message)) {
     if (STOPWORDS.has(w) || seen.has(w) || (w.length < 4 && !(w.length === 3 && vocab?.has(w)))) continue;
     seen.add(w);
     out.push(w);
-    if (out.length >= MAX_KEYWORDS) break;
+    if (out.length >= cap) break;
   }
   return out;
 }
@@ -396,6 +403,17 @@ export function turnKeywords(message: string, names: readonly { basename: string
   return recallKeywords(message, nameVocab(names));
 }
 
+/** The vault searches of a turn, shared by the adapter and the eval: one query
+ *  of the {@link turnKeywords} when the message has ten keywords or fewer, else
+ *  chunks of {@link QUERY_CHUNK} over its first {@link MAX_QUERY_KEYWORDS}. */
+export function recallQueries(message: string, names: readonly { basename: string; aliases: readonly string[] }[]): string[] {
+  const keywords = recallKeywords(message, nameVocab(names), MAX_QUERY_KEYWORDS);
+  if (keywords.length <= MAX_KEYWORDS) return keywords.length ? [keywords.join(" ")] : [];
+  const out: string[] = [];
+  for (let i = 0; i < keywords.length; i += QUERY_CHUNK) out.push(keywords.slice(i, i + QUERY_CHUNK).join(" "));
+  return out;
+}
+
 /** What one turn recalled: the notes and chats to inject, and the lanes they
  *  were ranked from. */
 export interface RecallResult {
@@ -428,13 +446,10 @@ export async function recallTurn(input: {
   const keywords = turnKeywords(input.message, input.names);
   if (!keywords.length) return null;
   const scores = input.semantic();
-  const title = titleLane(keywords, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
-  let sonar: NoteRecall[] = [];
-  try {
-    sonar = await input.search(keywords.join(" "));
-  } catch {
-    /* search failed: chats and the title lane may still recall something */
-  }
+  const title = titleLane(recallKeywords(input.message, nameVocab(input.names), MAX_TITLE_KEYWORDS), input.names, input.message).slice(0, RECALL_LANE_DEPTH);
+  // A failed search leaves the other queries, the chats and the title lane.
+  const searched = await Promise.all(recallQueries(input.message, input.names).map((q) => input.search(q).catch((): NoteRecall[] => [])));
+  const sonar = searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path);
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
   const scored = await scores;
   const hits = scored && semanticHits(scored);

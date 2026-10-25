@@ -10,6 +10,7 @@ import {
   nameVocab,
   rankRecall,
   recallKeywords,
+  recallQueries,
   recallTurn,
   turnKeywords,
   semanticHits,
@@ -446,6 +447,36 @@ describe("recallTurn", () => {
     expect(r!.notes).toEqual([]);
     expect(r!.lanes.sonar).toEqual([]);
   });
+  it("a long message is searched in chunks, and a note found by more than one chunk leads", async () => {
+    const msg = Array.from({ length: 20 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const lanes: Record<string, NoteRecall[]> = {
+      [msg.split(" ").slice(0, 8).join(" ")]: [hit("A.md"), hit("Shared.md")],
+      [msg.split(" ").slice(8, 16).join(" ")]: [hit("B.md"), hit("Shared.md")],
+      [msg.split(" ").slice(16).join(" ")]: [hit("C.md")],
+    };
+    const search = vi.fn((q: string) => Promise.resolve(lanes[q] ?? []));
+    const r = await recallTurn({ ...base, message: msg, search });
+    expect(search).toHaveBeenCalledTimes(3);
+    expect(r!.notes.map((n) => n.path)).toEqual(["Shared.md", "A.md", "B.md", "C.md"]);
+  });
+  it("one chunk failing leaves the others", async () => {
+    const msg = Array.from({ length: 20 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const search = vi.fn((q: string) => (q.startsWith("terminea") ? Promise.reject(new Error("sonar down")) : Promise.resolve([hit("B.md")])));
+    const r = await recallTurn({ ...base, message: msg, search });
+    expect(r!.notes.map((n) => n.path)).toEqual(["B.md"]);
+  });
+  it("the title lane reads the whole message: a name past the tenth keyword is still named", async () => {
+    const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const withNames = [...names, { path: "D/Turno SaaS Open Core.md", basename: "Turno SaaS Open Core", aliases: [] }];
+    const r = await recallTurn({ ...base, names: withNames, message: `${filler} turno saas open core` });
+    expect(r!.lanes.title.map((t) => t.path)).toContain("D/Turno SaaS Open Core.md");
+  });
+  it("past chats are still matched on the first ten keywords only", async () => {
+    const chat: ChatRecord = { id: "c", title: "t", messages: [{ role: "user", text: "tardiva zeta tardiva zeta", at: NOW - DAY }] };
+    const filler = Array.from({ length: 10 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const r = await recallTurn({ ...base, chats: [chat], message: `${filler} tardiva zeta` });
+    expect(r!.lanes.lexicalChats).toEqual([]);
+  });
   it("computes the semantic hits once and gates the lexical chats on them", async () => {
     const old: ChatRecord = { id: "old", title: "Pricing history", messages: [{ role: "user", text: "how did pricing start", at: NOW - 300 * DAY }] };
     const flat = Array.from({ length: 10 }, (_, i) => ({ id: `noise${i}`, score: 0.8 }));
@@ -456,6 +487,21 @@ describe("recallTurn", () => {
     expect(elsewhere!.chats.map((c) => c.id)).toEqual(["old"]);
     const down = await recallTurn({ ...input, semantic: () => Promise.resolve(null) });
     expect(down!.chats.map((c) => c.id)).toEqual(["c1"]);
+  });
+});
+
+describe("recallQueries", () => {
+  const nums = (n: number, from = 0): string => Array.from({ length: n }, (_, i) => `parola${String.fromCharCode(97 + from + i)}`).join(" ");
+  it("a message of ten keywords or fewer is one query, the same words recall always searched", () => {
+    const msg = `cosa abbiamo deciso su ${nums(6)} ieri`;
+    expect(recallQueries(msg, [])).toEqual([turnKeywords(msg, []).join(" ")]);
+    expect(recallQueries(msg, [])).toHaveLength(1);
+    expect(recallQueries(`mmm ${nums(10)}`, [])).toEqual([nums(10)]);
+  });
+  it("a longer message is searched in chunks of eight keywords, three at most, so no word is drowned by the rest", () => {
+    const q = recallQueries(`mmm ${nums(26)}`, []);
+    expect(q).toEqual([nums(8), nums(8, 8), nums(8, 16)]);
+    expect(recallQueries(`mmm ${nums(14)}`, [])).toEqual([nums(8), nums(6, 8)]);
   });
 });
 
