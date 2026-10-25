@@ -47,7 +47,11 @@ const STOPWORDS = new Set(
     "would could should been were will does didn make want need please thanks " +
     "della delle dello degli nella nelle negli sono come cosa questo questa quello quella perché perche quando dove anche " +
     "ancora molto tutto tutti fare fatto essere stato avere hanno sulla sulle dalla dalle alla alle allo agli puoi fammi " +
-    "voglio vorrei grazie ciao solo però pero mentre"
+    "voglio vorrei grazie ciao solo però pero mentre " +
+    // Three letters: only a vault name can bring them back (see recallKeywords), never these.
+    "chi cui ora per con non che dei del sul sui nel gli una uno tra fra piu mio mia tuo tua suo sua " +
+    "are was has had you can not but how why who our out its his her she him all any " +
+    "now one two six did get let got say see too way use yes yet own off old ago hai mai nei dal via tre uso"
   ).split(" "),
 );
 
@@ -61,14 +65,29 @@ function words(text: string): string[] {
     .filter(Boolean);
 }
 
+/** The 3-letter words that are a name in the vault: a token of some note's
+ *  basename or alias ("exo", "crm"). Stopwords and numbers never qualify, so a
+ *  note called "Per" cannot bring "per" back. */
+export function nameVocab(notes: readonly { basename: string; aliases: readonly string[] }[]): Set<string> {
+  const vocab = new Set<string>();
+  for (const note of notes) {
+    for (const name of [note.basename, ...note.aliases]) {
+      for (const w of words(name)) if (w.length === 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) vocab.add(w);
+    }
+  }
+  return vocab;
+}
+
 /** The distinct content words of a message, in order: the search query.
- *  Operators (`-x`, `path:`) never survive, so a message can't steer the
- *  search engine's syntax by accident. */
-export function recallKeywords(message: string): string[] {
+ *  Words of four letters or more qualify; a 3-letter word only when it is in
+ *  `vocab` ({@link nameVocab}), which is how "Exo" becomes searchable without
+ *  "the" and "per" coming back. Operators (`-x`, `path:`) never survive, so a
+ *  message can't steer the search engine's syntax by accident. */
+export function recallKeywords(message: string, vocab?: ReadonlySet<string>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const w of words(message)) {
-    if (w.length < 4 || STOPWORDS.has(w) || seen.has(w)) continue;
+    if (STOPWORDS.has(w) || seen.has(w) || (w.length < 4 && !(w.length === 3 && vocab?.has(w)))) continue;
     seen.add(w);
     out.push(w);
     if (out.length >= MAX_KEYWORDS) break;
@@ -173,8 +192,20 @@ export interface RecallLanes {
 }
 
 /** Name words that can match a keyword: the same normalisation as
- *  {@link recallKeywords}, minus dates and numbers. */
-const nameWords = (name: string): string[] => [...new Set(words(name).filter((w) => w.length >= 4 && !/^\d+$/.test(w)))];
+ *  {@link recallKeywords}, minus dates and numbers. A 3-letter word counts only
+ *  when the message asked for it, so it never thins the cover of a name the
+ *  message does not mean. */
+const nameWords = (name: string, asked: ReadonlySet<string>): string[] => [
+  ...new Set(words(name).filter((w) => (w.length >= 4 || (w.length === 3 && asked.has(w))) && !/^\d+$/.test(w))),
+];
+
+/** A folder note: `X/X.md`, the page a folder is about ("Active/Projects/Exo/Exo.md"). */
+export function isHub(path: string): boolean {
+  const parts = path.split("/");
+  if (parts.length < 2) return false;
+  const base = parts[parts.length - 1].replace(/\.md$/i, "");
+  return base.toLowerCase() === parts[parts.length - 2].toLowerCase();
+}
 
 /** A note the message names: how many words of its name the message shares,
  *  and `whole` when it shares every one. */
@@ -187,7 +218,8 @@ export interface TitleHit {
 /**
  * Notes the message names: a basename or alias that shares two keywords with
  * it, or whose every word is a keyword ("Turno", "Alberto Aspese"). More shared
- * words first, then names covered more fully, then path. A name sharing a
+ * words first, then names covered more fully, then a project hub ahead of a
+ * same-named note (a company card, a transcript), then path. A name sharing a
  * single word with a longer title is noise, not a mention.
  */
 export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): TitleHit[] {
@@ -196,7 +228,7 @@ export function titleLane(keywords: readonly string[], notes: readonly { path: s
   for (const note of notes) {
     let best: { shared: number; cover: number } | null = null;
     for (const name of [note.basename, ...note.aliases]) {
-      const ws = nameWords(name);
+      const ws = nameWords(name, asked);
       const shared = ws.filter((w) => asked.has(w)).length;
       if (!shared || (shared < 2 && shared < ws.length)) continue;
       const cover = shared / ws.length;
@@ -205,7 +237,13 @@ export function titleLane(keywords: readonly string[], notes: readonly { path: s
     if (best) hits.push({ path: note.path, ...best });
   }
   return hits
-    .sort((a, b) => b.shared - a.shared || b.cover - a.cover || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .sort(
+      (a, b) =>
+        b.shared - a.shared ||
+        b.cover - a.cover ||
+        Number(isHub(b.path)) - Number(isHub(a.path)) ||
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    )
     .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1 }));
 }
 

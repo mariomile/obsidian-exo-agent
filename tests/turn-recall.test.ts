@@ -5,7 +5,9 @@ import { join } from "node:path";
 import {
   chatsFromIds,
   formatRecallBlock,
+  isHub,
   matchPastChats,
+  nameVocab,
   rankRecall,
   recallKeywords,
   semanticHits,
@@ -50,6 +52,44 @@ describe("recallKeywords", () => {
       "pricing",
       "path",
     ]);
+  });
+});
+
+describe("recallKeywords with a name vocabulary", () => {
+  it("keeps a 3-char token only when a note is named so", () => {
+    const msg = "Qual è il progetto Exo adesso?";
+    expect(recallKeywords(msg)).toEqual(["qual", "progetto", "adesso"]);
+    expect(recallKeywords(msg, new Set(["exo"]))).toEqual(["qual", "progetto", "exo", "adesso"]);
+    expect(recallKeywords(msg, new Set(["crm"]))).toEqual(["qual", "progetto", "adesso"]);
+  });
+  it("stopwords stay dropped even when a note carries the word", () => {
+    const vocab = new Set(["per", "con", "the", "exo"]);
+    expect(recallKeywords("the plan per Exo con calma", vocab)).toEqual(["plan", "exo", "calma"]);
+  });
+  it("2-char tokens never qualify", () => {
+    expect(recallKeywords("cosa fa AI nel progetto", new Set(["ai"]))).toEqual(["progetto"]);
+  });
+});
+
+describe("nameVocab", () => {
+  it("collects the 3-char word tokens of basenames and aliases, minus stopwords and digits", () => {
+    const vocab = nameVocab([
+      { basename: "Exo", aliases: [] },
+      { basename: "Note per CRM", aliases: ["Gestione API"] },
+      { basename: "2026-10-25 123", aliases: [] },
+      { basename: "Deployment", aliases: [] },
+    ]);
+    expect([...vocab].sort()).toEqual(["api", "crm", "exo"]);
+  });
+});
+
+describe("isHub", () => {
+  it("a folder note is X/X.md, anywhere in the path", () => {
+    expect(isHub("Active/Projects/Exo/Exo.md")).toBe(true);
+    expect(isHub("Exo/Exo.md")).toBe(true);
+    expect(isHub("CRM/Companies/Exo.md")).toBe(false);
+    expect(isHub("Exo.md")).toBe(false);
+    expect(isHub("Active/Projects/Exo/Roadmap.md")).toBe(false);
   });
 });
 
@@ -206,6 +246,29 @@ describe("titleLane", () => {
   it("one shared word with a longer name is not a title match", () => {
     expect(titleLane(recallKeywords("quale task manager uso adesso"), [note("R/Notes on everything task related.md")])).toEqual([]);
   });
+  it("a 3-char name word counts once the message names it, so Exo is findable", () => {
+    expect(titleLane(["exo"], [note("Companies/Exo.md")])).toEqual([{ path: "Companies/Exo.md", shared: 1, whole: true }]);
+    expect(titleLane(["stato"], [note("Companies/Exo.md")])).toEqual([]);
+  });
+  it("a 3-char word in a longer name stays out of the cover unless the message names it", () => {
+    expect(titleLane(["companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 1, whole: true }]);
+    expect(titleLane(["crm", "companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 2, whole: true }]);
+  });
+  it("a project hub beats a same-named note that sorts before it", () => {
+    const notes = [note("Companies/DeepAgent.md"), note("Projects/DeepAgent/DeepAgent.md"), note("Archive/DeepAgent.md")];
+    expect(titleLane(["deepagent"], notes).map((h) => h.path)).toEqual([
+      "Projects/DeepAgent/DeepAgent.md",
+      "Archive/DeepAgent.md",
+      "Companies/DeepAgent.md",
+    ]);
+  });
+  it("without a hub the lane is unchanged: path order", () => {
+    expect(titleLane(["deepagent"], [note("Z/DeepAgent.md"), note("A/DeepAgent.md")]).map((h) => h.path)).toEqual(["A/DeepAgent.md", "Z/DeepAgent.md"]);
+  });
+  it("a hub does not outrank a note the message names more fully", () => {
+    const hits = titleLane(["bending", "spoons"], [note("Bending/Bending.md"), note("CRM/Bending Spoons.md")]);
+    expect(hits.map((h) => h.path)).toEqual(["CRM/Bending Spoons.md", "Bending/Bending.md"]);
+  });
   it("ties break by path, so the lane is deterministic", () => {
     const keywords = recallKeywords("parliamo di Bending Spoons domani mattina");
     expect(titleLane(keywords, [note("Z/Bending Spoons.md"), note("A/Bending Spoons.md")]).map((h) => h.path)).toEqual(["A/Bending Spoons.md", "Z/Bending Spoons.md"]);
@@ -243,6 +306,15 @@ describe("rankRecall fusion", () => {
     const title = [{ path: "Deep.md", shared: 2, whole: false }];
     const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["S1.md", "S2.md", "S3.md", "S4.md", "S5.md"]);
+  });
+  it("a note in two lanes still beats a title-only hub", () => {
+    const sonar = ["Companies/Exo.md"].map(n);
+    const title = [
+      { path: "Projects/Exo/Exo.md", shared: 1, whole: true },
+      { path: "Companies/Exo.md", shared: 1, whole: true },
+    ];
+    const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
+    expect(r.notes.map((x) => x.path)).toEqual(["Companies/Exo.md", "Projects/Exo/Exo.md"]);
   });
   it("chats from both lanes are deduped by id, keeping the lexical snippet", () => {
     const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("x", "lexical")], semanticChats: [c("y"), c("x", "semantic")] }, opts);
@@ -449,6 +521,15 @@ describe("recallForTurn", () => {
     expect(r).toBeNull();
   });
 
+  it("the chat gate takes a 3-char note name as a keyword: Exo is searched when a note is named Exo", async () => {
+    const files = [{ path: "Projects/Exo/Exo.md", basename: "Exo" }];
+    const base = app([]);
+    const a = { ...(base.app as object), vault: { getMarkdownFiles: () => files }, metadataCache: { getFileCache: () => null } } as never;
+    const r = await recallForTurn(a, { message: "what is the status of Exo today", convoId: "x", chats: [], now: NOW });
+    expect(base.calls[0]).toBe("status exo today");
+    expect(r!.notes.map((x) => x.path)).toEqual(["Projects/Exo/Exo.md"]);
+  });
+
   it("a semantic lane inside its budget is not aborted", async () => {
     semantic.mockResolvedValue([]);
     await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW, pluginDir: "p" });
@@ -469,7 +550,8 @@ describe("recallForTurn", () => {
       metadataCache: { getFileCache: (f: { path: string }) => (f.path === "Misc/Plan.md" ? { frontmatter: { aliases: ["Pricing tiers"] } } : null) },
     } as never;
     const r = await recallForTurn(a, { message: "what are the Exo pricing tiers", convoId: "current", chats: [], now: NOW });
-    expect(r!.notes.map((x) => x.path)).toEqual(["Misc/Plan.md", "Projects/Exo Pricing Tiers.md"]);
+    // "exo" is a vault name here, so the note named Exo Pricing Tiers shares three words, the alias two.
+    expect(r!.notes.map((x) => x.path)).toEqual(["Projects/Exo Pricing Tiers.md", "Misc/Plan.md"]);
   });
 
   it("reads supersede markers from frontmatter links and proposes the fix for a recalled note", async () => {

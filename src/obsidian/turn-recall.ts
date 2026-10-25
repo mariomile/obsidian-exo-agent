@@ -4,6 +4,7 @@ import {
   chatsFromIds,
   formatRecallBlock,
   matchPastChats,
+  nameVocab,
   rankRecall,
   recallKeywords,
   semanticHits,
@@ -15,9 +16,8 @@ import {
   RECALL_MAX_NOTES,
   type ChatRecall,
   type NoteRecall,
-  type TitleHit,
 } from "../core/turn-recall";
-import { buildSupersedeIndex, markersOf, type MarkerFix, type SupersedeIndex } from "../core/supersede";
+import { buildSupersedeIndex, markersOf } from "../core/supersede";
 import { proposeMarkerFixes } from "./corrections";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
 import { vaultBasePath } from "./tool-kit";
@@ -106,21 +106,26 @@ export async function recallForTurn(
   input: { message: string; convoId: string; chats: readonly ChatRecord[]; now: number; exclude?: PathFilter; pluginDir?: string },
 ): Promise<TurnRecall | null> {
   if (!shouldRecall(input.message)) return null;
-  const keywords = recallKeywords(input.message);
+  // The one pass over the notes feeds the title lane, the supersede index and
+  // the name vocabulary that lets a 3-letter name ("Exo") be a keyword.
+  const exclude = input.exclude ?? vaultExclusion(app);
+  let scan: ReturnType<typeof scanNotes> | undefined;
+  try {
+    scan = scanNotes(app, exclude);
+  } catch {
+    /* unreadable index: chats and the vault search may still recall something */
+  }
+  const keywords = recallKeywords(input.message, scan && nameVocab(scan.names));
   if (!keywords.length) return null;
   const basePath = input.pluginDir ? vaultBasePath(app) : "";
   const semantic =
     input.pluginDir && basePath
       ? withinBudget((signal) => recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH, signal), SEMANTIC_BUDGET_MS)
       : Promise.resolve(null);
+  const supersede = scan?.supersede;
+  const title = scan ? titleLane(keywords, scan.names).slice(0, RECALL_LANE_DEPTH) : [];
   let sonar: NoteRecall[] = [];
-  let title: TitleHit[] = [];
-  let supersede: { index: SupersedeIndex; fixes: MarkerFix[] } | undefined;
   try {
-    const exclude = input.exclude ?? vaultExclusion(app);
-    const scan = scanNotes(app, exclude);
-    supersede = scan.supersede;
-    title = titleLane(keywords, scan.names).slice(0, RECALL_LANE_DEPTH);
     const { hits } = await searchVaultNotes(app, keywords.join(" "), RECALL_LANE_DEPTH, exclude);
     sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
   } catch {
