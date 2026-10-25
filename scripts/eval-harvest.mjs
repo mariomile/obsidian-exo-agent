@@ -28,8 +28,9 @@ const records = JSON.parse(readFileSync(logPath, "utf8")).filter((r) => r.at >= 
 const writes = records.flatMap((r) => r.writes.map((w) => ({ ...w, undone: Boolean(r.undoneAt) })));
 
 const isInbox = (w) => /(^|\/)memory\/inbox\//.test(w.path);
-// A fact line carries provenance when it ends the vault's way: a source tail
-// (`[fonte: ...; dal: ...]`) or the changed-fact tail (`(dal ...; prima ...)`).
+// A fact line carries provenance when it has a source tail: `[fonte: ...; dal: ...]`
+// on an added fact, `(dal ...; prima ...) [fonte: ...]` on an updated one. The
+// bare `(dal ...; prima ...)` of releases before the source tail counts too.
 const hasProvenance = (w) => w.lines.some((l) => /\[fonte:|\bdal:|\(dal \d{4}-\d{2}-\d{2}; prima /.test(l));
 
 // The release-4 baseline counted only `[fonte:` and `dal:`; kept for comparison.

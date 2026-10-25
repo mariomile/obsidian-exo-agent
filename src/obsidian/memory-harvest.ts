@@ -14,7 +14,6 @@ import {
   harvestSlice,
   isHarvestDue,
   normalizeTarget,
-  safeTitle,
   keywordsOf,
   matchingLines,
   memoryRulesSection,
@@ -27,6 +26,7 @@ import {
   type NoteContext,
   type TargetEnv,
 } from "../core/memory-harvest";
+import { safeTitle } from "../core/text-safety";
 import { applyDecisions, type ApplyVault } from "../core/memory-apply";
 import type { WriteQueue } from "../core/write-queue";
 import { checkGitRepo, headSha, isWorktreeDirty, runGitCommit, type GitRun } from "./git";

@@ -9,17 +9,17 @@ import {
   applyAdd,
   applyUpdate,
   checkTarget,
-  containsSecret,
   inboxNote,
   normalizeTarget,
-  oneLine,
   stripProvenance,
   HARVEST_MAX_WRITES,
   type Decision,
   type HarvestProvenance,
   type TargetEnv,
 } from "./memory-harvest";
+import { formatProvenance } from "./block-patch";
 import { formatLoop } from "./open-loops";
+import { containsSecret, oneLine } from "./text-safety";
 
 export interface ApplyVault {
   exists(path: string): boolean;
@@ -96,11 +96,16 @@ export async function applyDecisions(vault: ApplyVault, decisions: readonly Deci
         reject("the open-loops ledger only takes new loops");
         continue;
       }
-      const title = oneLine(d.text).slice(0, 80);
-      const block = formatLoop({ id: `loop-${env.now + writes.length}`, title, note: oneLine(d.text), openedAt: env.now, status: "open" });
+      const fact = oneLine(stripProvenance(d.text));
+      if (!fact) {
+        reject("text is only a provenance tail");
+        continue;
+      }
+      const note = `${fact} ${formatProvenance({ ...env.provenance, msgIndex: 0 })}`;
+      const block = formatLoop({ id: `loop-${env.now + writes.length}`, title: fact.slice(0, 80), note, openedAt: env.now, status: "open" });
       const ok = await vault.edit(path, (cur) => `${cur.replace(/\s+$/, "")}\n\n${block}\n`);
       if (!ok) reject("ledger could not be edited");
-      else writes.push({ path, op: "add", text: oneLine(d.text), lines: block.split("\n") });
+      else writes.push({ path, op: "add", text: fact, lines: block.split("\n") });
       continue;
     }
 
@@ -126,7 +131,7 @@ export async function applyDecisions(vault: ApplyVault, decisions: readonly Deci
         out.write = { path, op: "add", text: oneLine(stripProvenance(d.text)), lines: [res.line] };
         return res.content;
       }
-      const res = applyUpdate(cur, d.oldLine, d.newText, env.today);
+      const res = applyUpdate(cur, d.oldLine, d.newText, env.provenance);
       if (!res) return null;
       out.write = { path, op: "update", text: oneLine(stripProvenance(d.newText)), lines: [res.to], replaced: res.from };
       return res.content;

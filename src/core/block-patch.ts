@@ -5,7 +5,7 @@
  */
 import { chatLink } from "./chat-link";
 import { documentNewline } from "./frontmatter-patch";
-import { oneLine, safeTitle } from "./memory-harvest";
+import { oneLine, safeTitle } from "./text-safety";
 import { LIST_ITEM, bodyLines, inFence, protectedLines, resolveSection, type SectionRef } from "./save-target";
 
 export interface Provenance {
@@ -50,12 +50,23 @@ export function newAnchor(rand: () => number, content = ""): string {
   }
 }
 
-/** A headless run has no chat to link back to (`convoId` empty): the line
- *  names the automation or playbook instead. */
-export function formatProvenance(p: Provenance): string {
+/** Where a fact came from: the chat with its link, or the automation by name
+ *  for a headless run (`convoId` empty). */
+function sourceOf(p: Provenance): string {
   const title = safeTitle(p.chatTitle).replace(/"/g, "'");
-  if (!p.convoId) return `[fonte: automazione "${title}"; dal: ${p.date}]`;
-  return `[fonte: chat "${title}" (${chatLink(p.convoId, p.msgIndex)}); dal: ${p.date}]`;
+  return p.convoId ? `chat "${title}" (${chatLink(p.convoId, p.msgIndex)})` : `automazione "${title}"`;
+}
+
+/** `[fonte: <source>; dal: <date>]`. A headless run has no chat to link back
+ *  to: the line names the automation or playbook instead. */
+export function formatProvenance(p: Provenance): string {
+  return `[fonte: ${sourceOf(p)}; dal: ${p.date}]`;
+}
+
+/** `[fonte: <source>]` for a line that already carries its date, such as a
+ *  changed fact `(dal <date>; prima <old>)`. */
+export function formatSource(p: Provenance): string {
+  return `[fonte: ${sourceOf(p)}]`;
 }
 
 /** One line into a list section becomes one vault fact line; anything else

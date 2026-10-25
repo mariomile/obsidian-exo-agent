@@ -29,6 +29,7 @@ function fakeVault(files: Record<string, string>) {
 
 const P = exoPaths("_exo");
 const TAIL = ' [fonte: chat "Planning" (obsidian://exo-chat?id=c-1&msg=0); dal: 2026-09-25]';
+const SRC = '[fonte: chat "Planning" (obsidian://exo-chat?id=c-1&msg=0)]';
 const INBOX = "_exo/memory/inbox/2026-09-25.md";
 function envFor(vault: ApplyVault, offered: string[]): ApplyEnv {
   return {
@@ -67,13 +68,13 @@ describe("applyDecisions", () => {
       ],
       envFor(vault, ["P/context.md"]),
     );
-    expect(store.get("P/context.md")).toBe("- Status: live (dal 2026-09-25; prima Status: beta)\n- Owner: Mario\n- Owner: Mario\n");
+    expect(store.get("P/context.md")).toBe(`- Status: live (dal 2026-09-25; prima Status: beta) ${SRC}\n- Owner: Mario\n- Owner: Mario\n`);
     expect(res.writes).toEqual([
       {
         path: "P/context.md",
         op: "update",
         text: "Status: live",
-        lines: ["- Status: live (dal 2026-09-25; prima Status: beta)"],
+        lines: [`- Status: live (dal 2026-09-25; prima Status: beta) ${SRC}`],
         replaced: "- Status: beta",
       },
     ]);
@@ -165,6 +166,19 @@ describe("applyDecisions", () => {
     expect(loops.map((l) => l.title)).toEqual(["Old", "Call Anna back about the design role"]);
     expect(loops[0].note).toBe("old note"); // the previous loop is untouched
     expect(res.rejected.map((r) => r.reason)).toEqual(["the open-loops ledger only takes new loops"]);
+  });
+
+  it("an open loop carries the provenance in its note, model tails stripped from title and note", async () => {
+    const { vault, store } = fakeVault({ [P.openLoops]: "" });
+    await applyDecisions(
+      vault,
+      [{ op: "add", candidate: 0, path: P.openLoops, text: "Call Anna back [fonte: chat \"Old\" (obsidian://exo-chat?id=z&msg=1); dal: 2026-01-01]" }],
+      envFor(vault, [P.openLoops]),
+    );
+    const [loop] = parseLoopsFile(store.get(P.openLoops)!);
+    expect(loop.title).toBe("Call Anna back");
+    expect(loop.note).toBe(`Call Anna back${TAIL}`);
+    expect(loop.note.match(/\[fonte/g)).toHaveLength(1);
   });
 
   it("drops edits that carry a credential", async () => {

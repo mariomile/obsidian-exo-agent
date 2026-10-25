@@ -3,7 +3,6 @@ import {
   applyAdd,
   applyUpdate,
   checkTarget,
-  containsSecret,
   explicitRulePaths,
   buildDecidePrompt,
   inboxNote,
@@ -12,7 +11,6 @@ import {
   harvestBlocklist,
   harvestSlice,
   isHarvestDue,
-  safeTitle,
   matchingLines,
   memoryRulesSection,
   parseCandidates,
@@ -24,6 +22,7 @@ import {
   type HarvestProvenance,
   type TargetEnv,
 } from "../src/core/memory-harvest";
+import { containsSecret, safeTitle } from "../src/core/text-safety";
 import { formatProvenance } from "../src/core/block-patch";
 import { formatSupersede } from "../src/core/supersede";
 import type { ChatMessage } from "../src/core/recent-chats";
@@ -330,40 +329,72 @@ describe("stripProvenance", () => {
   });
 });
 
+describe("stripProvenance, bracketed fact text", () => {
+  it("leaves wikilinks and bracketed words that are not a source tail", () => {
+    expect(stripProvenance("Dati in [[fonte-dati-crm]]")).toBe("Dati in [[fonte-dati-crm]]");
+    expect(stripProvenance("Vedi [[fonte-dati-crm]] [fonte: nota; dal: 2026-10-25]")).toBe("Vedi [[fonte-dati-crm]]");
+    expect(stripProvenance("Serve una [fonte di verità]")).toBe("Serve una [fonte di verità]");
+  });
+  it("drops the real [fonte regola 11: ...] variant", () => {
+    expect(stripProvenance("Fact [fonte regola 11: AGENTS.md; dal: 2026-10-25]")).toBe("Fact");
+  });
+  it("drops the update source tail without a dal: too", () => {
+    expect(stripProvenance('Team: 6 (dal 2026-10-25; prima Team: 4) [fonte: chat "T" (obsidian://exo-chat?id=a&msg=0)]')).toBe("Team: 6");
+  });
+});
+
 describe("applyUpdate", () => {
   const note = "## Work\n- Role: designer at Acme\n  - Team: 4\n";
-  const TODAY = "2026-10-25";
-  it("replaces exactly one line, keeping its bullet, and writes (dal <today>; prima <old>)", () => {
-    expect(applyUpdate(note, "- Role: designer at Acme", "Role: head of design at Acme", TODAY)).toEqual({
-      content: "## Work\n- Role: head of design at Acme (dal 2026-10-25; prima Role: designer at Acme)\n  - Team: 4\n",
+  const SRC = '[fonte: chat "Planning" (obsidian://exo-chat?id=c-1&msg=0)]';
+  const U = (content: string, old: string, text: string) => applyUpdate(content, old, text, { ...PROV, date: "2026-10-25" });
+  it("replaces exactly one line, keeping its bullet: (dal <today>; prima <old>) then the chat source", () => {
+    expect(U(note, "- Role: designer at Acme", "Role: head of design at Acme")).toEqual({
+      content: `## Work\n- Role: head of design at Acme (dal 2026-10-25; prima Role: designer at Acme) ${SRC}\n  - Team: 4\n`,
       from: "- Role: designer at Acme",
-      to: "- Role: head of design at Acme (dal 2026-10-25; prima Role: designer at Acme)",
+      to: `- Role: head of design at Acme (dal 2026-10-25; prima Role: designer at Acme) ${SRC}`,
     });
   });
-  it("the shape is the one corrections write", () => {
-    const res = applyUpdate(note, "- Role: designer at Acme", "Role: head", TODAY);
-    expect(res?.to).toBe(formatSupersede("- Role: designer at Acme", "Role: head", TODAY));
+  it("the changed-fact part is the one corrections write", () => {
+    const res = U(note, "- Role: designer at Acme", "Role: head");
+    expect(res?.to).toBe(`${formatSupersede("- Role: designer at Acme", "Role: head", "2026-10-25")} ${SRC}`);
+  });
+  it("the source carries no second dal:, the date is in the parenthesis", () => {
+    expect(U(note, "- Team: 4", "Team: 6")?.to).not.toMatch(/dal:/);
   });
   it("keeps nested indentation", () => {
-    expect(applyUpdate(note, "- Team: 4", "Team: 6", TODAY)?.content).toContain("\n  - Team: 6 (dal 2026-10-25; prima Team: 4)\n");
+    expect(U(note, "- Team: 4", "Team: 6")?.content).toContain(`\n  - Team: 6 (dal 2026-10-25; prima Team: 4) ${SRC}\n`);
   });
   it("does not duplicate a tail the model wrote itself", () => {
-    const res = applyUpdate(note, "- Team: 4", "Team: 6 (dal 2026-01-01; prima 4)", TODAY);
-    expect(res?.to).toBe("  - Team: 6 (dal 2026-10-25; prima Team: 4)");
-    expect(res?.to.match(/\(dal/g)).toHaveLength(1);
+    const res = U(note, "- Team: 4", 'Team: 6 (dal 2026-01-01; prima 4) [fonte: x; dal: 2026-01-01]');
+    expect(res?.to).toBe(`  - Team: 6 (dal 2026-10-25; prima Team: 4) ${SRC}`);
   });
   it("an old line that already holds a (dal; prima) tail nests nothing", () => {
     const doc = "- Team: 4 (dal 2026-01-01; prima 2)\n";
-    expect(applyUpdate(doc, "- Team: 4 (dal 2026-01-01; prima 2)", "Team: 6", TODAY)?.to).toBe("- Team: 6 (dal 2026-10-25; prima Team: 4)");
+    expect(U(doc, "- Team: 4 (dal 2026-01-01; prima 2)", "Team: 6")?.to).toBe(`- Team: 6 (dal 2026-10-25; prima Team: 4) ${SRC}`);
   });
-  it("an old line that holds a provenance tail drops it from prima", () => {
+  it("keeps the old line's source inside prima", () => {
     const doc = "- Team: 4 [fonte: nota; dal: 2026-01-01]\n";
-    expect(applyUpdate(doc, "- Team: 4 [fonte: nota; dal: 2026-01-01]", "Team: 6", TODAY)?.to).toBe("- Team: 6 (dal 2026-10-25; prima Team: 4)");
+    expect(U(doc, "- Team: 4 [fonte: nota; dal: 2026-01-01]", "Team: 6")?.to).toBe(
+      `- Team: 6 (dal 2026-10-25; prima Team: 4 [fonte: nota; dal: 2026-01-01]) ${SRC}`,
+    );
+  });
+  it("an old line with both tails drops only the changed-fact tail and keeps its source", () => {
+    const old = "- Team: 4 (dal 2026-01-01; prima 2) [fonte: nota B]";
+    expect(U(`${old}\n`, old, "Team: 6")?.to).toBe(`- Team: 6 (dal 2026-10-25; prima Team: 4 [fonte: nota B]) ${SRC}`);
+  });
+  it("takes a trailing block anchor off the old line and puts it back at the end of the new one", () => {
+    const old = "- Team: 4 [fonte: nota; dal: 2026-01-01] ^exo-abc123";
+    const res = U(`${old}\n`, old, "Team: 6");
+    expect(res?.to).toBe(`- Team: 6 (dal 2026-10-25; prima Team: 4 [fonte: nota; dal: 2026-01-01]) ${SRC} ^exo-abc123`);
+    expect(res?.to.match(/\^exo-abc123/g)).toHaveLength(1);
+  });
+  it("an anchored line with no source keeps its anchor last", () => {
+    expect(U("- Team: 4 ^exo-q1\n", "- Team: 4 ^exo-q1", "Team: 6")?.to).toBe(`- Team: 6 (dal 2026-10-25; prima Team: 4) ${SRC} ^exo-q1`);
   });
   it("refuses a line that is missing or not unique", () => {
-    expect(applyUpdate(note, "- Role: CEO", "x", TODAY)).toBeNull();
-    expect(applyUpdate("- a\n- a\n", "- a", "b", TODAY)).toBeNull();
-    expect(applyUpdate(note, "   ", "b", TODAY)).toBeNull();
+    expect(U(note, "- Role: CEO", "x")).toBeNull();
+    expect(U("- a\n- a\n", "- a", "b")).toBeNull();
+    expect(U(note, "   ", "b")).toBeNull();
   });
   it("refuses frontmatter, headings, table rows, fences, rules and code, whatever the model says", () => {
     const doc = [
@@ -379,10 +410,10 @@ describe("applyUpdate", () => {
       "- plain line",
     ].join("\n");
     for (const old of ["status: beta", "## Status", "| k | v |", "```", "status = beta", "---"]) {
-      expect(applyUpdate(doc, old, "live", TODAY), old).toBeNull();
+      expect(U(doc, old, "live"), old).toBeNull();
     }
-    expect(applyUpdate(doc, "- plain line", "## Injected heading", TODAY)).toBeNull();
-    expect(applyUpdate(doc, "- plain line", "new plain line", TODAY)?.to).toBe("- new plain line (dal 2026-10-25; prima plain line)");
+    expect(U(doc, "- plain line", "## Injected heading")).toBeNull();
+    expect(U(doc, "- plain line", "new plain line")?.to).toBe(`- new plain line (dal 2026-10-25; prima plain line) ${SRC}`);
   });
 });
 
