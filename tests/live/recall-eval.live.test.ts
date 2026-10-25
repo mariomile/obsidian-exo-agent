@@ -6,23 +6,24 @@
  * Read-only by construction: Obsidian is only asked to evaluate expressions
  * that read (Sonar search, note names, vault config), the conversation store is
  * read from disk, and the semantic chat index is only queried (`query` mode;
- * the test fails if the index files change). The lanes are built with the same
- * functions the turn uses (`searchVaultNotes`, `titleLane`, `matchPastChats`,
- * `chatsFromIds`) and fused by the same `rankRecall`, so what is measured is
+ * the test fails if the index files change). Every set goes through the turn's
+ * own `recallTurn`, the function the adapter calls: this file supplies only
+ * its reads (the note index minus excluded paths, built by the turn's own
+ * `indexNotes`; the Sonar hits; the semantic scores), so what is measured is
  * what ships.
  *
  * The adapter's own semantic call is not used here on purpose: it may refresh
  * the script it runs inside the plugin folder, and this run must not write.
- * For the same reason the supersede index is built here, by the turn's own
- * `indexNotes`, from the same frontmatter the adapter reads, and the
- * correction proposals recall would make are only listed, never appended.
+ * For the same reason the correction proposals recall would make are only
+ * listed, never appended.
  *
  * Two sets run: the 10 hand questions (regression gate, 10/10 and no trap) and
  * the generated set (`core/recall-eval-gen`, derived from the vault's own links
  * and paths at each run; prints per-family rates and the ids of the misses,
  * asserts only that no superseded note leads). `EXO_EVAL_GEN=0` skips the
- * generated set. The generated cases expect notes only, so their chat lanes
- * are left out: they cannot change which notes a turn injects.
+ * generated set. The generated cases expect notes only, so they run with no
+ * past chats and no semantic answer: chats cannot change which notes a turn
+ * injects.
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -31,17 +32,7 @@ import { join } from "node:path";
 import { searchVaultNotes, type NoteHit } from "../../src/obsidian/vault-search";
 import { makeExclusion } from "../../src/core/vault-exclusions";
 import type { ChatRecord } from "../../src/core/recent-chats";
-import {
-  chatsFromIds,
-  matchPastChats,
-  rankRecall,
-  recallKeywords,
-  semanticHits,
-  titleLane,
-  RECALL_LANE_DEPTH,
-  RECALL_MAX_CHATS,
-  RECALL_MAX_NOTES,
-} from "../../src/core/turn-recall";
+import { recallTurn, turnKeywords, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
 import { generateCases, type GenNote } from "../../src/core/recall-eval-gen";
 import {
   formatSummary,
@@ -80,61 +71,54 @@ function obsidianEval<T>(code: string): T {
 interface LiveVault {
   ignore: string[];
   reports: string;
-  sonar: NoteHit[][];
-  /** Milliseconds per Sonar call, as the turn would pay it. */
-  sonarMs: number[];
   names: { path: string; basename: string; frontmatter: Record<string, unknown> | null; links: { key: string; target: string }[] }[];
 }
 
-/** One Obsidian round trip for every question. Every call in it only reads. */
-function liveVault(queries: string[]): LiveVault {
-  const code = `(async () => {
-    const sonar = app.plugins.plugins["sonar"];
-    const queries = ${JSON.stringify(queries)};
-    const hits = [];
-    const sonarMs = [];
-    for (const q of queries) {
-      const t0 = performance.now();
-      await sonar.search(q, { limit: ${RECALL_LANE_DEPTH * 3} });
-      sonarMs.push(Math.round(performance.now() - t0));
-      hits.push(await sonar.search(q, { limit: ${PROBE_DEPTH} }));
-    }
-    return JSON.stringify({
-      ignore: app.vault.getConfig("userIgnoreFilters") ?? [],
-      reports: app.plugins.plugins["exo-agent"].paths.reports,
-      sonar: hits.map((hs) => hs.map((h) => ({ path: h.path, title: h.title, score: h.score, excerpt: h.excerpt ?? "" }))),
-      sonarMs,
-      names: app.vault.getMarkdownFiles().map((f) => {
-        const cache = app.metadataCache.getFileCache(f);
-        const fm = cache?.frontmatter;
-        const links = (cache?.frontmatterLinks ?? [])
-          .filter((l) => new RegExp(${JSON.stringify(SUPERSEDE_KEY.source)}).test(l.key))
-          .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
-        const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by, description: fm.description } : null;
-        return { path: f.path, basename: f.basename, frontmatter: keep, links };
-      }),
-    });
-  })()`;
+/** The vault's note index and exclusion config in one Obsidian round trip. Only reads. */
+function liveVault(): LiveVault {
+  const code = `(() => JSON.stringify({
+    ignore: app.vault.getConfig("userIgnoreFilters") ?? [],
+    reports: app.plugins.plugins["exo-agent"].paths.reports,
+    names: app.vault.getMarkdownFiles().map((f) => {
+      const cache = app.metadataCache.getFileCache(f);
+      const fm = cache?.frontmatter;
+      const links = (cache?.frontmatterLinks ?? [])
+        .filter((l) => new RegExp(${JSON.stringify(SUPERSEDE_KEY.source)}).test(l.key))
+        .map((l) => ({ key: l.key, target: app.metadataCache.getFirstLinkpathDest(l.link, f.path)?.path ?? l.link }));
+      const keep = fm ? { aliases: fm.aliases, alias: fm.alias, status: fm.status, superseded_by: fm.superseded_by, description: fm.description } : null;
+      return { path: f.path, basename: f.basename, frontmatter: keep, links };
+    }),
+  }))()`;
   return obsidianEval<LiveVault>(code);
 }
 
 /** Sonar hits per query, `PROBE_DEPTH` deep, a few queries per round trip. A
- *  blank query gets no hits. Only reads. */
-function liveSonar(queries: string[]): NoteHit[][] {
-  const out: NoteHit[][] = [];
+ *  blank query gets no hits. `ms` is the first call's wall time per query, as a
+ *  turn would pay it (only measured when asked: it doubles the calls). Only reads. */
+function liveSonar(queries: string[], timed = false): { hits: NoteHit[][]; ms: number[] } {
+  const hits: NoteHit[][] = [];
+  const ms: number[] = [];
   for (let i = 0; i < queries.length; i += 25) {
     const code = `(async () => {
       const sonar = app.plugins.plugins["sonar"];
       const hits = [];
+      const ms = [];
       for (const q of ${JSON.stringify(queries.slice(i, i + 25))}) {
+        if (${timed}) {
+          const t0 = performance.now();
+          if (q.trim()) await sonar.search(q, { limit: ${PROBE_DEPTH} });
+          ms.push(Math.round(performance.now() - t0));
+        }
         const hs = q.trim() ? await sonar.search(q, { limit: ${PROBE_DEPTH} }) : [];
         hits.push(hs.map((h) => ({ path: h.path, title: h.title, score: h.score, excerpt: h.excerpt ?? "" })));
       }
-      return JSON.stringify(hits);
+      return JSON.stringify({ hits, ms });
     })()`;
-    out.push(...obsidianEval<NoteHit[][]>(code));
+    const out = obsidianEval<{ hits: NoteHit[][]; ms: number[] }>(code);
+    hits.push(...out.hits);
+    ms.push(...out.ms);
   }
-  return out;
+  return { hits, ms };
 }
 
 /** Body lines (frontmatter stripped) and the wikilink targets on each, for the
@@ -200,44 +184,100 @@ const isCanonical = (path: string): boolean =>
 
 const pad = (s: string, n: number) => (s.length >= n ? s : s + " ".repeat(n - s.length));
 
+/** Prompts that name a short word of the vault ("win", "log", "ask") without
+ *  meaning a note: the title lane alone must inject nothing for them. */
+const SHORT_NAME_PROMPTS = ["ask Claude to rewrite this paragraph", "puoi controllare il log del bot oggi", "how do we win this deal"];
+/** Prompts that name a project: its hub note must lead. */
+const HUB_PROMPTS = [
+  { prompt: "Qual è lo stato attuale del progetto Exo e qual è il prossimo passo?", hub: "Active/Projects/Exo/Exo.md" },
+  { prompt: "Qual è lo stato attuale del progetto DeepAgent e qual è il prossimo passo?", hub: "Active/Projects/DeepAgent/DeepAgent.md" },
+];
+
+/** A prompt that writes a note out: it must inject that note, with no vault-search hit needed. */
+const NAMED_PROMPT = { prompt: "cosa dice il file CLAUDE.md?", note: "CLAUDE.md" };
+
+/** What a run reads once: the note index minus excluded paths (as the turn
+ *  builds it), the exclusion itself, and the conversation store. */
+function liveContext() {
+  const vault = liveVault();
+  const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
+  const live = vault.names.filter((n) => !exclude(n.path));
+  return { vault, exclude, live, ...indexNotes(live), store: liveChats(), now: Date.now() };
+}
+
+/** One turn through the shipped `recallTurn`. `sonar` holds the live hits for
+ *  the turn's own query, fetched beforehand (one Obsidian round trip per set);
+ *  a query nobody fetched is an error, never an empty lane. */
+async function runTurn(
+  ctx: ReturnType<typeof liveContext>,
+  sonar: Map<string, NoteHit[]>,
+  message: string,
+  opts: { chats: boolean; semantic: () => Promise<{ id: string; score: number }[] | null> },
+): Promise<RecallResult | null> {
+  return recallTurn({
+    message,
+    convoId: "",
+    chats: opts.chats ? ctx.store : [],
+    now: ctx.now,
+    names: ctx.names,
+    supersede: ctx.supersede.index,
+    search: async (query) => {
+      const hits = sonar.get(query);
+      if (!hits) throw new Error(`no live Sonar hits fetched for "${query}"`);
+      const found = await searchVaultNotes(sonarApp(hits), query, RECALL_LANE_DEPTH, ctx.exclude);
+      return found.hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
+    },
+    semantic: opts.semantic,
+  });
+}
+
+/** Live Sonar hits for what each message's turn would search for. */
+function fetchSonar(ctx: ReturnType<typeof liveContext>, messages: string[], timed = false) {
+  const queries = messages.map((m) => turnKeywords(m, ctx.names).join(" "));
+  const { hits, ms } = liveSonar(queries, timed);
+  return { map: new Map(queries.map((q, i) => [q, hits[i]])), probe: hits, ms };
+}
+
+/** Notes a turn injected on the title lane alone: named by the message, not found by the vault search. */
+const titleOnly = (r: RecallResult | null): string[] =>
+  r ? r.notes.map((n) => n.path).filter((p) => r.lanes.title.some((t) => t.path === p) && !r.lanes.sonar.some((s) => s.path === p)) : [];
+
 describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault", () => {
   it("serves the expected sources for the 10 questions", async () => {
     const fixture = JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "recall-eval.json"), "utf8")) as { cases: EvalCase[]; ordinary: string[] };
-    const store = liveChats();
+    const ctx = liveContext();
+    const { supersede, exclude, store } = ctx;
     const cases = fixture.cases.map((c) => resolveChats(c, store));
-    const keywords = cases.map((c) => recallKeywords(c.question));
-    const vault = liveVault(keywords.map((k) => k.join(" ")));
-    const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
-    const now = Date.now();
-
-    // The title-lane names and supersede index exactly as the turn builds them.
-    const { names, supersede } = indexNotes(vault.names.filter((n) => !exclude(n.path)));
+    const questions = cases.map((c) => c.question);
+    const ordinaryPrompts = [...fixture.ordinary, ...SHORT_NAME_PROMPTS, ...HUB_PROMPTS.map((h) => h.prompt), NAMED_PROMPT.prompt];
+    const sonar = fetchSonar(ctx, [...questions, ...ordinaryPrompts], true);
     const proposed = new Set<string>();
     const stampBefore = indexStamp();
 
     const rows: string[] = [];
     const scores: CaseScore[] = [];
     const semanticMs: number[] = [];
-    const titleMs: number[] = [];
     for (const [i, c] of cases.entries()) {
-      const { hits } = await searchVaultNotes(sonarApp(vault.sonar[i]), keywords[i].join(" "), RECALL_LANE_DEPTH, exclude);
-      const sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
-      const t0 = performance.now();
-      const title = titleLane(keywords[i], names).slice(0, RECALL_LANE_DEPTH);
-      titleMs.push(Math.round(performance.now() - t0));
-      const titlePaths = title.map((t) => t.path);
-      const lexicalChats = matchPastChats(store, keywords[i], { excludeId: "", now });
-      const sem = semanticScores(c.question);
+      const sem = { ms: 0 };
+      const result = await runTurn(ctx, sonar.map, c.question, {
+        chats: true,
+        semantic: async () => {
+          const r = semanticScores(c.question);
+          sem.ms = r.ms;
+          return r.scored;
+        },
+      });
+      expect(result, `no recall for ${c.id}`).not.toBeNull();
+      const ranked = result!;
       semanticMs.push(sem.ms);
-      const semIds = sem.scored && sem.scored.map((x) => x.id);
-      const semanticChats = sem.scored && chatsFromIds(semanticHits(sem.scored), store, { excludeId: "" });
-      const ranked = rankRecall({ sonar, title, lexicalChats, semanticChats }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede.index });
       for (const n of ranked.notes) if (supersede.fixes.some((f) => f.path === n.path)) proposed.add(n.path);
       const score = scoreCase(recallItems(ranked), c);
       scores.push(score);
 
       // Where each expected source sits in each lane, past the cut too.
-      const probe = vault.sonar[i].filter((h) => !exclude(h.path)).map((h) => h.path);
+      const probe = sonar.probe[i].filter((h) => !exclude(h.path)).map((h) => h.path);
+      const titlePaths = ranked.lanes.title.map((t) => t.path);
+      const semIds = ranked.lanes.semanticChats && ranked.lanes.semanticChats.map((x) => x.id);
       const at = (list: readonly string[], x: string | undefined) => {
         const r = x === undefined ? -1 : list.indexOf(x);
         return r < 0 ? "-" : String(r + 1);
@@ -245,23 +285,30 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       const lanes = c.expect.map((e) => {
         if ("note" in e) return `sonar ${at(probe, e.note)} title ${at(titlePaths, e.note)}`;
         const tag = e.chat.id ? "" : "unresolved ";
-        return `${tag}lexical ${at(lexicalChats.map((x) => x.id), e.chat.id)} semantic ${semIds ? at(semIds, e.chat.id) : "n/a"}`;
+        return `${tag}lexical ${at(ranked.lanes.lexicalChats.map((x) => x.id), e.chat.id)} semantic ${semIds ? at(semIds, e.chat.id) : "n/a"}`;
       });
       rows.push(
         `${c.id}  ${pad(score.hit ? (score.full ? "full" : "hit") : "MISS", 5)} ${pad(score.firstRank === null ? "-" : String(score.firstRank), 3)} ${pad(score.trapLeads ? "TRAP" : "", 5)} ${lanes.join(", ")}`,
       );
     }
-    // Ordinary editing prompts must not drag past chats into the turn: chats
-    // injected without the semantic floor, then with it.
-    const ordinary = fixture.ordinary.map((prompt) => {
-      const kw = recallKeywords(prompt);
-      const lexicalChats = matchPastChats(store, kw, { excludeId: "", now });
-      const { scored } = semanticScores(prompt);
-      const chats = (ids: string[] | null) =>
-        rankRecall({ sonar: [], title: [], lexicalChats, semanticChats: ids && chatsFromIds(ids, store, { excludeId: "" }) }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS }).chats.length;
-      return { before: chats(scored && scored.map((x) => x.id)), after: chats(scored && semanticHits(scored)) };
+
+    // Ordinary prompts must not drag past chats or name-only notes into the turn.
+    const ordinary: { prompt: string; chats: number; titleOnly: string[]; result: RecallResult | null }[] = [];
+    for (const prompt of ordinaryPrompts) {
+      const result = await runTurn(ctx, sonar.map, prompt, { chats: true, semantic: async () => semanticScores(prompt).scored });
+      ordinary.push({ prompt, chats: result?.chats.length ?? 0, titleOnly: titleOnly(result), result });
+    }
+    const group = (prompts: string[]) => ordinary.filter((o) => prompts.includes(o.prompt));
+    const fixtureOrdinary = group(fixture.ordinary);
+    const shortOrdinary = group(SHORT_NAME_PROMPTS);
+    const hubRanks = HUB_PROMPTS.map((h) => {
+      const r = ordinary.find((o) => o.prompt === h.prompt)!.result;
+      const rank = r ? r.notes.findIndex((n) => n.path === h.hub) + 1 : 0;
+      return { ...h, rank, sonarFound: r ? r.lanes.sonar.findIndex((n) => n.path === h.hub) + 1 : 0 };
     });
-    const total = (k: "before" | "after") => ordinary.reduce((n, o) => n + o[k], 0);
+
+    const named = ordinary.find((o) => o.prompt === NAMED_PROMPT.prompt)!.result;
+    const namedRank = named ? named.notes.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 : 0;
 
     expect(indexStamp(), "the semantic chat index changed during a read-only run").toBe(stampBefore);
     const summary = summarize(scores);
@@ -275,13 +322,17 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         ...rows,
         "",
         formatSummary(summary),
-        `sonar lane: ${ms(vault.sonarMs)}`,
-        `title lane (${names.length} notes): ${ms(titleMs)}`,
+        `sonar lane: ${ms(sonar.ms.slice(0, cases.length))}`,
         `semantic lane (node spawn + embed): ${ms(semanticMs)}`,
         `supersede: ${supersede.fixes.length} notes with disagreeing markers, ${supersede.broken.length} broken links; ` +
           `the 10 questions would propose ${proposed.size} correction(s)`,
         ...supersede.fixes.map((f) => `  ${proposed.has(f.path) ? "*" : " "} ${f.path}: ${JSON.stringify(f.set)}`),
-        `ordinary prompts (${ordinary.length}): ${total("before")} chats injected without the semantic floor, ${total("after")} with it (${ordinary.map((o) => `${o.before}>${o.after}`).join(" ")})`,
+        `ordinary prompts (${fixtureOrdinary.length}): ${fixtureOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${fixtureOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone (${fixtureOrdinary.map((o) => `${o.chats}/${o.titleOnly.length}`).join(" ")})`,
+        ...fixtureOrdinary.filter((o) => o.chats || o.titleOnly.length).map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
+        `short-name prompts (${shortOrdinary.length}): ${shortOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${shortOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
+        ...shortOrdinary.map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
+        `named note "${NAMED_PROMPT.prompt}": ${NAMED_PROMPT.note} rank ${namedRank || "-"} (Sonar ${named && named.lanes.sonar.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 || "-"})`,
+        ...hubRanks.map((h) => `hub ${h.hub}: rank ${h.rank || "-"} (Sonar ${h.sonarFound || "-"}) for "${h.prompt}"`),
       ].join("\n"),
     );
 
@@ -289,13 +340,16 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     // superseded note leads unlabelled.
     expect(summary.hitAt5).toBe(10);
     expect(summary.traps).toBe(0);
+    // S4: a short word alone never injects a note, and the project hubs lead.
+    expect(shortOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
+    expect(fixtureOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
+    expect(namedRank, `${NAMED_PROMPT.note} should be injected for "${NAMED_PROMPT.prompt}"`).toBeGreaterThan(0);
+    for (const h of hubRanks) expect(h.rank, `${h.hub} should lead for "${h.prompt}"`).toBe(1);
   }, 300_000);
 
   it.skipIf(process.env.EXO_EVAL_GEN === "0")("serves the generated question set without a superseded note leading", async () => {
-    const vault = liveVault([]);
-    const exclude = makeExclusion(vault.ignore, [`${vault.reports}/`]);
-    const live = vault.names.filter((n) => !exclude(n.path));
-    const { names, supersede } = indexNotes(live);
+    const ctx = liveContext();
+    const { live, supersede } = ctx;
     const canonicalPaths = live.map((n) => n.path).filter(isCanonical);
     const bodies = new Map(liveBodies(canonicalPaths).map((b) => [b.path, b]));
     const notes: GenNote[] = live.map((n) => ({
@@ -306,16 +360,14 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       links: bodies.get(n.path)?.links ?? [],
     }));
     const cases = generateCases({ notes, canonicalPaths, supersede: supersede.index, decisionsFolder: "_system/memory/decisions", peopleFolder: "CRM/People", projectsFolder: "Active/Projects" });
-    const keywords = cases.map((c) => recallKeywords(c.question));
-    const sonarHits = liveSonar(keywords.map((k) => k.join(" ")));
+    const sonar = fetchSonar(ctx, cases.map((c) => c.question));
 
-    const scored: { id: string; question: string; score: CaseScore }[] = [];
+    const scored: { id: string; question: string; score: CaseScore; where: string }[] = [];
     for (const [i, c] of cases.entries()) {
-      const { hits } = await searchVaultNotes(sonarApp(sonarHits[i]), keywords[i].join(" "), RECALL_LANE_DEPTH, exclude);
-      const sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
-      const title = titleLane(keywords[i], names).slice(0, RECALL_LANE_DEPTH);
-      const ranked = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede.index });
-      scored.push({ id: c.id, question: c.question, score: { ...scoreCase(recallItems(ranked), c), family: c.family } });
+      const result = await runTurn(ctx, sonar.map, c.question, { chats: false, semantic: async () => null });
+      const probe = sonar.probe[i].filter((h) => !ctx.exclude(h.path)).map((h) => h.path);
+      const where = c.expect.map((e) => ("note" in e ? `sonar ${probe.indexOf(e.note) + 1 || "-"} title ${result?.lanes.title.findIndex((t) => t.path === e.note) ?? -1}` : "chat")).join(", ");
+      scored.push({ id: c.id, question: c.question, score: { ...scoreCase(recallItems(result ?? { notes: [], chats: [] }), c), family: c.family }, where });
     }
     const summary = summarize(scored.map((s) => s.score));
     const misses = scored.filter((s) => !s.score.hit);
@@ -325,7 +377,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         `generated set: ${cases.length} cases derived from ${canonicalPaths.length} canonical notes`,
         formatSummary(summary),
         `misses (${misses.length}), id and best rank:`,
-        ...misses.map((m) => `  ${m.id}  ${m.score.firstRank ?? "-"}`),
+        ...misses.map((m) => `  ${m.id}  ${m.score.firstRank ?? "-"}  (${m.where})  ${m.question}`),
         `traps (${traps.length}):`,
         ...traps.map((t) => `  ${t.id}`),
         `supersede: ${supersede.fixes.length} notes with disagreeing markers, ${supersede.broken.length} broken links`,

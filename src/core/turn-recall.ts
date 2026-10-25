@@ -47,7 +47,11 @@ const STOPWORDS = new Set(
     "would could should been were will does didn make want need please thanks " +
     "della delle dello degli nella nelle negli sono come cosa questo questa quello quella perché perche quando dove anche " +
     "ancora molto tutto tutti fare fatto essere stato avere hanno sulla sulle dalla dalle alla alle allo agli puoi fammi " +
-    "voglio vorrei grazie ciao solo però pero mentre"
+    "voglio vorrei grazie ciao solo però pero mentre " +
+    // Three letters: only a vault name can bring them back (see recallKeywords), never these.
+    "chi cui ora per con non che dei del sul sui nel gli una uno tra fra piu mio mia tuo tua suo sua " +
+    "are was has had you can not but how why who our out its his her she him all any " +
+    "now one two six did get let got say see too way use yes yet own off old ago hai mai nei dal via tre uso due ore far"
   ).split(" "),
 );
 
@@ -61,14 +65,29 @@ function words(text: string): string[] {
     .filter(Boolean);
 }
 
+/** The 3-letter words that are a name in the vault: a token of some note's
+ *  basename or alias ("exo", "crm"). Stopwords and numbers never qualify, so a
+ *  note called "Per" cannot bring "per" back. */
+export function nameVocab(notes: readonly { basename: string; aliases: readonly string[] }[]): Set<string> {
+  const vocab = new Set<string>();
+  for (const note of notes) {
+    for (const name of [note.basename, ...note.aliases]) {
+      for (const w of words(name)) if (w.length === 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w)) vocab.add(w);
+    }
+  }
+  return vocab;
+}
+
 /** The distinct content words of a message, in order: the search query.
- *  Operators (`-x`, `path:`) never survive, so a message can't steer the
- *  search engine's syntax by accident. */
-export function recallKeywords(message: string): string[] {
+ *  Words of four letters or more qualify; a 3-letter word only when it is in
+ *  `vocab` ({@link nameVocab}), which is how "Exo" becomes searchable without
+ *  "the" and "per" coming back. Operators (`-x`, `path:`) never survive, so a
+ *  message can't steer the search engine's syntax by accident. */
+export function recallKeywords(message: string, vocab?: ReadonlySet<string>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const w of words(message)) {
-    if (w.length < 4 || STOPWORDS.has(w) || seen.has(w)) continue;
+    if (STOPWORDS.has(w) || seen.has(w) || (w.length < 4 && !(w.length === 3 && vocab?.has(w)))) continue;
     seen.add(w);
     out.push(w);
     if (out.length >= MAX_KEYWORDS) break;
@@ -93,6 +112,11 @@ export interface ChatRecall {
   msgIndex: number | null;
 }
 
+/** A lexical match: the chat plus how many of the rare keywords its best line holds. */
+export interface LexicalChat extends ChatRecall {
+  hits: number;
+}
+
 const flat = (s: string, n: number): string => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
@@ -104,13 +128,14 @@ const flat = (s: string, n: number): string => {
  * contains. Only the message's {@link RECALL_CHAT_KEYWORDS} rarest keywords
  * (fewest chats containing them) count: words like "prima" or "product" sit in
  * most chats and match anything. A chat needs two of those hits (one when the
- * message has a single keyword): one shared word is noise.
+ * message has a single keyword): one shared word is noise. Each match reports
+ * its `hits`, which {@link rankRecall}'s chat gate reads.
  */
 export function matchPastChats(
   chats: readonly ChatRecord[],
   keywords: readonly string[],
   opts: { excludeId: string; now: number },
-): ChatRecall[] {
+): LexicalChat[] {
   if (!keywords.length) return [];
   const since = opts.now - RECALL_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const candidates = chats
@@ -124,7 +149,7 @@ export function matchPastChats(
   const df = new Map(keywords.map((k) => [k, candidates.filter((c) => c.lines.some((l) => l.present.has(k))).length]));
   const rare = [...keywords].sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0)).slice(0, RECALL_CHAT_KEYWORDS);
   const need = Math.min(2, rare.length);
-  const scored: { recall: ChatRecall; score: number; at: number }[] = [];
+  const scored: { recall: LexicalChat; score: number; at: number }[] = [];
   for (const { chat, lines } of candidates) {
     let best: { text: string; score: number; at: number; index: number } | null = null;
     for (const line of lines) {
@@ -139,6 +164,7 @@ export function matchPastChats(
         date: localDate(best.at),
         snippet: flat(best.text, RECALL_EXCERPT_CHARS),
         msgIndex: best.index,
+        hits: best.score,
       },
       score: best.score,
       at: best.at,
@@ -159,15 +185,27 @@ export interface RecallLanes {
   /** Notes whose name the message mentions ({@link titleLane}). */
   title: TitleHit[];
   /** {@link matchPastChats}. */
-  lexicalChats: ChatRecall[];
+  lexicalChats: LexicalChat[];
   /** The semantic chat index ({@link chatsFromIds}), best first; null when it
    *  could not answer in time. */
   semanticChats: ChatRecall[] | null;
 }
 
 /** Name words that can match a keyword: the same normalisation as
- *  {@link recallKeywords}, minus dates and numbers. */
-const nameWords = (name: string): string[] => [...new Set(words(name).filter((w) => w.length >= 4 && !/^\d+$/.test(w)))];
+ *  {@link recallKeywords}, minus dates and numbers. Every 3-letter word that is
+ *  not a stopword counts, asked for or not, so "How to Win in the Ai Age" is
+ *  covered by "win" and "age" together, never by "win" alone. */
+const nameWords = (name: string): string[] => [
+  ...new Set(words(name).filter((w) => (w.length >= 4 || (w.length === 3 && !STOPWORDS.has(w))) && !/^\d+$/.test(w))),
+];
+
+/** A folder note: `X/X.md`, the page a folder is about ("Active/Projects/Exo/Exo.md"). */
+export function isHub(path: string): boolean {
+  const parts = path.split("/");
+  if (parts.length < 2) return false;
+  const base = parts[parts.length - 1].replace(/\.md$/i, "");
+  return base.toLowerCase() === parts[parts.length - 2].toLowerCase();
+}
 
 /** A note the message names: how many words of its name the message shares,
  *  and `whole` when it shares every one. */
@@ -175,31 +213,54 @@ export interface TitleHit {
   path: string;
   shared: number;
   whole: boolean;
+  /** Set when every shared word has three letters: too weak to inject a note
+   *  unless the vault search found it too ({@link rankRecall}). */
+  short?: true;
+  /** The message writes the note out: `<basename>.md` or `[[<basename>`. That
+   *  is a reference, not a word that happens to be a name, so it needs no
+   *  vault-search hit ({@link rankRecall}). */
+  explicit: boolean;
 }
 
 /**
  * Notes the message names: a basename or alias that shares two keywords with
  * it, or whose every word is a keyword ("Turno", "Alberto Aspese"). More shared
- * words first, then names covered more fully, then path. A name sharing a
+ * words first, then names covered more fully, then a project hub ahead of a
+ * same-named note (a company card, a transcript), then path. A name sharing a
  * single word with a longer title is noise, not a mention.
  */
-export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): TitleHit[] {
+export function titleLane(
+  keywords: readonly string[],
+  notes: readonly { path: string; basename: string; aliases: readonly string[] }[],
+  message: string,
+): TitleHit[] {
   const asked = new Set(keywords);
-  const hits: { path: string; shared: number; cover: number }[] = [];
+  const text = message.toLowerCase();
+  const hits: { path: string; shared: number; cover: number; short: boolean; explicit: boolean }[] = [];
   for (const note of notes) {
-    let best: { shared: number; cover: number } | null = null;
+    let best: { shared: number; cover: number; short: boolean } | null = null;
     for (const name of [note.basename, ...note.aliases]) {
       const ws = nameWords(name);
-      const shared = ws.filter((w) => asked.has(w)).length;
+      const common = ws.filter((w) => asked.has(w));
+      const shared = common.length;
       if (!shared || (shared < 2 && shared < ws.length)) continue;
       const cover = shared / ws.length;
-      if (!best || shared > best.shared || (shared === best.shared && cover > best.cover)) best = { shared, cover };
+      const short = common.every((w) => w.length === 3);
+      if (!best || shared > best.shared || (shared === best.shared && cover > best.cover)) best = { shared, cover, short };
     }
-    if (best) hits.push({ path: note.path, ...best });
+    if (!best) continue;
+    const base = note.basename.toLowerCase();
+    hits.push({ path: note.path, ...best, explicit: text.includes(`${base}.md`) || text.includes(`[[${base}`) });
   }
   return hits
-    .sort((a, b) => b.shared - a.shared || b.cover - a.cover || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-    .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1 }));
+    .sort(
+      (a, b) =>
+        b.shared - a.shared ||
+        b.cover - a.cover ||
+        Number(isHub(b.path)) - Number(isHub(a.path)) ||
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    )
+    .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1, ...(h.short ? { short: true as const } : {}), explicit: h.explicit }));
 }
 
 /** The chats of a semantic answer (best first) that stand out from it by
@@ -252,14 +313,30 @@ function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
     .map(([, v]) => v.item);
 }
 
-/** The notes and chats one turn injects, best first. A note named in full
- *  comes in on its name alone. A note named only in part needs the vault
- *  search to have found it too: three shared words lift it from anywhere in
- *  that search ("turno open core" for turno-saas-open-core), two only reorder
- *  the notes the search would inject anyway ("Orchestration Board" for
- *  "Orchestration Board Ideas" must not push out the decision about it).
- *  With `supersede`, a superseded note gives its slot to the current one and
- *  stays right below it, labelled. */
+/** Minimum rare-keyword hits for a lexical chat when the semantic lane could
+ *  not answer. */
+export const RECALL_CHAT_MIN_RARE_HITS = 3;
+
+/** The notes and chats one turn injects, best first.
+ *  - A note named in full comes in on its name alone: two words or more, or a
+ *    project hub ("Active/Projects/DeepAgent/DeepAgent.md").
+ *  - A one-word name that is not a project hub is a word the message may use
+ *    for something else ("Claude", "win"), and so is a title match resting on
+ *    3-letter words ({@link TitleHit.short}): both need the vault search to
+ *    have found the note too, unless the message writes the note out
+ *    ({@link TitleHit.explicit}).
+ *  - A note named only in part needs the same: three shared words lift it from
+ *    anywhere in that search ("turno open core" for turno-saas-open-core), two
+ *    only reorder the notes the search would inject anyway ("Orchestration
+ *    Board" for "Orchestration Board Ideas" must not push out the decision
+ *    about it).
+ *  - With `supersede`, a superseded note gives its slot to the current one and
+ *    stays right below it, labelled.
+ *  - A lexical chat is injected only if the semantic lane stands behind it; with
+ *    no semantic answer (`semanticChats` null) it needs
+ *    {@link RECALL_CHAT_MIN_RARE_HITS} rare-keyword hits. A chat only the
+ *    semantic lane found keeps its own rule (the lift floor, already applied to
+ *    `semanticChats`). */
 export function rankRecall(
   lanes: RecallLanes,
   opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex },
@@ -267,12 +344,20 @@ export function rankRecall(
   const found = new Set(lanes.sonar.map((n) => n.path));
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
   const title = lanes.title
-    .filter((t) => t.whole || (t.shared >= 3 ? found : injected).has(t.path))
+    .filter((t) => {
+      if (!t.explicit && (t.short || (t.shared < 2 && !isHub(t.path))) && !found.has(t.path)) return false;
+      return t.whole || (t.shared >= 3 ? found : injected).has(t.path);
+    })
     .map((t) => ({ path: t.path, excerpt: "" }));
   const notes = fuse([lanes.sonar, title], (n) => n.path).slice(0, opts.maxNotes);
+  const semantic = lanes.semanticChats;
+  const behind = semantic && new Set(semantic.map((c) => c.id));
+  const gated = lanes.lexicalChats.filter((c) => (behind ? behind.has(c.id) : c.hits >= RECALL_CHAT_MIN_RARE_HITS));
   return {
     notes: opts.supersede ? applySupersede(notes, opts.supersede, (path) => ({ path, excerpt: "" })).slice(0, opts.maxNotes) : notes,
-    chats: fuse([lanes.lexicalChats, lanes.semanticChats ?? []], (c) => c.id).slice(0, opts.maxChats),
+    chats: fuse([gated, semantic ?? []], (c) => c.id)
+      .slice(0, opts.maxChats)
+      .map(({ id, title, date, snippet, msgIndex }) => ({ id, title, date, snippet, msgIndex })),
   };
 }
 
@@ -303,4 +388,61 @@ export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly 
     block = render();
   }
   return block;
+}
+
+/** The keywords of a turn: {@link recallKeywords} with the 3-letter words the
+ *  vault names ({@link nameVocab}). */
+export function turnKeywords(message: string, names: readonly { basename: string; aliases: readonly string[] }[]): string[] {
+  return recallKeywords(message, nameVocab(names));
+}
+
+/** What one turn recalled: the notes and chats to inject, and the lanes they
+ *  were ranked from. */
+export interface RecallResult {
+  notes: NoteRecall[];
+  chats: ChatRecall[];
+  lanes: RecallLanes;
+}
+
+/**
+ * One turn of recall, everything but the reads. The adapter and the live eval
+ * both call it, each supplying only its own reads: `names` is the note index
+ * with excluded paths already left out (it feeds the keyword vocabulary and the
+ * title lane alike), `search` the vault search (a failure leaves the other
+ * lanes), `semantic` the raw scores of the semantic chat index, or null when it
+ * gave none in time. `semantic` is started before `search`, so the two run
+ * together. Null when the message is too short, a slash command, or has no
+ * keyword.
+ */
+export async function recallTurn(input: {
+  message: string;
+  convoId: string;
+  chats: readonly ChatRecord[];
+  now: number;
+  names: readonly { path: string; basename: string; aliases: readonly string[] }[];
+  supersede?: SupersedeIndex;
+  search: (query: string) => Promise<NoteRecall[]>;
+  semantic: () => Promise<readonly { id: string; score: number }[] | null>;
+}): Promise<RecallResult | null> {
+  if (!shouldRecall(input.message)) return null;
+  const keywords = turnKeywords(input.message, input.names);
+  if (!keywords.length) return null;
+  const scores = input.semantic();
+  const title = titleLane(keywords, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
+  let sonar: NoteRecall[] = [];
+  try {
+    sonar = await input.search(keywords.join(" "));
+  } catch {
+    /* search failed: chats and the title lane may still recall something */
+  }
+  const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
+  const scored = await scores;
+  const hits = scored && semanticHits(scored);
+  const lanes: RecallLanes = {
+    sonar,
+    title,
+    lexicalChats,
+    semanticChats: hits && chatsFromIds(hits, input.chats, { excludeId: input.convoId }),
+  };
+  return { ...rankRecall(lanes, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: input.supersede }), lanes };
 }

@@ -1,22 +1,14 @@
 import { parseFrontMatterAliases, type App } from "obsidian";
 import type { ChatRecord } from "../core/recent-chats";
 import {
-  chatsFromIds,
   formatRecallBlock,
-  matchPastChats,
-  rankRecall,
-  recallKeywords,
-  semanticHits,
+  recallTurn,
   shouldRecall,
-  titleLane,
   RECALL_LANE_DEPTH,
-  RECALL_MAX_CHATS,
-  RECALL_MAX_NOTES,
   type ChatRecall,
   type NoteRecall,
-  type TitleHit,
 } from "../core/turn-recall";
-import { buildSupersedeIndex, markersOf, type MarkerFix, type SupersedeIndex } from "../core/supersede";
+import { buildSupersedeIndex, markersOf } from "../core/supersede";
 import { proposeMarkerFixes } from "./corrections";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
 import { vaultBasePath } from "./tool-kit";
@@ -105,35 +97,39 @@ export async function recallForTurn(
   input: { message: string; convoId: string; chats: readonly ChatRecord[]; now: number; exclude?: PathFilter; pluginDir?: string },
 ): Promise<TurnRecall | null> {
   if (!shouldRecall(input.message)) return null;
-  const keywords = recallKeywords(input.message);
-  if (!keywords.length) return null;
-  const basePath = input.pluginDir ? vaultBasePath(app) : "";
-  const semantic =
-    input.pluginDir && basePath
-      ? withinBudget((signal) => recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH, signal), SEMANTIC_BUDGET_MS)
-      : Promise.resolve(null);
-  let sonar: NoteRecall[] = [];
-  let title: TitleHit[] = [];
-  let supersede: { index: SupersedeIndex; fixes: MarkerFix[] } | undefined;
+  // The one pass over the notes feeds the title lane, the supersede index and
+  // the name vocabulary that lets a 3-letter name ("Exo") be a keyword.
+  let exclude: PathFilter | undefined;
+  let scan: ReturnType<typeof scanNotes> | undefined;
   try {
-    const exclude = input.exclude ?? vaultExclusion(app);
-    const scan = scanNotes(app, exclude);
-    supersede = scan.supersede;
-    title = titleLane(keywords, scan.names).slice(0, RECALL_LANE_DEPTH);
-    const { hits } = await searchVaultNotes(app, keywords.join(" "), RECALL_LANE_DEPTH, exclude);
-    sonar = hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
+    exclude = input.exclude ?? vaultExclusion(app);
+    scan = scanNotes(app, exclude);
   } catch {
-    /* search failed: chats alone may still recall something */
+    /* unreadable index: chats and the vault search may still recall something */
   }
-  const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
-  const scored = await semantic;
-  const { notes, chats } = rankRecall(
-    { sonar, title, lexicalChats, semanticChats: scored && chatsFromIds(semanticHits(scored), input.chats, { excludeId: input.convoId }) },
-    { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede?.index },
-  );
+  const basePath = input.pluginDir ? vaultBasePath(app) : "";
+  const result = await recallTurn({
+    message: input.message,
+    convoId: input.convoId,
+    chats: input.chats,
+    now: input.now,
+    names: scan?.names ?? [],
+    supersede: scan?.supersede.index,
+    search: async (query) => {
+      if (!exclude) return [];
+      const { hits } = await searchVaultNotes(app, query, RECALL_LANE_DEPTH, exclude);
+      return hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
+    },
+    semantic: () =>
+      input.pluginDir && basePath
+        ? withinBudget((signal) => recallChatScores(recallHost(`${basePath}/${input.pluginDir}`), input.message, SEMANTIC_DEPTH, signal), SEMANTIC_BUDGET_MS)
+        : Promise.resolve(null),
+  });
+  if (!result) return null;
+  const { notes, chats } = result;
   // A recalled note whose markers disagree is corrected (with an undo receipt).
   const recalled = new Set(notes.map((n) => n.path));
-  const fixes = supersede?.fixes.filter((f) => recalled.has(f.path)) ?? [];
+  const fixes = scan?.supersede.fixes.filter((f) => recalled.has(f.path)) ?? [];
   if (fixes.length) void proposeMarkerFixes(app, fixes, input.convoId).catch(() => {});
   const block = formatRecallBlock(notes, chats);
   return block ? { block, notes, chats } : null;
