@@ -10,6 +10,8 @@ import {
   nameVocab,
   rankRecall,
   recallKeywords,
+  recallTurn,
+  turnKeywords,
   semanticHits,
   shouldRecall,
   titleLane,
@@ -20,6 +22,7 @@ import {
   RECALL_MAX_NOTES,
   RECALL_OPEN,
   type ChatRecall,
+  type LexicalChat,
   type NoteRecall,
 } from "../src/core/turn-recall";
 import { indexNotes, recallForTurn, SEMANTIC_BUDGET_MS } from "../src/obsidian/turn-recall";
@@ -199,16 +202,16 @@ describe("formatRecallBlock", () => {
 
 describe("rankRecall on single lanes (parity with the pre-extraction pipeline)", () => {
   const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
-  const before = (sonar: NoteRecall[], lexical: ChatRecall[]) => ({
+  const before = (sonar: NoteRecall[], lexical: LexicalChat[]) => ({
     notes: sonar.slice(0, RECALL_MAX_NOTES),
     chats: lexical.slice(0, RECALL_MAX_CHATS).map(({ hits: _hits, ...chat }) => chat),
   });
-  const lanes = (sonar: NoteRecall[], lexicalChats: ChatRecall[]) => ({ sonar, title: [], lexicalChats, semanticChats: null });
+  const lanes = (sonar: NoteRecall[], lexicalChats: LexicalChat[]) => ({ sonar, title: [], lexicalChats, semanticChats: null });
   const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
 
   it("keeps Sonar's order and the lexical chats as they were", () => {
     const sonar = ["B.md", "A.md", "C.md"].map(n);
-    const lexical = matchPastChats(chats, ["pricing", "tiers", "launch"], { excludeId: "current", now: NOW });
+    const lexical = matchPastChats(chats, ["pricing", "tiers", "launch"], { excludeId: "current", now: NOW }).map((c) => ({ ...c, hits: 3 }));
     expect(rankRecall(lanes(sonar, lexical), opts)).toEqual(before(sonar, lexical));
   });
   it("cuts a long Sonar lane to five notes", () => {
@@ -216,7 +219,7 @@ describe("rankRecall on single lanes (parity with the pre-extraction pipeline)",
     expect(rankRecall(lanes(sonar, []), opts)).toEqual(before(sonar, []));
   });
   it("chats alone when the vault search found nothing", () => {
-    const lexical: ChatRecall[] = [1, 2, 3].map((i) => ({ id: `c${i}`, title: `T${i}`, date: "2026-10-01", snippet: "s", msgIndex: 0 }));
+    const lexical: LexicalChat[] = [1, 2, 3].map((i) => ({ id: `c${i}`, title: `T${i}`, date: "2026-10-01", snippet: "s", msgIndex: 0, hits: 3 }));
     expect(rankRecall(lanes([], lexical), opts)).toEqual(before([], lexical));
   });
 });
@@ -246,13 +249,20 @@ describe("titleLane", () => {
   it("one shared word with a longer name is not a title match", () => {
     expect(titleLane(recallKeywords("quale task manager uso adesso"), [note("R/Notes on everything task related.md")])).toEqual([]);
   });
-  it("a 3-char name word counts once the message names it, so Exo is findable", () => {
-    expect(titleLane(["exo"], [note("Companies/Exo.md")])).toEqual([{ path: "Companies/Exo.md", shared: 1, whole: true }]);
+  it("a 3-char name word counts once the message names it, so Exo is findable; the hit is marked short", () => {
+    expect(titleLane(["exo"], [note("Companies/Exo.md")])).toEqual([{ path: "Companies/Exo.md", shared: 1, whole: true, short: true }]);
     expect(titleLane(["stato"], [note("Companies/Exo.md")])).toEqual([]);
   });
-  it("a 3-char word in a longer name stays out of the cover unless the message names it", () => {
-    expect(titleLane(["companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 1, whole: true }]);
+  it("every non-stopword 3-char word of a name counts in its coverage: 'win this deal' is not How to Win in the Ai Age", () => {
+    expect(titleLane(["win", "deal"], [note("R/How to Win in the Ai Age.md")])).toEqual([]);
+    expect(titleLane(["win", "age"], [note("R/How to Win in the Ai Age.md")])).toEqual([{ path: "R/How to Win in the Ai Age.md", shared: 2, whole: true, short: true }]);
+  });
+  it("a name with a 3-char word needs the message to name it too", () => {
+    expect(titleLane(["companies"], [note("T/CRM Companies.md")])).toEqual([]);
     expect(titleLane(["crm", "companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 2, whole: true }]);
+  });
+  it("3-char stopwords in a name do not count: Guida per Exo is covered by guida + exo", () => {
+    expect(titleLane(["guida", "exo"], [note("G/Guida per Exo.md")])).toEqual([{ path: "G/Guida per Exo.md", shared: 2, whole: true }]);
   });
   it("a project hub beats a same-named note that sorts before it", () => {
     const notes = [note("Companies/DeepAgent.md"), note("Projects/DeepAgent/DeepAgent.md"), note("Archive/DeepAgent.md")];
@@ -278,6 +288,7 @@ describe("titleLane", () => {
 describe("rankRecall fusion", () => {
   const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
   const c = (id: string, snippet = "s"): ChatRecall => ({ id, title: id, date: "2026-10-01", snippet, msgIndex: 0 });
+  const lex = (id: string, hits: number, snippet = "s"): LexicalChat => ({ ...c(id, snippet), hits });
   const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
 
   it("a note found by two lanes outranks the note one lane ranked first", () => {
@@ -287,7 +298,7 @@ describe("rankRecall fusion", () => {
     expect(r.notes[0].excerpt).toBe("about Both.md");
   });
   it("equal scores break by path", () => {
-    const r = rankRecall({ sonar: [n("Z.md")], title: [{ path: "A.md", shared: 1, whole: true }], lexicalChats: [], semanticChats: null }, opts);
+    const r = rankRecall({ sonar: [n("Z.md")], title: [{ path: "A.md", shared: 2, whole: true }], lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["A.md", "Z.md"]);
   });
   it("a partial name match only confirms a note the vault search found; it never brings one in alone", () => {
@@ -307,6 +318,21 @@ describe("rankRecall fusion", () => {
     const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["S1.md", "S2.md", "S3.md", "S4.md", "S5.md"]);
   });
+  it("a title match resting on a 3-char word alone needs the vault search to have found the note", () => {
+    const hub = { path: "Projects/Exo/Exo.md", shared: 1, whole: true, short: true as const };
+    expect(rankRecall({ sonar: [], title: [hub], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
+    const deep = ["A", "B", "C", "D", "E", "F", "G", "Projects/Exo/Exo"].map((x) => n(`${x}.md`));
+    expect(rankRecall({ sonar: deep, title: [hub], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("Projects/Exo/Exo.md");
+  });
+  it("a name of two words or more, all in the message, still comes in on its name alone", () => {
+    const hit = { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true };
+    expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes.map((x) => x.path)).toEqual(["CRM/People/Alberto Aspese.md"]);
+  });
+  it("a one-word name needs the vault search too, however long the word: 'Claude' in a prompt is not the CLAUDE note", () => {
+    const hit = { path: "CLAUDE.md", shared: 1, whole: true };
+    expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
+    expect(rankRecall({ sonar: [n("Turno Open Core.md"), n("CLAUDE.md")], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("CLAUDE.md");
+  });
   it("a note in two lanes still beats a title-only hub", () => {
     const sonar = ["Companies/Exo.md"].map(n);
     const title = [
@@ -317,46 +343,96 @@ describe("rankRecall fusion", () => {
     expect(r.notes.map((x) => x.path)).toEqual(["Companies/Exo.md", "Projects/Exo/Exo.md"]);
   });
   it("chats from both lanes are deduped by id, keeping the lexical snippet", () => {
-    const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("x", "lexical")], semanticChats: [c("y"), c("x", "semantic")] }, opts);
+    const r = rankRecall({ sonar: [], title: [], lexicalChats: [lex("x", 2, "lexical")], semanticChats: [c("y"), c("x", "semantic")] }, opts);
     expect(r.chats.map((x) => [x.id, x.snippet])).toEqual([["x", "lexical"], ["y", "s"]]);
   });
   it("still two chats at most", () => {
-    const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("a")], semanticChats: [c("b"), c("d"), c("e")] }, opts);
+    const r = rankRecall({ sonar: [], title: [], lexicalChats: [lex("a", 2)], semanticChats: [c("a"), c("b"), c("d"), c("e")] }, opts);
     expect(r.chats).toHaveLength(2);
   });
 });
 
 describe("rankRecall chat gate", () => {
-  const lexical = (id: string, hits: number): ChatRecall & { hits: number } => ({ id, title: id, date: "2026-10-01", snippet: "lexical", msgIndex: 0, hits });
+  const lexical = (id: string, hits: number): LexicalChat => ({ id, title: id, date: "2026-10-01", snippet: "lexical", msgIndex: 0, hits });
   const sem = (id: string): ChatRecall => ({ id, title: id, date: "2026-10-01", snippet: "semantic", msgIndex: 0 });
   const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
-  const rank = (lexicalChats: (ChatRecall & { hits: number })[], semanticChats: ChatRecall[] | null, semanticIds: Set<string> | null) =>
-    rankRecall({ sonar: [], title: [], lexicalChats, semanticChats }, { ...opts, chatGate: { semanticIds, minRareHits: 3 } }).chats;
+  const rank = (lexicalChats: LexicalChat[], semanticChats: ChatRecall[] | null) => rankRecall({ sonar: [], title: [], lexicalChats, semanticChats }, opts).chats;
 
-  it("a lexical chat with 2 hits the semantic lane does not know is dropped", () => {
-    expect(rank([lexical("a", 2)], [], new Set(["other"]))).toEqual([]);
+  it("a lexical chat with 2 hits the semantic lane does not stand behind is dropped", () => {
+    expect(rank([lexical("a", 2)], [sem("other")]).map((c) => c.id)).toEqual(["other"]);
   });
   it("even 3 hits do not rescue it while the semantic lane answered", () => {
-    expect(rank([lexical("a", 3)], [], new Set(["other"]))).toEqual([]);
+    expect(rank([lexical("a", 3)], [])).toEqual([]);
   });
-  it("a lexical chat the semantic lane also scored is kept, below the lift floor too", () => {
-    expect(rank([lexical("a", 2)], [], new Set(["a", "b"])).map((c) => c.id)).toEqual(["a"]);
+  it("a lexical chat the semantic lane stands behind is kept with 2 hits", () => {
+    expect(rank([lexical("a", 2)], [sem("a")]).map((c) => c.id)).toEqual(["a"]);
   });
   it("semantic lane unavailable: 3 hits keep the chat", () => {
-    expect(rank([lexical("a", 3)], null, null).map((c) => c.id)).toEqual(["a"]);
+    expect(rank([lexical("a", 3)], null).map((c) => c.id)).toEqual(["a"]);
   });
   it("semantic lane unavailable: 2 hits drop it", () => {
-    expect(rank([lexical("a", 2)], null, null)).toEqual([]);
+    expect(rank([lexical("a", 2)], null)).toEqual([]);
   });
-  it("a semantic-only chat above the lift floor is kept untouched", () => {
-    expect(rank([], [sem("s")], new Set(["s"])).map((c) => c.id)).toEqual(["s"]);
+  it("a semantic-only chat is kept untouched", () => {
+    expect(rank([], [sem("s")]).map((c) => c.id)).toEqual(["s"]);
   });
-  it("the gate only filters the lexical lane: a corroborated chat keeps its lexical snippet and loses the hit count", () => {
-    const [chat] = rank([lexical("a", 2)], [sem("a")], new Set(["a"]));
+  it("a corroborated chat keeps its lexical snippet and loses the hit count", () => {
+    const [chat] = rank([lexical("a", 2)], [sem("a")]);
     expect(chat).toEqual({ id: "a", title: "a", date: "2026-10-01", snippet: "lexical", msgIndex: 0 });
   });
-  it("without a gate nothing is filtered (eval and tests that feed bare lanes)", () => {
-    expect(rankRecall({ sonar: [], title: [], lexicalChats: [lexical("a", 2)], semanticChats: null }, opts).chats.map((c) => c.id)).toEqual(["a"]);
+});
+
+describe("recallTurn", () => {
+  const names = [
+    { path: "Projects/Exo/Exo.md", basename: "Exo", aliases: [] },
+    { path: "Companies/Exo.md", basename: "Exo", aliases: [] },
+    { path: "R/How to Win in the Ai Age.md", basename: "How to Win in the Ai Age", aliases: [] },
+    { path: "T/Win.md", basename: "Win", aliases: [] },
+  ];
+  const hit = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
+  const base = { names, chats: [] as ChatRecord[], convoId: "x", now: NOW, search: () => Promise.resolve([] as NoteRecall[]), semantic: () => Promise.resolve(null) };
+
+  it("is null for short messages, and for messages with no keyword, without reading anything", async () => {
+    const search = vi.fn(() => Promise.resolve([]));
+    const semantic = vi.fn(() => Promise.resolve(null));
+    expect(await recallTurn({ ...base, message: "ok thanks", search, semantic })).toBeNull();
+    expect(await recallTurn({ ...base, message: "come sono stato questo", search, semantic })).toBeNull();
+    expect(search).not.toHaveBeenCalled();
+    expect(semantic).not.toHaveBeenCalled();
+  });
+  it("the vocabulary comes from the names it is given: no Exo note, no exo keyword", async () => {
+    const search = vi.fn(() => Promise.resolve([]));
+    await recallTurn({ ...base, names: names.slice(2), message: "what is the status of Exo today", search });
+    expect(search).toHaveBeenCalledWith("status today");
+    expect(turnKeywords("what is the status of Exo today", names)).toEqual(["status", "exo", "today"]);
+  });
+  it("the project hub keeps its lead over the same-named company card when Sonar found both", async () => {
+    const search = () => Promise.resolve([hit("Projects/Exo/Exo.md"), hit("Companies/Exo.md")]);
+    const r = await recallTurn({ ...base, message: "what is the status of Exo today", search });
+    expect(r!.notes.map((x) => x.path)).toEqual(["Projects/Exo/Exo.md", "Companies/Exo.md"]);
+  });
+  it("a short name alone injects nothing: Sonar must have found the note too", async () => {
+    for (const message of ["how do we win this deal", "ask Claude to rewrite this paragraph"]) {
+      const r = await recallTurn({ ...base, message });
+      expect(r!.notes).toEqual([]);
+      expect(r!.lanes.title.map((t) => t.path)).not.toContain("R/How to Win in the Ai Age.md");
+    }
+  });
+  it("a search that throws leaves the chats and the title lane", async () => {
+    const r = await recallTurn({ ...base, message: "what is the status of Exo today", search: () => Promise.reject(new Error("sonar down")) });
+    expect(r!.notes).toEqual([]);
+    expect(r!.lanes.sonar).toEqual([]);
+  });
+  it("computes the semantic hits once and gates the lexical chats on them", async () => {
+    const old: ChatRecord = { id: "old", title: "Pricing history", messages: [{ role: "user", text: "how did pricing start", at: NOW - 300 * DAY }] };
+    const flat = Array.from({ length: 10 }, (_, i) => ({ id: `noise${i}`, score: 0.8 }));
+    const input = { ...base, chats: [...chats, old], convoId: "current", message: "what are the Exo pricing tiers" };
+    const behind = await recallTurn({ ...input, semantic: () => Promise.resolve([{ id: "c1", score: 0.87 }, { id: "old", score: 0.88 }, ...flat]) });
+    expect(behind!.chats.map((c) => c.id)).toEqual(["c1", "old"]);
+    const elsewhere = await recallTurn({ ...input, semantic: () => Promise.resolve([{ id: "old", score: 0.88 }, ...flat]) });
+    expect(elsewhere!.chats.map((c) => c.id)).toEqual(["old"]);
+    const down = await recallTurn({ ...input, semantic: () => Promise.resolve(null) });
+    expect(down!.chats.map((c) => c.id)).toEqual(["c1"]);
   });
 });
 
@@ -521,9 +597,9 @@ describe("recallForTurn", () => {
     expect(r).toBeNull();
   });
 
-  it("the chat gate takes a 3-char note name as a keyword: Exo is searched when a note is named Exo", async () => {
+  it("a 3-char note name is a keyword: Exo is searched when a note is named Exo", async () => {
     const files = [{ path: "Projects/Exo/Exo.md", basename: "Exo" }];
-    const base = app([]);
+    const base = app([{ path: "Projects/Exo/Exo.md", title: "Exo", score: 1, excerpt: "the Exo hub" }]);
     const a = { ...(base.app as object), vault: { getMarkdownFiles: () => files }, metadataCache: { getFileCache: () => null } } as never;
     const r = await recallForTurn(a, { message: "what is the status of Exo today", convoId: "x", chats: [], now: NOW });
     expect(base.calls[0]).toBe("status exo today");
