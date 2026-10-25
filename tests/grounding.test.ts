@@ -50,7 +50,7 @@ describe("citedPaths", () => {
 });
 
 describe("scoreGrounding", () => {
-  const entry = (notes: RecallLogEntry["notes"], msgIndex = 0): RecallLogEntry => ({ convoId: "c", msgIndex, userAt: 5, at: 6, notes });
+  const entry = (notes: RecallLogEntry["notes"], msgIndex = 0): RecallLogEntry => ({ convoId: "c", msgIndex, userAt: 100 + msgIndex, at: 200 + msgIndex, notes });
   const score = (entries: RecallLogEntry[], answers: Record<number, string | null>) =>
     scoreGrounding(entries, (e) => answers[e.msgIndex] ?? null, resolve);
 
@@ -84,6 +84,18 @@ describe("scoreGrounding", () => {
     const s = score([e], { 0: "It was in [[Pricing 2025]], now in [[Knowledge/Pricing]]." });
     expect(s.supersededCitedAsCurrent).toBe(0);
     expect(s.citingRecalled).toBe(1);
+  });
+  it("counts a retried turn once, by its last entry", () => {
+    const first = entry([{ path: "Knowledge/Pricing.md" }]);
+    const retry = { ...first, at: first.at + 1 };
+    const other = entry([{ path: "Knowledge/Pricing.md" }], 2);
+    const s = score([first, retry, other], { 0: "Per [[Knowledge/Pricing]].", 2: "No link." });
+    expect(s).toEqual({ turns: 2, citingRecalled: 1, supersededCitedAsCurrent: 0 });
+  });
+  it("reads an ambiguous link as the recalled note's successor", () => {
+    const r = makeResolver([{ path: "Pricing.md" }, { path: "Knowledge/Pricing.md" }, { path: "Old/Pricing 2025.md" }]);
+    const e = entry([{ path: "Old/Pricing 2025.md", supersededBy: "Knowledge/Pricing.md" }]);
+    expect(scoreGrounding([e], () => "Was [[Pricing 2025]], now [[Pricing]].", r).supersededCitedAsCurrent).toBe(0);
   });
   it("does not count a superseded note that is not cited", () => {
     const e = entry([{ path: "Knowledge/Old/Pricing 2025.md", supersededBy: "Knowledge/Pricing.md" }]);

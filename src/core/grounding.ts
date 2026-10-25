@@ -124,14 +124,16 @@ export function recallLogEntry(input: {
 }
 
 /** Score the logged turns against their replies. `answerOf` is null for a turn
- *  whose reply is not available; such a turn is not counted. */
+ *  whose reply is not available; such a turn is not counted. A retried turn is
+ *  logged once per attempt; only its last entry counts. */
 export function scoreGrounding(
   entries: readonly RecallLogEntry[],
   answerOf: (entry: RecallLogEntry) => string | null,
   resolve: LinkResolver,
 ): GroundingScore {
   const score: GroundingScore = { turns: 0, citingRecalled: 0, supersededCitedAsCurrent: 0 };
-  for (const e of entries) {
+  const latest = new Map(entries.map((e) => [`${e.convoId}:${e.userAt}`, e]));
+  for (const e of latest.values()) {
     const answer = answerOf(e);
     if (answer === null) continue;
     score.turns++;
@@ -139,7 +141,7 @@ export function scoreGrounding(
       citedPaths(
         answer,
         resolve,
-        e.notes.map((n) => n.path),
+        e.notes.flatMap((n) => (n.supersededBy ? [n.path, n.supersededBy] : [n.path])),
       ),
     );
     if (e.notes.some((n) => cited.has(n.path))) score.citingRecalled++;
