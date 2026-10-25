@@ -275,6 +275,12 @@ describe("titleLane", () => {
     expect(lane(["agents"], [agents], "controlla agents.md adesso")[0].explicit).toBe(true);
     expect(lane(["agents"], [agents], "controlla (agents.md) adesso")[0].explicit).toBe(true);
     expect(lane(["agents"], [agents], "agents.md dice")[0].explicit).toBe(true);
+    expect(lane(["agents"], [agents], "apri knowledge/agents.md")[0].explicit).toBe(true);
+  });
+  it("a hyphen or underscore before the file name joins it to a longer one: open-agents.md does not write out a note named agents", () => {
+    const agents = note("T/agents.md");
+    expect(lane(["agents"], [agents], "apri turno-open-agents.md adesso")[0].explicit).toBe(false);
+    expect(lane(["agents"], [agents], "apri sub_agents.md adesso")[0].explicit).toBe(false);
   });
   it("a basename with regex characters is matched literally", () => {
     const cpp = note("T/C++ (guida).md");
@@ -366,17 +372,6 @@ describe("rankRecall fusion", () => {
     const hit = { path: "CLAUDE.md", shared: 1, whole: true, explicit: false };
     expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
     expect(rankRecall({ sonar: [n("Turno Open Core.md"), n("CLAUDE.md")], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("CLAUDE.md");
-  });
-  it("with a head (a long message) a title hit beyond it needs the search or an explicit mention; the head's own names stand on their name", () => {
-    const named = { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true, explicit: false };
-    const chance = { path: "Knowledge/Product Manager.md", shared: 2, whole: true, explicit: false };
-    const written = { path: "Knowledge/Roadmap Q4.md", shared: 2, whole: true, explicit: true };
-    const head = new Set([named.path]);
-    const paths = (sonar: NoteRecall[], withHead?: ReadonlySet<string>) =>
-      rankRecall({ sonar, title: [named, chance, written], lexicalChats: [], semanticChats: null }, { ...opts, head: withHead }).notes.map((x) => x.path);
-    expect(paths([], head)).toEqual([named.path, written.path]);
-    expect(paths([n(chance.path)], head)).toEqual([chance.path, named.path, written.path]);
-    expect(paths([], undefined)).toEqual([named.path, chance.path, written.path]);
   });
   it("a note in two lanes still beats a title-only hub", () => {
     const sonar = ["Companies/Exo.md"].map(n);
@@ -517,7 +512,7 @@ describe("recallTurn", () => {
     const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
     const withNames = [...names, { path: "D/Open Core.md", basename: "Open Core", aliases: [] }];
     const long = await recallTurn({ ...base, names: withNames, message: `${filler} open core` });
-    expect(long!.lanes.title.map((t) => t.path)).toEqual(["D/Open Core.md"]);
+    expect(long!.lanes.title).toEqual([]);
     expect(long!.notes).toEqual([]);
     const written = await recallTurn({ ...base, names: withNames, message: `${filler} leggi [[open core]]` });
     expect(written!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
@@ -531,6 +526,22 @@ describe("recallTurn", () => {
     const long = await recallTurn({ ...base, names: withNames, message: `cosa dice open core oggi ${filler}` });
     expect(short!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
     expect(long!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
+  });
+  it("chance names past the tenth keyword cannot push a name inside it out of the title lane", async () => {
+    const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`);
+    const chance = Array.from({ length: 21 }, (_, i) => ({ path: `F/${i}.md`, basename: `${filler[7 + (i % 7)]} ${filler[7 + ((i + 1) % 7)]}`, aliases: [] }));
+    const withNames = [...names, ...chance, { path: "Z/Open Core.md", basename: "Open Core", aliases: [] }];
+    const long = await recallTurn({ ...base, names: withNames, message: `cosa dice open core oggi ${filler.join(" ")}` });
+    expect(long!.notes.map((n) => n.path)).toEqual(["Z/Open Core.md"]);
+  });
+  it("a name inside the first ten keywords keeps the hit those ten give: words past them neither weaken nor strengthen it", async () => {
+    const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const person = { path: "CRM/People/Alberto Aspese.md", basename: "Alberto Aspese", aliases: ["Alberto Aspese DeepAgent Sales"] };
+    const kept = await recallTurn({ ...base, names: [...names, person], message: `cosa dice alberto aspese oggi ${filler} sales` });
+    expect(kept!.notes.map((n) => n.path)).toEqual([person.path]);
+    const ideas = { path: "D/Orchestration Board Ideas.md", basename: "Orchestration Board Ideas", aliases: [] };
+    const partial = await recallTurn({ ...base, names: [...names, ideas], message: `orchestration board oggi ${filler} ideas` });
+    expect(partial!.notes).toEqual([]);
   });
   it("past chats are still matched on the first ten keywords only", async () => {
     const chat: ChatRecord = { id: "c", title: "t", messages: [{ role: "user", text: "tardiva zeta tardiva zeta", at: NOW - DAY }] };

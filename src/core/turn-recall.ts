@@ -231,10 +231,10 @@ export interface TitleHit {
 
 /** Whether the message writes the note out: a link to it (`[[name]]`,
  *  `[[name|alias]]`, `[[name#heading]]`) or its file name (`name.md`, not the
- *  tail of `subagents.md`). `text` is lower-cased. */
+ *  tail of `subagents.md` or `open-core.md`). `text` is lower-cased. */
 function writesOut(text: string, base: string): boolean {
   const name = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\[\\[${name}(\\]\\]|\\||#)|(^|[^\\p{L}\\p{N}])${name}\\.md`, "u").test(text);
+  return new RegExp(`\\[\\[${name}(\\]\\]|\\||#)|(^|[^\\p{L}\\p{N}_-])${name}\\.md`, "u").test(text);
 }
 
 /**
@@ -345,11 +345,6 @@ export const RECALL_CHAT_MIN_RARE_HITS = 3;
  *    only reorder the notes the search would inject anyway ("Orchestration
  *    Board" for "Orchestration Board Ideas" must not push out the decision
  *    about it).
- *  - A long message (`opts.head` set) shares words with many names by chance,
- *    so a title hit beyond the names its first {@link MAX_KEYWORDS} keywords
- *    already give (`head`, the paths those name) comes in only if the vault
- *    search found the note too, or the message writes it out. The names in the
- *    first ten words count as they would in a short message.
  *  - With `supersede`, a superseded note gives its slot to the current one and
  *    stays right below it, labelled.
  *  - A lexical chat is injected only if the semantic lane stands behind it; with
@@ -359,13 +354,12 @@ export const RECALL_CHAT_MIN_RARE_HITS = 3;
  *    `semanticChats`). */
 export function rankRecall(
   lanes: RecallLanes,
-  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex; head?: ReadonlySet<string> },
+  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex },
 ): { notes: NoteRecall[]; chats: ChatRecall[] } {
   const found = new Set(lanes.sonar.map((n) => n.path));
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
   const title = lanes.title
     .filter((t) => {
-      if (opts.head && !opts.head.has(t.path) && !t.explicit && !found.has(t.path)) return false;
       if (!t.explicit && (t.short || (t.shared < 2 && !isHub(t.path))) && !found.has(t.path)) return false;
       return t.whole || (t.shared >= 3 ? found : injected).has(t.path);
     })
@@ -464,9 +458,14 @@ export async function recallTurn(input: {
   const searched = await Promise.all(recallQueries(input.message, vocab).map((q) => input.search(q).catch((): NoteRecall[] => [])));
   // Cut to the lane depth after fusing: `found` ({@link rankRecall}) must not widen with the chunks.
   const sonar = (searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path)).slice(0, RECALL_LANE_DEPTH);
-  const title = titleLane(wide, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
-  // Only what the widening added is gated ({@link rankRecall}): the names the first ten keywords give stand as they always did.
-  const head = wide.length > MAX_KEYWORDS ? new Set(titleLane(keywords, input.names, input.message).map((t) => t.path)) : undefined;
+  // The names the first ten keywords give stand as in a short message. A long
+  // message shares words with many names by chance: a name only the words past
+  // the tenth give comes in if the search found the note too, or the message
+  // writes it out.
+  const near = titleLane(keywords, input.names, input.message);
+  const found = new Set(sonar.map((n) => n.path));
+  const far = wide.length > MAX_KEYWORDS ? titleLane(wide, input.names, input.message).filter((t) => (t.explicit || found.has(t.path)) && !near.some((h) => h.path === t.path)) : [];
+  const title = [...near, ...far].slice(0, RECALL_LANE_DEPTH);
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
   const scored = await scores;
   const hits = scored && semanticHits(scored);
@@ -476,5 +475,5 @@ export async function recallTurn(input: {
     lexicalChats,
     semanticChats: hits && chatsFromIds(hits, input.chats, { excludeId: input.convoId }),
   };
-  return { ...rankRecall(lanes, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: input.supersede, head }), lanes };
+  return { ...rankRecall(lanes, { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: input.supersede }), lanes };
 }

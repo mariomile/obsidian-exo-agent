@@ -192,11 +192,11 @@ const SHORT_NAME_PROMPTS = ["ask Claude to rewrite this paragraph", "puoi contro
  *  trip, a dinner, a workshop: none names a note of the vault, so a long
  *  message must not inject a note on a chance overlap of words. */
 const LONG_PROMPTS = [
-  "Domani mattina ho una riunione con il commercialista per sistemare la dichiarazione dei redditi e vorrei una lista ordinata dei documenti da portare, delle scadenze fiscali più vicine e delle domande che conviene fare prima di firmare",
+  "Domani mattina ho una riunione con il commercialista per sistemare le tasse e vorrei una lista ordinata dei documenti da portare, delle scadenze fiscali più vicine e delle domande che conviene fare prima di firmare",
   "Devo scrivere una email al cliente per spiegare che la fatturazione elettronica ha avuto un ritardo questa settimana e che stiamo sistemando il problema insieme al commercialista, tieni un tono cordiale ma professionale e chiaro",
   "Mi serve un itinerario di quattro giorni a Lisbona a fine novembre con musei, ristoranti di pesce vicino al fiume e un paio di serate tranquille, tenendo il budget sotto i mille euro per due persone compresi voli e hotel",
   "Sto cercando una ricetta per una cena con sei amici che comprenda un antipasto freddo, un primo di pasta fresca fatta in casa e un dolce senza forno, considerando che due ospiti sono vegetariani e uno è allergico alle noci",
-  "Vorrei una scaletta per un workshop interno di mezza giornata sulla gestione delle priorità, con un'introduzione, tre esercizi pratici in piccoli gruppi e un momento finale di discussione aperta con tutti i partecipanti",
+  "Vorrei una scaletta per un workshop interno di mezza giornata su come organizzare meglio le settimane di lavoro, con un'introduzione, tre esercizi pratici in piccoli gruppi e un momento finale di discussione aperta con tutti i partecipanti",
 ];
 /** Prompts that name a project: its hub note must lead. */
 const HUB_PROMPTS = [
