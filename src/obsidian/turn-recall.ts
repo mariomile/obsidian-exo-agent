@@ -12,6 +12,8 @@ import { buildSupersedeIndex, markersOf } from "../core/supersede";
 import { proposeMarkerFixes } from "./corrections";
 import { searchVaultNotes, vaultExclusion } from "./vault-search";
 import { vaultBasePath } from "./tool-kit";
+import { recallLogEntry } from "../core/grounding";
+import { recallLogFor } from "./recall-log";
 import { recallChatScores, recallHost } from "./chat-recall";
 import type { PathFilter } from "../core/vault-exclusions";
 
@@ -97,6 +99,8 @@ export async function recallForTurn(
   input: { message: string; convoId: string; chats: readonly ChatRecord[]; now: number; exclude?: PathFilter; pluginDir?: string },
 ): Promise<TurnRecall | null> {
   if (!shouldRecall(input.message)) return null;
+  // The user message is already pushed (bubbleThenRecall), so it is the last one.
+  const messageCount = input.chats.find((c) => c.id === input.convoId)?.messages.length ?? 0;
   // The one pass over the notes feeds the title lane, the supersede index and
   // the name vocabulary that lets a 3-letter name ("Exo") be a keyword.
   let exclude: PathFilter | undefined;
@@ -132,5 +136,9 @@ export async function recallForTurn(
   const fixes = scan?.supersede.fixes.filter((f) => recalled.has(f.path)) ?? [];
   if (fixes.length) void proposeMarkerFixes(app, fixes, input.convoId).catch(() => {});
   const block = formatRecallBlock(notes, chats);
+  if (block && input.pluginDir) {
+    const entry = recallLogEntry({ convoId: input.convoId, messageCount, at: input.now, notes });
+    if (entry) void Promise.resolve().then(() => recallLogFor(app, input.pluginDir!).append(entry)).catch(() => {});
+  }
   return block ? { block, notes, chats } : null;
 }

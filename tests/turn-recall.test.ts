@@ -184,6 +184,14 @@ describe("formatRecallBlock", () => {
     const line = block.split("\n").find((l) => l.startsWith("- Notes/Pricing.md"))!;
     expect(line.length).toBeLessThanOrEqual("- Notes/Pricing.md: ".length + 300);
   });
+  it("tells the model to cite what it relies on and to prefer a successor, once", () => {
+    const block = formatRecallBlock([{ path: "Notes/Pricing.md", excerpt: "x" }], []);
+    const rule = "When you rely on a recalled note, cite it as [[Note]]. A note marked superseded is not current; cite its successor.";
+    expect(block.split(rule)).toHaveLength(2);
+    expect(block.indexOf(rule)).toBeLessThan(block.indexOf("Notes:"));
+    // chat-only blocks carry it too: the header is shared
+    expect(formatRecallBlock([], [{ id: "t", title: "T", date: "2026-09-20", snippet: "s", msgIndex: 0 }])).toContain(rule);
+  });
   it("keeps at most 5 notes and 2 chats, and the whole block within 2000 chars", () => {
     const notes = Array.from({ length: 8 }, (_, i) => ({ path: `N/${i}.md`, excerpt: "e".repeat(300) }));
     const past = Array.from({ length: 4 }, (_, i) => ({
@@ -565,6 +573,37 @@ describe("recallForTurn", () => {
     expect(r!.notes).toEqual([{ path: "Notes/Pricing.md", excerpt: "Pro is 29 euro" }]);
     expect(r!.chats.map((c) => c.title)).toEqual(["Pricing call"]);
     expect(r!.block).toContain("- Notes/Pricing.md: Pro is 29 euro");
+  });
+
+  it("logs what it injected for the grounding eval: paths only, pointing at the user message just pushed", async () => {
+    const written: Record<string, string> = {};
+    const adapter = {
+      getBasePath: () => "/v",
+      exists: async (p: string) => p in written,
+      read: async (p: string) => written[p],
+      write: async (p: string, c: string) => {
+        written[p] = c;
+      },
+    };
+    const a = { ...(app([{ path: "Notes/Pricing.md", title: "Pricing", score: 3, excerpt: "Pro is 29 euro" }]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "plug/exo" });
+    expect(r).not.toBeNull();
+    await vi.waitFor(() => expect(written["plug/exo/recall-log.json"]).toBeDefined());
+    const log = JSON.parse(written["plug/exo/recall-log.json"]);
+    // `current` holds one message, the user's: index 0
+    expect(log).toEqual([{ convoId: "current", msgIndex: 0, at: NOW, notes: [{ path: "Notes/Pricing.md" }] }]);
+    expect(written["plug/exo/recall-log.json"]).not.toContain("29 euro");
+  });
+
+  it("logs nothing when only chats were recalled, or without a plugin folder", async () => {
+    const written: Record<string, string> = {};
+    const adapter = { getBasePath: () => "/v", exists: async () => false, read: async () => "", write: async (p: string, c: string) => void (written[p] = c) };
+    const a = { ...(app([]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "plug/exo" });
+    const b = { ...(app([{ path: "Notes/P.md", title: "P", score: 1, excerpt: "e" }]).app as object), vault: { getMarkdownFiles: () => [], adapter } } as never;
+    await recallForTurn(b, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(written).toEqual({});
   });
 
   it("skips short messages and slash commands without searching", async () => {

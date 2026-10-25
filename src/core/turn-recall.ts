@@ -375,7 +375,7 @@ export function formatRecallBlock(notes: readonly NoteRecall[], chats: readonly 
   const chatLinesOut = chats.slice(0, RECALL_MAX_CHATS).map((c) => `- "${flat(c.title, 80)}" (${c.date}): ${c.snippet}`);
   const render = (): string => {
     if (!noteLines.length && !chatLinesOut.length) return "";
-    const parts = [RECALL_OPEN, "Background context recalled from the vault and past chats, NOT the current conversation. Use it only if relevant."];
+    const parts = [RECALL_OPEN, "Background context recalled from the vault and past chats, NOT the current conversation. Use it only if relevant. When you rely on a recalled note, cite it as [[Note]]. A note marked superseded is not current; cite its successor."];
     if (noteLines.length) parts.push("Notes:", ...noteLines);
     if (chatLinesOut.length) parts.push("Past chats:", ...chatLinesOut);
     parts.push(RECALL_CLOSE);

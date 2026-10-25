@@ -12,7 +12,7 @@ export const autoMemoryNote = (opts: { recall: boolean; chats: boolean }): strin
   "### Memory\n" +
   "Your memory is this vault: durable facts live in the user's own notes. After a chat goes idle, Exo reads it and adds or updates one-line facts in the right notes by itself, so you do not need to save anything to remember it. " +
   (opts.recall
-    ? "Before each message, Exo may prepend a `[vault-recall]` block with related notes and past chats: it is BACKGROUND, never the current conversation. When the user points back ('continua', 'as above'), resolve it from THIS thread. "
+    ? "Before each message, Exo may prepend a `[vault-recall]` block with related notes and past chats: it is BACKGROUND, never the current conversation. When the user points back ('continua', 'as above'), resolve it from THIS thread. When you answer from recalled notes, cite the ones you rely on as [[Note]]; a note marked superseded is not current, cite its successor. "
     : "") +
   (opts.chats ? "Use `recent_chats` when the user asks what you discussed recently." : "");
 
