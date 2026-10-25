@@ -9,9 +9,11 @@
  * data: the vault's own memory rules (AGENTS.md) plus search hits reach the
  * model; the code only enforces generic guardrails. No Obsidian import.
  */
+import { formatProvenance } from "./block-patch";
 import { chatLines, type ChatLine, type ChatMessage } from "./recent-chats";
 import type { ExoPaths } from "./paths";
 import { headingsOf, inFence, protectedLines } from "./save-target";
+import { formatSupersede, withoutListMarker } from "./supersede";
 
 /* ------------------------------ scheduling ------------------------------ */
 
@@ -300,14 +302,14 @@ export function buildDecidePrompt(input: {
     "For EACH fact below decide one operation:",
     '- {"op":"noop","candidate":i}: already recorded (same meaning), not worth keeping, or no safe place for it.',
     '- {"op":"add","candidate":i,"path":"...","section":"...","text":"..."}: append ONE line to an existing note, under the named section heading (omit section to append at the end).',
-    '- {"op":"update","candidate":i,"path":"...","oldLine":"...","newText":"..."}: the fact CHANGED a line that exists. oldLine must be copied EXACTLY from a "line:" shown below. newText replaces that one line and keeps the old value as a trace.',
+    '- {"op":"update","candidate":i,"path":"...","oldLine":"...","newText":"..."}: the fact CHANGED a line that exists. oldLine must be copied EXACTLY from a "line:" shown below. newText is the new value of that one line.',
     "",
     "Rules:",
     "- Only paths shown below as NOTE, or the inbox. Never invent a path, never create notes.",
     `- Agent lessons go to ${input.agentLessonPath} when that note is shown; anything useful with no obvious home goes to the inbox: ${input.inboxPath}.`,
     "- Additive only: never remove or rewrite the owner's text beyond the single updated line.",
     "- Write text and newText in the language of the target note, one line, no leading bullet.",
-    "- For an update, use the changed-fact format from the vault rules if they define one; otherwise `<new> (since YYYY-MM-DD; previously <old>)`.",
+    "- Write the bare fact only. Do not write a source, a date or the previous value: the code appends the source line and keeps the old value as a trace.",
     "- Never write credentials, keys, tokens or passwords.",
     "",
     "VAULT MEMORY RULES:",
@@ -415,13 +417,42 @@ export function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim().replace(/^[-*+]\s+/, "");
 }
 
-/** Append `- text` under `section` (a heading, matched without its #s,
- *  case-insensitively, never inside frontmatter or code) or at the end of the
- *  note. Null when the text would be structure or the note's frontmatter
- *  never closes. */
-export function applyAdd(content: string, section: string | undefined, text: string): { content: string; line: string } | null {
-  const line = `- ${oneLine(text)}`;
-  if (structural(oneLine(text))) return null;
+/** Where a harvest write came from: the chat, as corrections cite it. */
+export interface HarvestProvenance {
+  convoId: string;
+  chatTitle: string;
+  /** YYYY-MM-DD */
+  date: string;
+}
+
+const FONTE_TAIL = /\s*\[fonte\b[^\n]*\]\s*$/;
+const CHANGED_TAIL = /\s*\((?:dal|since) \d{4}-\d{2}-\d{2}; (?:prima|previously) [^\n]*\)\s*$/;
+
+/** The fact without a provenance tail the model wrote itself: a trailing
+ *  `[fonte ...]` and/or `(dal ...; prima ...)`, in any order. The code adds
+ *  the real ones, so none must appear twice. */
+export function stripProvenance(text: string): string {
+  let out = text;
+  for (let prev = ""; prev !== out; ) {
+    prev = out;
+    out = out.replace(FONTE_TAIL, "").replace(CHANGED_TAIL, "");
+  }
+  return out.trimEnd();
+}
+
+/** Append `- text [fonte: ...; dal: ...]` under `section` (a heading, matched
+ *  without its #s, case-insensitively, never inside frontmatter or code) or at
+ *  the end of the note. Null when the text would be structure or the note's
+ *  frontmatter never closes. */
+export function applyAdd(
+  content: string,
+  section: string | undefined,
+  text: string,
+  p: HarvestProvenance,
+): { content: string; line: string } | null {
+  const fact = oneLine(stripProvenance(oneLine(text)));
+  if (!fact || structural(fact)) return null;
+  const line = `- ${fact} ${formatProvenance({ ...p, msgIndex: 0 })}`;
   const lines = content.replace(/\s+$/, "").split("\n");
   const prot = protectedLines(lines);
   const { open, frontmatterEnd, fenced } = prot;
@@ -453,24 +484,30 @@ export function applyAdd(content: string, section: string | undefined, text: str
 }
 
 /** Replace the ONE plain content line equal (whitespace-trimmed) to `oldLine`
- *  with `newText`, keeping its indentation and bullet. Null unless the line
- *  occurs exactly once, is not frontmatter / heading / table / fence / rule,
- *  and the new text is not structure either. */
+ *  with `<new> (dal <today>; prima <old>)` (the shape corrections write),
+ *  keeping its indentation and bullet. Null unless the line occurs exactly
+ *  once, is not frontmatter / heading / table / fence / rule, and the new text
+ *  is not structure either. A tail the model wrote, or one the old line
+ *  already holds, is dropped so nothing nests. */
 export function applyUpdate(
   content: string,
   oldLine: string,
   newText: string,
+  today: string,
 ): { content: string; from: string; to: string } | null {
   const want = oldLine.trim();
-  if (!want || structural(oneLine(newText))) return null;
+  const next = oneLine(stripProvenance(oneLine(newText)));
+  if (!want || !next || structural(next)) return null;
   const lines = content.split("\n");
   const hits = lines.flatMap((l, i) => (l.trim() === want ? [i] : []));
   if (hits.length !== 1) return null;
   const i = hits[0];
   if (protectedLines(lines).locked[i]) return null;
-  const prefix = lines[i].match(/^\s*(?:[-*+]\s+(?:\[.\]\s+)?)?/)?.[0] ?? "";
   const from = lines[i];
-  lines[i] = `${prefix}${oneLine(newText)}`;
+  const changed = formatSupersede(stripProvenance(from), next, today);
+  // A plain (unbulleted) line keeps its indentation too.
+  const indent = withoutListMarker(from) === from.trim() ? (from.match(/^\s*/) ?? [""])[0] : "";
+  lines[i] = `${indent}${changed}`;
   return { content: lines.join("\n"), from, to: lines[i] };
 }
 

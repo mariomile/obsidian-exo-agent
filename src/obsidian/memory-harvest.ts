@@ -226,7 +226,14 @@ export class MemoryHarvester {
     // (and with the loops tools when the ledger is a target).
     const apply = () =>
       this.d.writeQueue.enqueue(() =>
-        applyDecisions(this.vault(), decisions, { ...env, today, now, offered, ledgerPath: paths.openLoops }),
+        applyDecisions(this.vault(), decisions, {
+          ...env,
+          today,
+          now,
+          offered,
+          ledgerPath: paths.openLoops,
+          provenance: { convoId: chat.id, chatTitle: safeTitle(chat.title), date: today },
+        }),
       );
     const result = targets.includes(paths.openLoops) ? await this.d.loopsWriteQueue.enqueue(apply) : await apply();
     for (const r of result.rejected) this.d.diag(`harvest rejected ${r.decision.op}: ${r.reason}`);

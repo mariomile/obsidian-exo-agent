@@ -13,8 +13,10 @@ import {
   inboxNote,
   normalizeTarget,
   oneLine,
+  stripProvenance,
   HARVEST_MAX_WRITES,
   type Decision,
+  type HarvestProvenance,
   type TargetEnv,
 } from "./memory-harvest";
 import { formatLoop } from "./open-loops";
@@ -57,6 +59,8 @@ export interface ApplyEnv extends TargetEnv {
   /** The open-loops ledger: an ADD there becomes a well-formed loop entry,
    *  and UPDATE is refused (its lines are the ledger's own metadata). */
   ledgerPath: string;
+  /** The chat the facts came from: code appends it to every line it writes. */
+  provenance: HarvestProvenance;
 }
 
 export async function applyDecisions(vault: ApplyVault, decisions: readonly Decision[], env: ApplyEnv): Promise<ApplyResult> {
@@ -103,28 +107,28 @@ export async function applyDecisions(vault: ApplyVault, decisions: readonly Deci
     if (d.op === "add" && !created.has(path) && !env.exists(path)) {
       // Only the inbox reaches here (checkTarget): create it with the fact.
       const starter = inboxNote(env.today);
-      const res = applyAdd(starter, d.section, d.text);
+      const res = applyAdd(starter, d.section, d.text, env.provenance);
       if (!res) {
         reject("text would be structure, not a line");
         continue;
       }
       await vault.create(path, res.content);
       created.add(path);
-      writes.push({ path, op: "add", text: oneLine(d.text), lines: [res.line], created: starter });
+      writes.push({ path, op: "add", text: oneLine(stripProvenance(d.text)), lines: [res.line], created: starter });
       continue;
     }
 
     const out: { write?: AppliedWrite } = {};
     const ok = await vault.edit(path, (cur) => {
       if (d.op === "add") {
-        const res = applyAdd(cur, d.section, d.text);
+        const res = applyAdd(cur, d.section, d.text, env.provenance);
         if (!res) return null;
-        out.write = { path, op: "add", text: oneLine(d.text), lines: [res.line] };
+        out.write = { path, op: "add", text: oneLine(stripProvenance(d.text)), lines: [res.line] };
         return res.content;
       }
-      const res = applyUpdate(cur, d.oldLine, d.newText);
+      const res = applyUpdate(cur, d.oldLine, d.newText, env.today);
       if (!res) return null;
-      out.write = { path, op: "update", text: oneLine(d.newText), lines: [res.to], replaced: res.from };
+      out.write = { path, op: "update", text: oneLine(stripProvenance(d.newText)), lines: [res.to], replaced: res.from };
       return res.content;
     });
     if (!ok || !out.write) {
