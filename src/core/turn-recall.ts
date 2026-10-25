@@ -216,6 +216,10 @@ export interface TitleHit {
   /** Set when every shared word has three letters: too weak to inject a note
    *  unless the vault search found it too ({@link rankRecall}). */
   short?: true;
+  /** The message writes the note out: `<basename>.md` or `[[<basename>`. That
+   *  is a reference, not a word that happens to be a name, so it needs no
+   *  vault-search hit ({@link rankRecall}). */
+  explicit: boolean;
 }
 
 /**
@@ -225,9 +229,14 @@ export interface TitleHit {
  * same-named note (a company card, a transcript), then path. A name sharing a
  * single word with a longer title is noise, not a mention.
  */
-export function titleLane(keywords: readonly string[], notes: readonly { path: string; basename: string; aliases: readonly string[] }[]): TitleHit[] {
+export function titleLane(
+  keywords: readonly string[],
+  notes: readonly { path: string; basename: string; aliases: readonly string[] }[],
+  message: string,
+): TitleHit[] {
   const asked = new Set(keywords);
-  const hits: { path: string; shared: number; cover: number; short: boolean }[] = [];
+  const text = message.toLowerCase();
+  const hits: { path: string; shared: number; cover: number; short: boolean; explicit: boolean }[] = [];
   for (const note of notes) {
     let best: { shared: number; cover: number; short: boolean } | null = null;
     for (const name of [note.basename, ...note.aliases]) {
@@ -239,7 +248,9 @@ export function titleLane(keywords: readonly string[], notes: readonly { path: s
       const short = common.every((w) => w.length === 3);
       if (!best || shared > best.shared || (shared === best.shared && cover > best.cover)) best = { shared, cover, short };
     }
-    if (best) hits.push({ path: note.path, ...best });
+    if (!best) continue;
+    const base = note.basename.toLowerCase();
+    hits.push({ path: note.path, ...best, explicit: text.includes(`${base}.md`) || text.includes(`[[${base}`) });
   }
   return hits
     .sort(
@@ -249,7 +260,7 @@ export function titleLane(keywords: readonly string[], notes: readonly { path: s
         Number(isHub(b.path)) - Number(isHub(a.path)) ||
         (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
     )
-    .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1, ...(h.short ? { short: true as const } : {}) }));
+    .map((h) => ({ path: h.path, shared: h.shared, whole: h.cover === 1, ...(h.short ? { short: true as const } : {}), explicit: h.explicit }));
 }
 
 /** The chats of a semantic answer (best first) that stand out from it by
@@ -312,7 +323,8 @@ export const RECALL_CHAT_MIN_RARE_HITS = 3;
  *  - A one-word name that is not a project hub is a word the message may use
  *    for something else ("Claude", "win"), and so is a title match resting on
  *    3-letter words ({@link TitleHit.short}): both need the vault search to
- *    have found the note too.
+ *    have found the note too, unless the message writes the note out
+ *    ({@link TitleHit.explicit}).
  *  - A note named only in part needs the same: three shared words lift it from
  *    anywhere in that search ("turno open core" for turno-saas-open-core), two
  *    only reorder the notes the search would inject anyway ("Orchestration
@@ -333,7 +345,7 @@ export function rankRecall(
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
   const title = lanes.title
     .filter((t) => {
-      if ((t.short || (t.shared < 2 && !isHub(t.path))) && !found.has(t.path)) return false;
+      if (!t.explicit && (t.short || (t.shared < 2 && !isHub(t.path))) && !found.has(t.path)) return false;
       return t.whole || (t.shared >= 3 ? found : injected).has(t.path);
     })
     .map((t) => ({ path: t.path, excerpt: "" }));
@@ -416,7 +428,7 @@ export async function recallTurn(input: {
   const keywords = turnKeywords(input.message, input.names);
   if (!keywords.length) return null;
   const scores = input.semantic();
-  const title = titleLane(keywords, input.names).slice(0, RECALL_LANE_DEPTH);
+  const title = titleLane(keywords, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
   let sonar: NoteRecall[] = [];
   try {
     sonar = await input.search(keywords.join(" "));

@@ -225,63 +225,71 @@ describe("rankRecall on single lanes (parity with the pre-extraction pipeline)",
 });
 
 describe("titleLane", () => {
+  const lane = (keywords: string[], notes: ReturnType<typeof note>[], message = "") => titleLane(keywords, notes, message);
   const note = (path: string, aliases: string[] = []) => ({ path, basename: path.replace(/^.*\//, "").replace(/\.md$/, ""), aliases });
 
   it("a note the message names in full beats one that shares a single word", () => {
     const keywords = recallKeywords("Chi è Alberto Aspese e quanti eventi in calendario abbiamo avuto?");
     const notes = [note("Templates/Calendario.md"), note("CRM/People/Alberto Aspese.md"), note("CRM/People/Alberto Rossi.md")];
-    expect(titleLane(keywords, notes)).toEqual([
-      { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true },
-      { path: "Templates/Calendario.md", shared: 1, whole: true },
+    expect(lane(keywords, notes)).toEqual([
+      { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true, explicit: false },
+      { path: "Templates/Calendario.md", shared: 1, whole: true, explicit: false },
     ]);
   });
   it("normalises diacritics and hyphens: open-core matches open core, città matches citta", () => {
     const keywords = recallKeywords("Che cosa è diventato Turno con il modello open core?");
-    expect(titleLane(keywords, [note("D/2026-10-03-turno-saas-open-core.md")])).toEqual([{ path: "D/2026-10-03-turno-saas-open-core.md", shared: 3, whole: false }]);
-    expect(titleLane(recallKeywords("parlami della nuova universita di citta alta"), [note("N/Università Città Alta.md")])).toEqual([
-      { path: "N/Università Città Alta.md", shared: 3, whole: true },
+    expect(lane(keywords, [note("D/2026-10-03-turno-saas-open-core.md")])).toEqual([{ path: "D/2026-10-03-turno-saas-open-core.md", shared: 3, whole: false, explicit: false }]);
+    expect(lane(recallKeywords("parlami della nuova universita di citta alta"), [note("N/Università Città Alta.md")])).toEqual([
+      { path: "N/Università Città Alta.md", shared: 3, whole: true, explicit: false },
     ]);
   });
   it("aliases count as names", () => {
     const keywords = recallKeywords("cosa sappiamo della Orchestration Board ormai?");
-    expect(titleLane(keywords, [note("P/Board ideas v2.md", ["Orchestration Board"])])).toEqual([{ path: "P/Board ideas v2.md", shared: 2, whole: true }]);
+    expect(lane(keywords, [note("P/Board ideas v2.md", ["Orchestration Board"])])).toEqual([{ path: "P/Board ideas v2.md", shared: 2, whole: true, explicit: false }]);
   });
   it("one shared word with a longer name is not a title match", () => {
-    expect(titleLane(recallKeywords("quale task manager uso adesso"), [note("R/Notes on everything task related.md")])).toEqual([]);
+    expect(lane(recallKeywords("quale task manager uso adesso"), [note("R/Notes on everything task related.md")])).toEqual([]);
   });
   it("a 3-char name word counts once the message names it, so Exo is findable; the hit is marked short", () => {
-    expect(titleLane(["exo"], [note("Companies/Exo.md")])).toEqual([{ path: "Companies/Exo.md", shared: 1, whole: true, short: true }]);
-    expect(titleLane(["stato"], [note("Companies/Exo.md")])).toEqual([]);
+    expect(lane(["exo"], [note("Companies/Exo.md")])).toEqual([{ path: "Companies/Exo.md", shared: 1, whole: true, short: true, explicit: false }]);
+    expect(lane(["stato"], [note("Companies/Exo.md")])).toEqual([]);
+  });
+  it("a title hit is explicit when the message writes <name>.md or [[<name>, whatever the case", () => {
+    const claude = note("CLAUDE.md");
+    expect(lane(["claude"], [claude], "cosa dice il file CLAUDE.md?")[0].explicit).toBe(true);
+    expect(lane(["claude"], [claude], "apri [[claude]] adesso")[0].explicit).toBe(true);
+    expect(lane(["claude"], [claude], "apri [[Claude|il file]] adesso")[0].explicit).toBe(true);
+    expect(lane(["claude"], [claude], "ask Claude to rewrite")[0].explicit).toBe(false);
   });
   it("every non-stopword 3-char word of a name counts in its coverage: 'win this deal' is not How to Win in the Ai Age", () => {
-    expect(titleLane(["win", "deal"], [note("R/How to Win in the Ai Age.md")])).toEqual([]);
-    expect(titleLane(["win", "age"], [note("R/How to Win in the Ai Age.md")])).toEqual([{ path: "R/How to Win in the Ai Age.md", shared: 2, whole: true, short: true }]);
+    expect(lane(["win", "deal"], [note("R/How to Win in the Ai Age.md")])).toEqual([]);
+    expect(lane(["win", "age"], [note("R/How to Win in the Ai Age.md")])).toEqual([{ path: "R/How to Win in the Ai Age.md", shared: 2, whole: true, short: true, explicit: false }]);
   });
   it("a name with a 3-char word needs the message to name it too", () => {
-    expect(titleLane(["companies"], [note("T/CRM Companies.md")])).toEqual([]);
-    expect(titleLane(["crm", "companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 2, whole: true }]);
+    expect(lane(["companies"], [note("T/CRM Companies.md")])).toEqual([]);
+    expect(lane(["crm", "companies"], [note("T/CRM Companies.md")])).toEqual([{ path: "T/CRM Companies.md", shared: 2, whole: true, explicit: false }]);
   });
   it("3-char stopwords in a name do not count: Guida per Exo is covered by guida + exo", () => {
-    expect(titleLane(["guida", "exo"], [note("G/Guida per Exo.md")])).toEqual([{ path: "G/Guida per Exo.md", shared: 2, whole: true }]);
+    expect(lane(["guida", "exo"], [note("G/Guida per Exo.md")])).toEqual([{ path: "G/Guida per Exo.md", shared: 2, whole: true, explicit: false }]);
   });
   it("a project hub beats a same-named note that sorts before it", () => {
     const notes = [note("Companies/DeepAgent.md"), note("Projects/DeepAgent/DeepAgent.md"), note("Archive/DeepAgent.md")];
-    expect(titleLane(["deepagent"], notes).map((h) => h.path)).toEqual([
+    expect(lane(["deepagent"], notes).map((h) => h.path)).toEqual([
       "Projects/DeepAgent/DeepAgent.md",
       "Archive/DeepAgent.md",
       "Companies/DeepAgent.md",
     ]);
   });
   it("without a hub the lane is unchanged: path order", () => {
-    expect(titleLane(["deepagent"], [note("Z/DeepAgent.md"), note("A/DeepAgent.md")]).map((h) => h.path)).toEqual(["A/DeepAgent.md", "Z/DeepAgent.md"]);
+    expect(lane(["deepagent"], [note("Z/DeepAgent.md"), note("A/DeepAgent.md")]).map((h) => h.path)).toEqual(["A/DeepAgent.md", "Z/DeepAgent.md"]);
   });
   it("a hub does not outrank a note the message names more fully", () => {
-    const hits = titleLane(["bending", "spoons"], [note("Bending/Bending.md"), note("CRM/Bending Spoons.md")]);
+    const hits = lane(["bending", "spoons"], [note("Bending/Bending.md"), note("CRM/Bending Spoons.md")]);
     expect(hits.map((h) => h.path)).toEqual(["CRM/Bending Spoons.md", "Bending/Bending.md"]);
   });
   it("ties break by path, so the lane is deterministic", () => {
     const keywords = recallKeywords("parliamo di Bending Spoons domani mattina");
-    expect(titleLane(keywords, [note("Z/Bending Spoons.md"), note("A/Bending Spoons.md")]).map((h) => h.path)).toEqual(["A/Bending Spoons.md", "Z/Bending Spoons.md"]);
+    expect(lane(keywords, [note("Z/Bending Spoons.md"), note("A/Bending Spoons.md")]).map((h) => h.path)).toEqual(["A/Bending Spoons.md", "Z/Bending Spoons.md"]);
   });
 });
 
@@ -293,20 +301,20 @@ describe("rankRecall fusion", () => {
 
   it("a note found by two lanes outranks the note one lane ranked first", () => {
     const sonar = ["Top.md", "B.md", "C.md", "D.md", "E.md", "F.md", "Both.md"].map(n);
-    const r = rankRecall({ sonar, title: [{ path: "Both.md", shared: 3, whole: false }], lexicalChats: [], semanticChats: null }, opts);
+    const r = rankRecall({ sonar, title: [{ path: "Both.md", shared: 3, whole: false, explicit: false }], lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["Both.md", "Top.md", "B.md", "C.md", "D.md"]);
     expect(r.notes[0].excerpt).toBe("about Both.md");
   });
   it("equal scores break by path", () => {
-    const r = rankRecall({ sonar: [n("Z.md")], title: [{ path: "A.md", shared: 2, whole: true }], lexicalChats: [], semanticChats: null }, opts);
+    const r = rankRecall({ sonar: [n("Z.md")], title: [{ path: "A.md", shared: 2, whole: true, explicit: false }], lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["A.md", "Z.md"]);
   });
   it("a partial name match only confirms a note the vault search found; it never brings one in alone", () => {
     const sonar = ["S1.md", "S2.md", "S3.md", "S4.md", "S5.md"].map(n);
     const title = [
-      { path: "Partial only.md", shared: 3, whole: false },
-      { path: "S5.md", shared: 2, whole: false },
-      { path: "Named in full.md", shared: 2, whole: true },
+      { path: "Partial only.md", shared: 3, whole: false, explicit: false },
+      { path: "S5.md", shared: 2, whole: false, explicit: false },
+      { path: "Named in full.md", shared: 2, whole: true, explicit: false },
     ];
     const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["S5.md", "S1.md", "Named in full.md", "S2.md", "S3.md"]);
@@ -314,30 +322,36 @@ describe("rankRecall fusion", () => {
   });
   it("two words shared with a longer name reorder the notes the vault search would inject, never push one out", () => {
     const sonar = ["S1.md", "S2.md", "S3.md", "S4.md", "S5.md", "S6.md", "Deep.md"].map(n);
-    const title = [{ path: "Deep.md", shared: 2, whole: false }];
+    const title = [{ path: "Deep.md", shared: 2, whole: false, explicit: false }];
     const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["S1.md", "S2.md", "S3.md", "S4.md", "S5.md"]);
   });
   it("a title match resting on a 3-char word alone needs the vault search to have found the note", () => {
-    const hub = { path: "Projects/Exo/Exo.md", shared: 1, whole: true, short: true as const };
+    const hub = { path: "Projects/Exo/Exo.md", shared: 1, whole: true, short: true as const, explicit: false };
     expect(rankRecall({ sonar: [], title: [hub], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
     const deep = ["A", "B", "C", "D", "E", "F", "G", "Projects/Exo/Exo"].map((x) => n(`${x}.md`));
     expect(rankRecall({ sonar: deep, title: [hub], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("Projects/Exo/Exo.md");
   });
+  it("an explicit reference needs no search hit even for a one-word name", () => {
+    const hit = { path: "CLAUDE.md", shared: 1, whole: true, explicit: true };
+    expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes.map((x) => x.path)).toEqual(["CLAUDE.md"]);
+    const short = { path: "Companies/Exo.md", shared: 1, whole: true, short: true as const, explicit: true };
+    expect(rankRecall({ sonar: [], title: [short], lexicalChats: [], semanticChats: null }, opts).notes.map((x) => x.path)).toEqual(["Companies/Exo.md"]);
+  });
   it("a name of two words or more, all in the message, still comes in on its name alone", () => {
-    const hit = { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true };
+    const hit = { path: "CRM/People/Alberto Aspese.md", shared: 2, whole: true, explicit: false };
     expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes.map((x) => x.path)).toEqual(["CRM/People/Alberto Aspese.md"]);
   });
   it("a one-word name needs the vault search too, however long the word: 'Claude' in a prompt is not the CLAUDE note", () => {
-    const hit = { path: "CLAUDE.md", shared: 1, whole: true };
+    const hit = { path: "CLAUDE.md", shared: 1, whole: true, explicit: false };
     expect(rankRecall({ sonar: [], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes).toEqual([]);
     expect(rankRecall({ sonar: [n("Turno Open Core.md"), n("CLAUDE.md")], title: [hit], lexicalChats: [], semanticChats: null }, opts).notes[0].path).toBe("CLAUDE.md");
   });
   it("a note in two lanes still beats a title-only hub", () => {
     const sonar = ["Companies/Exo.md"].map(n);
     const title = [
-      { path: "Projects/Exo/Exo.md", shared: 1, whole: true },
-      { path: "Companies/Exo.md", shared: 1, whole: true },
+      { path: "Projects/Exo/Exo.md", shared: 1, whole: true, explicit: false },
+      { path: "Companies/Exo.md", shared: 1, whole: true, explicit: false },
     ];
     const r = rankRecall({ sonar, title, lexicalChats: [], semanticChats: null }, opts);
     expect(r.notes.map((x) => x.path)).toEqual(["Companies/Exo.md", "Projects/Exo/Exo.md"]);
@@ -388,6 +402,7 @@ describe("recallTurn", () => {
     { path: "Companies/Exo.md", basename: "Exo", aliases: [] },
     { path: "R/How to Win in the Ai Age.md", basename: "How to Win in the Ai Age", aliases: [] },
     { path: "T/Win.md", basename: "Win", aliases: [] },
+    { path: "CLAUDE.md", basename: "CLAUDE", aliases: [] },
   ];
   const hit = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
   const base = { names, chats: [] as ChatRecord[], convoId: "x", now: NOW, search: () => Promise.resolve([] as NoteRecall[]), semantic: () => Promise.resolve(null) };
@@ -417,6 +432,14 @@ describe("recallTurn", () => {
       expect(r!.notes).toEqual([]);
       expect(r!.lanes.title.map((t) => t.path)).not.toContain("R/How to Win in the Ai Age.md");
     }
+  });
+  it("a note referenced as a file in the message comes in without the vault search: 'cosa dice il file CLAUDE.md?' injects it, 'ask Claude to rewrite this paragraph' does not", async () => {
+    const named = await recallTurn({ ...base, message: "cosa dice il file CLAUDE.md?" });
+    expect(named!.notes.map((x) => x.path)).toEqual(["CLAUDE.md"]);
+    const linked = await recallTurn({ ...base, message: "riassumi [[claude]] per favore adesso" });
+    expect(linked!.notes.map((x) => x.path)).toEqual(["CLAUDE.md"]);
+    const loose = await recallTurn({ ...base, message: "ask Claude to rewrite this paragraph" });
+    expect(loose!.notes).toEqual([]);
   });
   it("a search that throws leaves the chats and the title lane", async () => {
     const r = await recallTurn({ ...base, message: "what is the status of Exo today", search: () => Promise.reject(new Error("sonar down")) });

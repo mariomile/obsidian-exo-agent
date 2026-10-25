@@ -99,9 +99,10 @@ export async function recallForTurn(
   if (!shouldRecall(input.message)) return null;
   // The one pass over the notes feeds the title lane, the supersede index and
   // the name vocabulary that lets a 3-letter name ("Exo") be a keyword.
-  const exclude = input.exclude ?? vaultExclusion(app);
+  let exclude: PathFilter | undefined;
   let scan: ReturnType<typeof scanNotes> | undefined;
   try {
+    exclude = input.exclude ?? vaultExclusion(app);
     scan = scanNotes(app, exclude);
   } catch {
     /* unreadable index: chats and the vault search may still recall something */
@@ -115,6 +116,7 @@ export async function recallForTurn(
     names: scan?.names ?? [],
     supersede: scan?.supersede.index,
     search: async (query) => {
+      if (!exclude) return [];
       const { hits } = await searchVaultNotes(app, query, RECALL_LANE_DEPTH, exclude);
       return hits.map((h) => ({ path: h.path, excerpt: h.excerpt }));
     },

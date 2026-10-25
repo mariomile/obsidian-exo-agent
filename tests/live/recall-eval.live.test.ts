@@ -193,6 +193,9 @@ const HUB_PROMPTS = [
   { prompt: "Qual è lo stato attuale del progetto DeepAgent e qual è il prossimo passo?", hub: "Active/Projects/DeepAgent/DeepAgent.md" },
 ];
 
+/** A prompt that writes a note out: it must inject that note, with no vault-search hit needed. */
+const NAMED_PROMPT = { prompt: "cosa dice il file CLAUDE.md?", note: "CLAUDE.md" };
+
 /** What a run reads once: the note index minus excluded paths (as the turn
  *  builds it), the exclusion itself, and the conversation store. */
 function liveContext() {
@@ -246,7 +249,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const { supersede, exclude, store } = ctx;
     const cases = fixture.cases.map((c) => resolveChats(c, store));
     const questions = cases.map((c) => c.question);
-    const ordinaryPrompts = [...fixture.ordinary, ...SHORT_NAME_PROMPTS, ...HUB_PROMPTS.map((h) => h.prompt)];
+    const ordinaryPrompts = [...fixture.ordinary, ...SHORT_NAME_PROMPTS, ...HUB_PROMPTS.map((h) => h.prompt), NAMED_PROMPT.prompt];
     const sonar = fetchSonar(ctx, [...questions, ...ordinaryPrompts], true);
     const proposed = new Set<string>();
     const stampBefore = indexStamp();
@@ -304,6 +307,9 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       return { ...h, rank, sonarFound: r ? r.lanes.sonar.findIndex((n) => n.path === h.hub) + 1 : 0 };
     });
 
+    const named = ordinary.find((o) => o.prompt === NAMED_PROMPT.prompt)!.result;
+    const namedRank = named ? named.notes.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 : 0;
+
     expect(indexStamp(), "the semantic chat index changed during a read-only run").toBe(stampBefore);
     const summary = summarize(scores);
     const ms = (xs: number[]) => {
@@ -325,6 +331,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         ...fixtureOrdinary.filter((o) => o.chats || o.titleOnly.length).map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
         `short-name prompts (${shortOrdinary.length}): ${shortOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${shortOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
         ...shortOrdinary.map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
+        `named note "${NAMED_PROMPT.prompt}": ${NAMED_PROMPT.note} rank ${namedRank || "-"} (Sonar ${named && named.lanes.sonar.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 || "-"})`,
         ...hubRanks.map((h) => `hub ${h.hub}: rank ${h.rank || "-"} (Sonar ${h.sonarFound || "-"}) for "${h.prompt}"`),
       ].join("\n"),
     );
@@ -336,6 +343,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     // S4: a short word alone never injects a note, and the project hubs lead.
     expect(shortOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
     expect(fixtureOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
+    expect(namedRank, `${NAMED_PROMPT.note} should be injected for "${NAMED_PROMPT.prompt}"`).toBeGreaterThan(0);
     for (const h of hubRanks) expect(h.rank, `${h.hub} should lead for "${h.prompt}"`).toBe(1);
   }, 300_000);
 
