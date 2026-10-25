@@ -83,8 +83,12 @@ describe("matchPastChats", () => {
   it("matches past chats in the last 60 days, never the current one, with title, date and snippet", () => {
     const out = matchPastChats(chats, ["pricing", "tiers", "launch"], { excludeId: "current", now: NOW });
     expect(out).toEqual([
-      { id: "c1", title: "Pricing call", date: "2026-09-23", snippet: "Let's settle Exo pricing tiers today", msgIndex: 0 },
+      { id: "c1", title: "Pricing call", date: "2026-09-23", snippet: "Let's settle Exo pricing tiers today", msgIndex: 0, hits: 2 },
     ]);
+  });
+  it("reports how many of the rare keywords the best line holds, for the chat gate", () => {
+    const three: ChatRecord = { id: "t", title: "T", messages: [{ role: "user", text: "pricing tiers launch plan", at: NOW - DAY }] };
+    expect(matchPastChats([three], ["pricing", "tiers", "launch"], { excludeId: "x", now: NOW }).map((c) => c.hits)).toEqual([3]);
   });
   it("carries the index of the best matching message, counting messages recall skips", () => {
     const chat: ChatRecord = {
@@ -157,7 +161,7 @@ describe("rankRecall on single lanes (parity with the pre-extraction pipeline)",
   const n = (path: string): NoteRecall => ({ path, excerpt: `about ${path}` });
   const before = (sonar: NoteRecall[], lexical: ChatRecall[]) => ({
     notes: sonar.slice(0, RECALL_MAX_NOTES),
-    chats: lexical.slice(0, RECALL_MAX_CHATS),
+    chats: lexical.slice(0, RECALL_MAX_CHATS).map(({ hits: _hits, ...chat }) => chat),
   });
   const lanes = (sonar: NoteRecall[], lexicalChats: ChatRecall[]) => ({ sonar, title: [], lexicalChats, semanticChats: null });
   const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
@@ -247,6 +251,40 @@ describe("rankRecall fusion", () => {
   it("still two chats at most", () => {
     const r = rankRecall({ sonar: [], title: [], lexicalChats: [c("a")], semanticChats: [c("b"), c("d"), c("e")] }, opts);
     expect(r.chats).toHaveLength(2);
+  });
+});
+
+describe("rankRecall chat gate", () => {
+  const lexical = (id: string, hits: number): ChatRecall & { hits: number } => ({ id, title: id, date: "2026-10-01", snippet: "lexical", msgIndex: 0, hits });
+  const sem = (id: string): ChatRecall => ({ id, title: id, date: "2026-10-01", snippet: "semantic", msgIndex: 0 });
+  const opts = { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS };
+  const rank = (lexicalChats: (ChatRecall & { hits: number })[], semanticChats: ChatRecall[] | null, semanticIds: Set<string> | null) =>
+    rankRecall({ sonar: [], title: [], lexicalChats, semanticChats }, { ...opts, chatGate: { semanticIds, minRareHits: 3 } }).chats;
+
+  it("a lexical chat with 2 hits the semantic lane does not know is dropped", () => {
+    expect(rank([lexical("a", 2)], [], new Set(["other"]))).toEqual([]);
+  });
+  it("even 3 hits do not rescue it while the semantic lane answered", () => {
+    expect(rank([lexical("a", 3)], [], new Set(["other"]))).toEqual([]);
+  });
+  it("a lexical chat the semantic lane also scored is kept, below the lift floor too", () => {
+    expect(rank([lexical("a", 2)], [], new Set(["a", "b"])).map((c) => c.id)).toEqual(["a"]);
+  });
+  it("semantic lane unavailable: 3 hits keep the chat", () => {
+    expect(rank([lexical("a", 3)], null, null).map((c) => c.id)).toEqual(["a"]);
+  });
+  it("semantic lane unavailable: 2 hits drop it", () => {
+    expect(rank([lexical("a", 2)], null, null)).toEqual([]);
+  });
+  it("a semantic-only chat above the lift floor is kept untouched", () => {
+    expect(rank([], [sem("s")], new Set(["s"])).map((c) => c.id)).toEqual(["s"]);
+  });
+  it("the gate only filters the lexical lane: a corroborated chat keeps its lexical snippet and loses the hit count", () => {
+    const [chat] = rank([lexical("a", 2)], [sem("a")], new Set(["a"]));
+    expect(chat).toEqual({ id: "a", title: "a", date: "2026-10-01", snippet: "lexical", msgIndex: 0 });
+  });
+  it("without a gate nothing is filtered (eval and tests that feed bare lanes)", () => {
+    expect(rankRecall({ sonar: [], title: [], lexicalChats: [lexical("a", 2)], semanticChats: null }, opts).chats.map((c) => c.id)).toEqual(["a"]);
   });
 });
 
@@ -351,8 +389,8 @@ describe("recallForTurn", () => {
       { path: "Notes/Pricing.md", title: "Pricing", score: 3, excerpt: "Pro is 29 euro" },
       { path: ".archive/Old.md", title: "Old", score: 2, excerpt: "hidden" },
     ]);
-    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW });
-    expect(calls[0]).toBe("pricing tiers");
+    const r = await recallForTurn(a, { message: "what are the Exo pricing tiers today", convoId: "current", chats, now: NOW });
+    expect(calls[0]).toBe("pricing tiers today");
     expect(r!.notes).toEqual([{ path: "Notes/Pricing.md", excerpt: "Pro is 29 euro" }]);
     expect(r!.chats.map((c) => c.title)).toEqual(["Pricing call"]);
     expect(r!.block).toContain("- Notes/Pricing.md: Pro is 29 euro");
@@ -380,7 +418,7 @@ describe("recallForTurn", () => {
   it("adds the semantic chat lane: a chat outside the lexical window is recalled", async () => {
     const old: ChatRecord = { id: "old", title: "Pricing history", messages: [{ role: "user", text: "how did pricing start", at: NOW - 300 * DAY }] };
     const flat = Array.from({ length: 10 }, (_, i) => ({ id: `noise${i}`, score: 0.8 }));
-    semantic.mockResolvedValue([{ id: "current", score: 0.9 }, { id: "old", score: 0.88 }, ...flat]);
+    semantic.mockResolvedValue([{ id: "current", score: 0.9 }, { id: "old", score: 0.88 }, { id: "c1", score: 0.87 }, ...flat]);
     const r = await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats: [...chats, old], now: NOW, pluginDir: ".obsidian/plugins/exo-agent" });
     expect(semantic).toHaveBeenCalledWith({ pluginDir: "/v/.obsidian/plugins/exo-agent", scriptPath: "/v/.obsidian/plugins/exo-agent/chat-recall.mjs" }, "what are the Exo pricing tiers", 12, expect.any(AbortSignal));
     expect(r!.chats.map((c) => c.id)).toEqual(["c1", "old"]);
@@ -391,10 +429,24 @@ describe("recallForTurn", () => {
     semantic.mockReturnValue(new Promise(() => {}));
     const pending = recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats, now: NOW, pluginDir: "p" });
     await vi.advanceTimersByTimeAsync(SEMANTIC_BUDGET_MS);
-    const r = await pending;
-    expect(r!.chats.map((c) => c.id)).toEqual(["c1"]);
+    // c1 shares two keywords only: without the semantic lane that is not enough.
+    expect(await pending).toBeNull();
     // Giving up also stops the query: the subprocess is not left running.
     expect(semantic.mock.calls[0][3]!.aborted).toBe(true);
+  });
+
+  it("a semantic lane past its budget still lets a chat holding 3 rare keywords through", async () => {
+    vi.useFakeTimers();
+    semantic.mockReturnValue(new Promise(() => {}));
+    const pending = recallForTurn(withVault(app([]).app), { message: "settle Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "p" });
+    await vi.advanceTimersByTimeAsync(SEMANTIC_BUDGET_MS);
+    expect((await pending)!.chats.map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("a semantic answer that does not stand behind the lexical chat drops it, even if it scored it", async () => {
+    semantic.mockResolvedValue([...Array.from({ length: 11 }, (_, i) => ({ id: `n${i}`, score: 0.8 })), { id: "c1", score: 0.8 }]);
+    const r = await recallForTurn(withVault(app([]).app), { message: "settle Exo pricing tiers today", convoId: "current", chats, now: NOW, pluginDir: "p" });
+    expect(r).toBeNull();
   });
 
   it("a semantic lane inside its budget is not aborted", async () => {
@@ -473,11 +525,11 @@ describe("recallForTurn", () => {
     expect(appended).toEqual([]);
   });
 
-  it("a semantic answer with nothing standing out adds no chat", async () => {
-    semantic.mockResolvedValue(Array.from({ length: 12 }, (_, i) => ({ id: i ? `n${i}` : "old", score: 0.86 })));
+  it("a semantic answer with nothing standing out adds no chat and corroborates none", async () => {
+    semantic.mockResolvedValue(Array.from({ length: 12 }, (_, i) => ({ id: i ? (i === 1 ? "c1" : `n${i}`) : "old", score: 0.86 })));
     const old: ChatRecord = { id: "old", title: "Old", messages: [{ role: "user", text: "anything", at: NOW - 300 * DAY }] };
     const r = await recallForTurn(withVault(app([]).app), { message: "what are the Exo pricing tiers", convoId: "current", chats: [...chats, old], now: NOW, pluginDir: "p" });
-    expect(r!.chats.map((c) => c.id)).toEqual(["c1"]);
+    expect(r).toBeNull();
   });
 });
 

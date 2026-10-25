@@ -93,6 +93,11 @@ export interface ChatRecall {
   msgIndex: number | null;
 }
 
+/** A lexical match: the chat plus how many of the rare keywords its best line holds. */
+export interface LexicalChat extends ChatRecall {
+  hits: number;
+}
+
 const flat = (s: string, n: number): string => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
@@ -104,13 +109,14 @@ const flat = (s: string, n: number): string => {
  * contains. Only the message's {@link RECALL_CHAT_KEYWORDS} rarest keywords
  * (fewest chats containing them) count: words like "prima" or "product" sit in
  * most chats and match anything. A chat needs two of those hits (one when the
- * message has a single keyword): one shared word is noise.
+ * message has a single keyword): one shared word is noise. Each match reports
+ * its `hits`, which {@link rankRecall}'s chat gate reads.
  */
 export function matchPastChats(
   chats: readonly ChatRecord[],
   keywords: readonly string[],
   opts: { excludeId: string; now: number },
-): ChatRecall[] {
+): LexicalChat[] {
   if (!keywords.length) return [];
   const since = opts.now - RECALL_CHAT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const candidates = chats
@@ -124,7 +130,7 @@ export function matchPastChats(
   const df = new Map(keywords.map((k) => [k, candidates.filter((c) => c.lines.some((l) => l.present.has(k))).length]));
   const rare = [...keywords].sort((a, b) => (df.get(a) ?? 0) - (df.get(b) ?? 0)).slice(0, RECALL_CHAT_KEYWORDS);
   const need = Math.min(2, rare.length);
-  const scored: { recall: ChatRecall; score: number; at: number }[] = [];
+  const scored: { recall: LexicalChat; score: number; at: number }[] = [];
   for (const { chat, lines } of candidates) {
     let best: { text: string; score: number; at: number; index: number } | null = null;
     for (const line of lines) {
@@ -139,6 +145,7 @@ export function matchPastChats(
         date: localDate(best.at),
         snippet: flat(best.text, RECALL_EXCERPT_CHARS),
         msgIndex: best.index,
+        hits: best.score,
       },
       score: best.score,
       at: best.at,
@@ -159,7 +166,7 @@ export interface RecallLanes {
   /** Notes whose name the message mentions ({@link titleLane}). */
   title: TitleHit[];
   /** {@link matchPastChats}. */
-  lexicalChats: ChatRecall[];
+  lexicalChats: (ChatRecall & { hits?: number })[];
   /** The semantic chat index ({@link chatsFromIds}), best first; null when it
    *  could not answer in time. */
   semanticChats: ChatRecall[] | null;
@@ -252,6 +259,22 @@ function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
     .map(([, v]) => v.item);
 }
 
+/** Minimum rare-keyword hits for a lexical chat when the semantic lane could
+ *  not answer. */
+export const RECALL_CHAT_MIN_RARE_HITS = 3;
+
+/** When set, a lexical chat is injected only if corroborated: the semantic
+ *  lane stands behind the same chat, or (`semanticIds` null, the lane timed out or
+ *  failed) its best line holds `minRareHits` of the rare keywords. */
+export interface ChatGate {
+  /** The chats the semantic lane stands behind ({@link semanticHits}: the ones
+   *  that lift off its median), or null when it gave no answer. Its raw
+   *  top-12 is no corroboration: it always holds twelve chats, whatever the
+   *  prompt. */
+  semanticIds: ReadonlySet<string> | null;
+  minRareHits: typeof RECALL_CHAT_MIN_RARE_HITS;
+}
+
 /** The notes and chats one turn injects, best first. A note named in full
  *  comes in on its name alone. A note named only in part needs the vault
  *  search to have found it too: three shared words lift it from anywhere in
@@ -259,10 +282,12 @@ function fuse<T>(lanes: readonly (readonly T[])[], key: (t: T) => string): T[] {
  *  the notes the search would inject anyway ("Orchestration Board" for
  *  "Orchestration Board Ideas" must not push out the decision about it).
  *  With `supersede`, a superseded note gives its slot to the current one and
- *  stays right below it, labelled. */
+ *  stays right below it, labelled. With `chatGate`, a lexical chat nothing
+ *  corroborates is left out; a chat only the semantic lane found keeps its own
+ *  rule (the lift floor, already applied to `semanticChats`). */
 export function rankRecall(
   lanes: RecallLanes,
-  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex },
+  opts: { maxNotes: number; maxChats: number; supersede?: SupersedeIndex; chatGate?: ChatGate },
 ): { notes: NoteRecall[]; chats: ChatRecall[] } {
   const found = new Set(lanes.sonar.map((n) => n.path));
   const injected = new Set(lanes.sonar.slice(0, opts.maxNotes).map((n) => n.path));
@@ -270,9 +295,15 @@ export function rankRecall(
     .filter((t) => t.whole || (t.shared >= 3 ? found : injected).has(t.path))
     .map((t) => ({ path: t.path, excerpt: "" }));
   const notes = fuse([lanes.sonar, title], (n) => n.path).slice(0, opts.maxNotes);
+  const gate = opts.chatGate;
+  const gated = gate
+    ? lanes.lexicalChats.filter((c) => (gate.semanticIds ? gate.semanticIds.has(c.id) : (c.hits ?? 0) >= gate.minRareHits))
+    : lanes.lexicalChats;
   return {
     notes: opts.supersede ? applySupersede(notes, opts.supersede, (path) => ({ path, excerpt: "" })).slice(0, opts.maxNotes) : notes,
-    chats: fuse([lanes.lexicalChats, lanes.semanticChats ?? []], (c) => c.id).slice(0, opts.maxChats),
+    chats: fuse([gated, lanes.semanticChats ?? []], (c) => c.id)
+      .slice(0, opts.maxChats)
+      .map(({ id, title, date, snippet, msgIndex }) => ({ id, title, date, snippet, msgIndex })),
   };
 }
 

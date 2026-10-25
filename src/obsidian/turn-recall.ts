@@ -10,6 +10,7 @@ import {
   shouldRecall,
   titleLane,
   RECALL_LANE_DEPTH,
+  RECALL_CHAT_MIN_RARE_HITS,
   RECALL_MAX_CHATS,
   RECALL_MAX_NOTES,
   type ChatRecall,
@@ -129,7 +130,12 @@ export async function recallForTurn(
   const scored = await semantic;
   const { notes, chats } = rankRecall(
     { sonar, title, lexicalChats, semanticChats: scored && chatsFromIds(semanticHits(scored), input.chats, { excludeId: input.convoId }) },
-    { maxNotes: RECALL_MAX_NOTES, maxChats: RECALL_MAX_CHATS, supersede: supersede?.index },
+    {
+      maxNotes: RECALL_MAX_NOTES,
+      maxChats: RECALL_MAX_CHATS,
+      supersede: supersede?.index,
+      chatGate: { semanticIds: scored && new Set(semanticHits(scored)), minRareHits: RECALL_CHAT_MIN_RARE_HITS },
+    },
   );
   // A recalled note whose markers disagree is corrected (with an undo receipt).
   const recalled = new Set(notes.map((n) => n.path));
