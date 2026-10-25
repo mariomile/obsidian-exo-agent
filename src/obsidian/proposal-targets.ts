@@ -38,7 +38,8 @@ export interface ProposalTargetVaultAdapter {
   getFile(path: string): { path: string } | null;
   read(path: string): Promise<string>;
   create(path: string, content: string): Promise<void>;
-  modify(path: string, content: string): Promise<void>;
+  /** Atomic read-compute-write against the file's current content (`vault.process`). `fn` must be synchronous. */
+  process(path: string, fn: (current: string) => string): Promise<void>;
   /** Ensure the parent directory for this file path exists. */
   ensureFolder(path: string): Promise<void>;
 }
@@ -56,39 +57,48 @@ export class OpenLoopProposalTarget implements OpenLoopTarget {
 
   create(input: OpenLoopCreateInput): Promise<{ id: string; path: string }> {
     return this.queue.enqueue(async () => {
-      const existing = this.vault.getFile(this.openLoopsPath);
-      const current = existing ? await this.vault.read(this.openLoopsPath) : "";
-      const entries = current ? parseLoopsFile(current) : [];
-      const marker = proposalMarker(input.proposalId);
-      const prior = entries.find(({ note }) => note.includes(marker));
-      if (prior) return { id: prior.id, path: this.openLoopsPath };
+      // Parse, dedupe and append against the content `process` hands us, not an
+      // earlier read: an open editor's autosave can land in between.
+      let result: { id: string; written: boolean } | undefined;
+      const append = (current: string): string => {
+        const entries = current ? parseLoopsFile(current) : [];
+        const marker = proposalMarker(input.proposalId);
+        const prior = entries.find(({ note }) => note.includes(marker));
+        if (prior) {
+          result = { id: prior.id, written: false };
+          return current;
+        }
 
-      // Date.now() alone can collide when two proposals are accepted in the
-      // same millisecond. Re-check against the freshly-read ledger while still
-      // inside the shared queue and advance the numeric suffix until unused.
-      const taken = new Set(entries.map(({ id }) => id));
-      let openedAt = this.now();
-      while (taken.has(`loop-${openedAt}`)) openedAt++;
+        // Date.now() alone can collide when two proposals are accepted in the
+        // same millisecond. Re-check against the ledger content while still
+        // inside the shared queue and advance the numeric suffix until unused.
+        const taken = new Set(entries.map(({ id }) => id));
+        let openedAt = this.now();
+        while (taken.has(`loop-${openedAt}`)) openedAt++;
 
-      const entry: LoopEntry = {
-        id: `loop-${openedAt}`,
-        title: input.title,
-        note: withMarker(input.note, input.proposalId),
-        openedAt,
-        status: "open",
-        ...(input.resurface ? { resurface: input.resurface } : {}),
-        ...(input.tags?.length ? { tags: input.tags } : {}),
+        const entry: LoopEntry = {
+          id: `loop-${openedAt}`,
+          title: input.title,
+          note: withMarker(input.note, input.proposalId),
+          openedAt,
+          status: "open",
+          ...(input.resurface ? { resurface: input.resurface } : {}),
+          ...(input.tags?.length ? { tags: input.tags } : {}),
+        };
+        result = { id: entry.id, written: true };
+        return `${[...entries, entry].map(formatLoop).join("\n\n")}\n`;
       };
-      const content = `${[...entries, entry].map(formatLoop).join("\n\n")}\n`;
 
-      if (existing) {
-        await this.vault.modify(this.openLoopsPath, content);
+      if (this.vault.getFile(this.openLoopsPath)) {
+        await this.vault.process(this.openLoopsPath, append);
       } else {
         await this.vault.ensureFolder(this.openLoopsPath);
-        await this.vault.create(this.openLoopsPath, content);
+        await this.vault.create(this.openLoopsPath, append(""));
       }
+      if (!result) throw new Error(`Open loops ledger not updated: ${this.openLoopsPath}`);
+      if (!result.written) return { id: result.id, path: this.openLoopsPath };
       this.noteWrite([this.openLoopsPath]);
-      return { id: entry.id, path: this.openLoopsPath };
+      return { id: result.id, path: this.openLoopsPath };
     });
   }
 }

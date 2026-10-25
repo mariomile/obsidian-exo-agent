@@ -374,10 +374,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       create: async (path, content) => {
         await this.app.vault.create(path, content);
       },
-      modify: async (path, content) => {
+      process: async (path, fn) => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) throw new Error(`File not found: ${path}`);
-        await this.app.vault.modify(file, content);
+        await this.app.vault.process(file, fn);
       },
       ensureFolder: (path) => this.ensureParentFolders(path),
     };
