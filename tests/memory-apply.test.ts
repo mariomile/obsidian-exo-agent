@@ -28,6 +28,8 @@ function fakeVault(files: Record<string, string>) {
 }
 
 const P = exoPaths("_exo");
+const TAIL = ' [fonte: chat "Planning" (obsidian://exo-chat?id=c-1&msg=0); dal: 2026-09-25]';
+const SRC = '[fonte: chat "Planning" (obsidian://exo-chat?id=c-1&msg=0)]';
 const INBOX = "_exo/memory/inbox/2026-09-25.md";
 function envFor(vault: ApplyVault, offered: string[]): ApplyEnv {
   return {
@@ -39,6 +41,7 @@ function envFor(vault: ApplyVault, offered: string[]): ApplyEnv {
     now: 1_790_000_000_000,
     offered: new Set(offered),
     ledgerPath: P.openLoops,
+    provenance: { convoId: "c-1", chatTitle: "Planning", date: "2026-09-25" },
   };
 }
 
@@ -50,8 +53,8 @@ describe("applyDecisions", () => {
       [{ op: "add", candidate: 0, path: "CRM/Anna.md", section: "Work", text: "Leads design at Acme" }],
       envFor(vault, ["CRM/Anna.md"]),
     );
-    expect(store.get("CRM/Anna.md")).toBe("# Anna\n## Work\n- Designer\n- Leads design at Acme\n");
-    expect(res.writes).toEqual([{ path: "CRM/Anna.md", op: "add", text: "Leads design at Acme", lines: ["- Leads design at Acme"] }]);
+    expect(store.get("CRM/Anna.md")).toBe(`# Anna\n## Work\n- Designer\n- Leads design at Acme${TAIL}\n`);
+    expect(res.writes).toEqual([{ path: "CRM/Anna.md", op: "add", text: "Leads design at Acme", lines: [`- Leads design at Acme${TAIL}`] }]);
   });
 
   it("UPDATE replaces only the exact line and records both lines; a line not there exactly once is rejected", async () => {
@@ -59,19 +62,19 @@ describe("applyDecisions", () => {
     const res = await applyDecisions(
       vault,
       [
-        { op: "update", candidate: 0, path: "P/context.md", oldLine: "- Status: beta", newText: "Status: live (dal 2026-09-25; prima beta)" },
+        { op: "update", candidate: 0, path: "P/context.md", oldLine: "- Status: beta", newText: "Status: live" },
         { op: "update", candidate: 1, path: "P/context.md", oldLine: "- Owner: Mario", newText: "Owner: Anna" },
         { op: "update", candidate: 2, path: "P/context.md", oldLine: "- Status: alpha", newText: "x" },
       ],
       envFor(vault, ["P/context.md"]),
     );
-    expect(store.get("P/context.md")).toBe("- Status: live (dal 2026-09-25; prima beta)\n- Owner: Mario\n- Owner: Mario\n");
+    expect(store.get("P/context.md")).toBe(`- Status: live (dal 2026-09-25; prima Status: beta) ${SRC}\n- Owner: Mario\n- Owner: Mario\n`);
     expect(res.writes).toEqual([
       {
         path: "P/context.md",
         op: "update",
-        text: "Status: live (dal 2026-09-25; prima beta)",
-        lines: ["- Status: live (dal 2026-09-25; prima beta)"],
+        text: "Status: live",
+        lines: [`- Status: live (dal 2026-09-25; prima Status: beta) ${SRC}`],
         replaced: "- Status: beta",
       },
     ]);
@@ -143,7 +146,7 @@ describe("applyDecisions", () => {
       envFor(vault, []),
     );
     expect(created).toEqual([INBOX]);
-    expect(store.get(INBOX)).toMatch(/# Memory inbox: 2026-09-25\n- rclone has a gdrive remote\n- second fact\n$/);
+    expect(store.get(INBOX)).toMatch(new RegExp(`# Memory inbox: 2026-09-25\\n- rclone has a gdrive remote \\[fonte: chat "Planning" \\(obsidian://exo-chat\\?id=c-1&msg=0\\); dal: 2026-09-25\\]\\n- second fact \\[fonte[^\\n]*\\]\\n$`));
     expect(res.writes[0].created).toContain("# Memory inbox: 2026-09-25");
     expect(res.writes[1].created).toBeUndefined();
   });
@@ -163,6 +166,19 @@ describe("applyDecisions", () => {
     expect(loops.map((l) => l.title)).toEqual(["Old", "Call Anna back about the design role"]);
     expect(loops[0].note).toBe("old note"); // the previous loop is untouched
     expect(res.rejected.map((r) => r.reason)).toEqual(["the open-loops ledger only takes new loops"]);
+  });
+
+  it("an open loop carries the provenance in its note, model tails stripped from title and note", async () => {
+    const { vault, store } = fakeVault({ [P.openLoops]: "" });
+    await applyDecisions(
+      vault,
+      [{ op: "add", candidate: 0, path: P.openLoops, text: "Call Anna back [fonte: chat \"Old\" (obsidian://exo-chat?id=z&msg=1); dal: 2026-01-01]" }],
+      envFor(vault, [P.openLoops]),
+    );
+    const [loop] = parseLoopsFile(store.get(P.openLoops)!);
+    expect(loop.title).toBe("Call Anna back");
+    expect(loop.note).toBe(`Call Anna back${TAIL}`);
+    expect(loop.note.match(/\[fonte/g)).toHaveLength(1);
   });
 
   it("drops edits that carry a credential", async () => {

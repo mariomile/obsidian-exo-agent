@@ -9,15 +9,17 @@ import {
   applyAdd,
   applyUpdate,
   checkTarget,
-  containsSecret,
   inboxNote,
   normalizeTarget,
-  oneLine,
+  stripProvenance,
   HARVEST_MAX_WRITES,
   type Decision,
+  type HarvestProvenance,
   type TargetEnv,
 } from "./memory-harvest";
+import { formatProvenance } from "./block-patch";
 import { formatLoop } from "./open-loops";
+import { containsSecret, oneLine } from "./text-safety";
 
 export interface ApplyVault {
   exists(path: string): boolean;
@@ -57,6 +59,8 @@ export interface ApplyEnv extends TargetEnv {
   /** The open-loops ledger: an ADD there becomes a well-formed loop entry,
    *  and UPDATE is refused (its lines are the ledger's own metadata). */
   ledgerPath: string;
+  /** The chat the facts came from: code appends it to every line it writes. */
+  provenance: HarvestProvenance;
 }
 
 export async function applyDecisions(vault: ApplyVault, decisions: readonly Decision[], env: ApplyEnv): Promise<ApplyResult> {
@@ -92,39 +96,44 @@ export async function applyDecisions(vault: ApplyVault, decisions: readonly Deci
         reject("the open-loops ledger only takes new loops");
         continue;
       }
-      const title = oneLine(d.text).slice(0, 80);
-      const block = formatLoop({ id: `loop-${env.now + writes.length}`, title, note: oneLine(d.text), openedAt: env.now, status: "open" });
+      const fact = oneLine(stripProvenance(d.text));
+      if (!fact) {
+        reject("text is only a provenance tail");
+        continue;
+      }
+      const note = `${fact} ${formatProvenance({ ...env.provenance, msgIndex: 0 })}`;
+      const block = formatLoop({ id: `loop-${env.now + writes.length}`, title: fact.slice(0, 80), note, openedAt: env.now, status: "open" });
       const ok = await vault.edit(path, (cur) => `${cur.replace(/\s+$/, "")}\n\n${block}\n`);
       if (!ok) reject("ledger could not be edited");
-      else writes.push({ path, op: "add", text: oneLine(d.text), lines: block.split("\n") });
+      else writes.push({ path, op: "add", text: fact, lines: block.split("\n") });
       continue;
     }
 
     if (d.op === "add" && !created.has(path) && !env.exists(path)) {
       // Only the inbox reaches here (checkTarget): create it with the fact.
       const starter = inboxNote(env.today);
-      const res = applyAdd(starter, d.section, d.text);
+      const res = applyAdd(starter, d.section, d.text, env.provenance);
       if (!res) {
         reject("text would be structure, not a line");
         continue;
       }
       await vault.create(path, res.content);
       created.add(path);
-      writes.push({ path, op: "add", text: oneLine(d.text), lines: [res.line], created: starter });
+      writes.push({ path, op: "add", text: oneLine(stripProvenance(d.text)), lines: [res.line], created: starter });
       continue;
     }
 
     const out: { write?: AppliedWrite } = {};
     const ok = await vault.edit(path, (cur) => {
       if (d.op === "add") {
-        const res = applyAdd(cur, d.section, d.text);
+        const res = applyAdd(cur, d.section, d.text, env.provenance);
         if (!res) return null;
-        out.write = { path, op: "add", text: oneLine(d.text), lines: [res.line] };
+        out.write = { path, op: "add", text: oneLine(stripProvenance(d.text)), lines: [res.line] };
         return res.content;
       }
-      const res = applyUpdate(cur, d.oldLine, d.newText);
+      const res = applyUpdate(cur, d.oldLine, d.newText, env.provenance);
       if (!res) return null;
-      out.write = { path, op: "update", text: oneLine(d.newText), lines: [res.to], replaced: res.from };
+      out.write = { path, op: "update", text: oneLine(stripProvenance(d.newText)), lines: [res.to], replaced: res.from };
       return res.content;
     });
     if (!ok || !out.write) {

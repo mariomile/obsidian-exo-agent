@@ -9,9 +9,12 @@
  * data: the vault's own memory rules (AGENTS.md) plus search hits reach the
  * model; the code only enforces generic guardrails. No Obsidian import.
  */
+import { formatProvenance, formatSource } from "./block-patch";
 import { chatLines, type ChatLine, type ChatMessage } from "./recent-chats";
 import type { ExoPaths } from "./paths";
+import { containsSecret, oneLine } from "./text-safety";
 import { headingsOf, inFence, protectedLines } from "./save-target";
+import { formatSupersede, withoutListMarker } from "./supersede";
 
 /* ------------------------------ scheduling ------------------------------ */
 
@@ -68,39 +71,6 @@ export function buildTranscript(lines: readonly ChatLine[]): string {
   const rendered = lines.map((l) => `${l.role === "user" ? "USER" : "ASSISTANT"}: ${l.text.trim()}`).join("\n\n");
   // Keep the END when clipping: the most recent exchange is the freshest signal.
   return rendered.length > TRANSCRIPT_MAX_CHARS ? `…\n${rendered.slice(-TRANSCRIPT_MAX_CHARS)}` : rendered;
-}
-
-/* ------------------------------- secrets -------------------------------- */
-
-const SECRET_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}/,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bAIza[0-9A-Za-z_-]{30,}/,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
-  /\bbearer\s+[A-Za-z0-9._~+/-]{16,}/i,
-  /\b(?:password|passwd|pwd|passphrase|api[_ -]?key|secret|token|access[_ -]?key)\s*[:=]\s*\S{6,}/i,
-  // env-style assignments: OPENAI_API_KEY=…, DB_PASSWORD: …
-  /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD)[A-Z0-9_]*\s*[:=]\s*\S+/i,
-  /\bsk_(?:live|test)_[A-Za-z0-9]+/,
-  // credentials inside a URL: https://user:pass@host
-  /:\/\/[^/\s:@]+:[^@\s]+@/,
-  // Italian: "la password è …", "password e' …"
-  /\bpassword\s+(?:è|e')\s*\S+/i,
-];
-
-/** True when `text` carries something that looks like a credential. */
-export function containsSecret(text: string): boolean {
-  return SECRET_PATTERNS.some((re) => re.test(text));
-}
-
-/** A chat title safe to put in a commit message, a Notice or the log. */
-export function safeTitle(title: string): string {
-  const t = title.replace(/\s+/g, " ").trim();
-  return !t || containsSecret(t) ? "chat" : t;
 }
 
 /* ------------------------------ step 1: extract ------------------------------ */
@@ -300,14 +270,14 @@ export function buildDecidePrompt(input: {
     "For EACH fact below decide one operation:",
     '- {"op":"noop","candidate":i}: already recorded (same meaning), not worth keeping, or no safe place for it.',
     '- {"op":"add","candidate":i,"path":"...","section":"...","text":"..."}: append ONE line to an existing note, under the named section heading (omit section to append at the end).',
-    '- {"op":"update","candidate":i,"path":"...","oldLine":"...","newText":"..."}: the fact CHANGED a line that exists. oldLine must be copied EXACTLY from a "line:" shown below. newText replaces that one line and keeps the old value as a trace.',
+    '- {"op":"update","candidate":i,"path":"...","oldLine":"...","newText":"..."}: the fact CHANGED a line that exists. oldLine must be copied EXACTLY from a "line:" shown below. newText is the new value of that one line.',
     "",
     "Rules:",
     "- Only paths shown below as NOTE, or the inbox. Never invent a path, never create notes.",
     `- Agent lessons go to ${input.agentLessonPath} when that note is shown; anything useful with no obvious home goes to the inbox: ${input.inboxPath}.`,
     "- Additive only: never remove or rewrite the owner's text beyond the single updated line.",
     "- Write text and newText in the language of the target note, one line, no leading bullet.",
-    "- For an update, use the changed-fact format from the vault rules if they define one; otherwise `<new> (since YYYY-MM-DD; previously <old>)`.",
+    "- Write the bare fact only. Do not write a source, a date or the previous value: the code appends the source line and keeps the old value as a trace.",
     "- Never write credentials, keys, tokens or passwords.",
     "",
     "VAULT MEMORY RULES:",
@@ -410,18 +380,57 @@ export function checkTarget(path: string, env: TargetEnv): string | null {
   return null;
 }
 
-/** One line, no leading bullet, no trailing whitespace. */
-export function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim().replace(/^[-*+]\s+/, "");
+/** Where a harvest write came from: the chat, as corrections cite it. */
+export interface HarvestProvenance {
+  convoId: string;
+  chatTitle: string;
+  /** YYYY-MM-DD */
+  date: string;
 }
 
-/** Append `- text` under `section` (a heading, matched without its #s,
- *  case-insensitively, never inside frontmatter or code) or at the end of the
- *  note. Null when the text would be structure or the note's frontmatter
- *  never closes. */
-export function applyAdd(content: string, section: string | undefined, text: string): { content: string; line: string } | null {
-  const line = `- ${oneLine(text)}`;
-  if (structural(oneLine(text))) return null;
+/** A trailing `[fonte ...: ...]`: not a wikilink (`[[fonte-x]]`), and it needs
+ *  a colon, so `[fonte di verità]` in a fact's own text is left alone. */
+const FONTE_TAIL = /\s*(?<!\[)\[fonte\b[^\]\n]*:[^\n]*\]\s*$/;
+const CHANGED_TAIL = /\s*\((?:dal|since) \d{4}-\d{2}-\d{2}; (?:prima|previously) [^\n]*\)\s*$/;
+/** A trailing block anchor, ` ^exo-abc123`. */
+const ANCHOR_TAIL = /\s\^[\w-]+\s*$/;
+
+/** The fact without a provenance tail the model wrote itself: a trailing
+ *  `[fonte ...]` and/or `(dal ...; prima ...)`, in any order. The code adds
+ *  the real ones, so none must appear twice. */
+export function stripProvenance(text: string): string {
+  let out = text;
+  for (let prev = ""; prev !== out; ) {
+    prev = out;
+    out = out.replace(FONTE_TAIL, "").replace(CHANGED_TAIL, "");
+  }
+  return out.trimEnd();
+}
+
+/** An existing line as the value an update replaces: without its block anchor
+ *  and without a changed-fact tail (nothing nests), but keeping its own
+ *  `[fonte ...]`, which moves inside the new `prima`. */
+function replacedValue(line: string): { value: string; anchor: string } {
+  const anchor = ANCHOR_TAIL.exec(line)?.[0] ?? "";
+  const bare = anchor ? line.slice(0, line.length - anchor.length) : line;
+  const fonte = FONTE_TAIL.exec(bare)?.[0] ?? "";
+  const head = fonte ? bare.slice(0, bare.length - fonte.length) : bare;
+  return { value: `${head.replace(CHANGED_TAIL, "").trimEnd()}${fonte.trimEnd() ? ` ${fonte.trim()}` : ""}`, anchor: anchor.trim() };
+}
+
+/** Append `- text [fonte: ...; dal: ...]` under `section` (a heading, matched
+ *  without its #s, case-insensitively, never inside frontmatter or code) or at
+ *  the end of the note. Null when the text would be structure or the note's
+ *  frontmatter never closes. */
+export function applyAdd(
+  content: string,
+  section: string | undefined,
+  text: string,
+  p: HarvestProvenance,
+): { content: string; line: string } | null {
+  const fact = oneLine(stripProvenance(oneLine(text)));
+  if (!fact || structural(fact)) return null;
+  const line = `- ${fact} ${formatProvenance({ ...p, msgIndex: 0 })}`;
   const lines = content.replace(/\s+$/, "").split("\n");
   const prot = protectedLines(lines);
   const { open, frontmatterEnd, fenced } = prot;
@@ -453,24 +462,31 @@ export function applyAdd(content: string, section: string | undefined, text: str
 }
 
 /** Replace the ONE plain content line equal (whitespace-trimmed) to `oldLine`
- *  with `newText`, keeping its indentation and bullet. Null unless the line
- *  occurs exactly once, is not frontmatter / heading / table / fence / rule,
- *  and the new text is not structure either. */
+ *  with `<new> (dal <date>; prima <old>) [fonte: <chat>]`, keeping its
+ *  indentation, bullet and trailing block anchor. The old value keeps its own
+ *  source inside `prima`; a tail the model wrote is dropped, so nothing nests.
+ *  Null unless the line occurs exactly once, is not frontmatter / heading /
+ *  table / fence / rule, and the new text is not structure either. */
 export function applyUpdate(
   content: string,
   oldLine: string,
   newText: string,
+  p: HarvestProvenance,
 ): { content: string; from: string; to: string } | null {
   const want = oldLine.trim();
-  if (!want || structural(oneLine(newText))) return null;
+  const next = oneLine(stripProvenance(oneLine(newText)));
+  if (!want || !next || structural(next)) return null;
   const lines = content.split("\n");
   const hits = lines.flatMap((l, i) => (l.trim() === want ? [i] : []));
   if (hits.length !== 1) return null;
   const i = hits[0];
   if (protectedLines(lines).locked[i]) return null;
-  const prefix = lines[i].match(/^\s*(?:[-*+]\s+(?:\[.\]\s+)?)?/)?.[0] ?? "";
   const from = lines[i];
-  lines[i] = `${prefix}${oneLine(newText)}`;
+  const { value, anchor } = replacedValue(from);
+  const changed = formatSupersede(value, next, p.date);
+  // A plain (unbulleted) line keeps its indentation too.
+  const indent = withoutListMarker(from) === from.trim() ? (from.match(/^\s*/) ?? [""])[0] : "";
+  lines[i] = `${indent}${changed} ${formatSource({ ...p, msgIndex: 0 })}${anchor ? ` ${anchor}` : ""}`;
   return { content: lines.join("\n"), from, to: lines[i] };
 }
 

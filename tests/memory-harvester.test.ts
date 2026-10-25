@@ -129,7 +129,7 @@ describe("MemoryHarvester", () => {
     const chat = chatWith();
     const { harvester, files, marks, prompts, notices, logFile } = setup({ chats: [chat], replies: [EXTRACT, DECIDE] });
     await harvester.tick();
-    expect(files.get("CRM/People/Anna.md")).toBe(`# Anna\n## Work\n- Head of design at Acme (dal ${today}; prima Designer at Acme)\n`);
+    expect(files.get("CRM/People/Anna.md")).toBe(`# Anna\n## Work\n- Head of design at Acme (dal ${today}; prima Designer at Acme) [fonte: chat "Team update" (obsidian://exo-chat?id=c1&msg=0)]\n`);
     expect(marks).toEqual([["c1", 2]]);
     // The decider saw the vault's own rules and the exact line to update.
     expect(prompts[1]).toContain("## Memoria");
