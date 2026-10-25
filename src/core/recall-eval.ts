@@ -40,14 +40,21 @@ export interface CaseScore {
   rr: number;
   /** A must-not-lead note sits in the top k without a supersede label. */
   trapLeads: boolean;
+  /** Generated cases carry their family (core/recall-eval-gen); hand cases do not. */
+  family?: string;
 }
 
-export interface EvalSummary {
+export interface Totals {
   cases: number;
   hitAt5: number;
   fullAt5: number;
   mrr: number;
   traps: number;
+}
+
+export interface EvalSummary extends Totals {
+  /** Per family, in order of first appearance; absent when no score has one. */
+  families?: (Totals & { family: string })[];
 }
 
 /** What one recall served, as the eval reads it: notes, then chats. */
@@ -83,18 +90,31 @@ export function scoreCase(ranked: readonly RecallItem[], c: EvalCase, k = 5): Ca
   };
 }
 
+const totals = (results: readonly CaseScore[]): Totals => ({
+  cases: results.length,
+  hitAt5: results.filter((r) => r.hit).length,
+  fullAt5: results.filter((r) => r.full).length,
+  mrr: results.length ? results.reduce((a, r) => a + r.rr, 0) / results.length : 0,
+  traps: results.filter((r) => r.trapLeads).length,
+});
+
 export function summarize(results: readonly CaseScore[]): EvalSummary {
+  const names = [...new Set(results.flatMap((r) => (r.family ? [r.family] : [])))];
   return {
-    cases: results.length,
-    hitAt5: results.filter((r) => r.hit).length,
-    fullAt5: results.filter((r) => r.full).length,
-    mrr: results.length ? results.reduce((a, r) => a + r.rr, 0) / results.length : 0,
-    traps: results.filter((r) => r.trapLeads).length,
+    ...totals(results),
+    ...(names.length ? { families: names.map((family) => ({ family, ...totals(results.filter((r) => r.family === family)) })) } : {}),
   };
 }
 
+/** The total line, then one row per family when the scores carry one. */
 export function formatSummary(s: EvalSummary): string {
-  return `hit@5 ${s.hitAt5}/${s.cases} · full@5 ${s.fullAt5}/${s.cases} · MRR ${s.mrr.toFixed(2)} · traps ${s.traps}`;
+  const head = `hit@5 ${s.hitAt5}/${s.cases} · full@5 ${s.fullAt5}/${s.cases} · MRR ${s.mrr.toFixed(2)} · traps ${s.traps}`;
+  const width = Math.max(0, ...(s.families ?? []).map((f) => f.family.length));
+  const rows = (s.families ?? []).map(
+    (f) =>
+      `  ${f.family.padEnd(width)}  hit@5 ${f.hitAt5}/${f.cases} (${Math.round((100 * f.hitAt5) / f.cases)}%) · MRR ${f.mrr.toFixed(2)} · traps ${f.traps}`,
+  );
+  return [head, ...rows].join("\n");
 }
 
 /** Fill each chat expectation's id from the store: exact title, and the date
