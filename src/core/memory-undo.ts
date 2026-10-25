@@ -29,6 +29,8 @@ export interface UndoResult {
   message: string;
   /** The revert commit, when git made one. */
   revertSha?: string;
+  /** Not ok, but some notes were already restored: a retry cannot succeed. */
+  partial?: boolean;
 }
 
 const lines = (out: string): string[] =>
@@ -109,8 +111,10 @@ export function uniqueRun(lines: readonly string[], block: readonly string[]): n
 /**
  * Reverse `writes` exactly: remove each inserted block, put each replaced line
  * back, newest first. Computed in memory for every note before anything is
- * written, so it is all or nothing (`dryRun` stops right before writing). A note the harvest created is removed when
- * nothing but its starter content is left.
+ * written (`dryRun` stops right before writing). A note edited while the undo
+ * writes stops it there: notes already restored stay restored and the result is
+ * `partial`, naming them. A note the harvest created is removed when nothing
+ * but its starter content is left.
  */
 export async function reverseWrites(
   vault: UndoVault,
@@ -140,6 +144,7 @@ export async function reverseWrites(
     if (w.created !== undefined) created.set(w.path, w.created);
   }
   if (opts.dryRun) return { ok: true, message: "reversible" };
+  const done: string[] = [];
   for (const [path, content] of next) {
     const starter = created.get(path);
     if (starter !== undefined && content.trim() === starter.trim()) await vault.remove(path);
@@ -154,9 +159,13 @@ export async function reverseWrites(
           return content;
         });
       } catch {
-        return { ok: false, message: `Not undone: ${path} changed while undoing. Edit it by hand instead.` };
+        const notDone = `Not undone: ${path} changed while undoing. Edit it by hand instead.`;
+        return done.length
+          ? { ok: false, partial: true, message: `Undid ${done.join(", ")}. ${notDone}` }
+          : { ok: false, message: notDone };
       }
     }
+    done.push(path);
   }
   return { ok: true, message: `Undid ${writes.length} memory write(s) in ${next.size} note(s).` };
 }

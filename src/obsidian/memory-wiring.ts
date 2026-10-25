@@ -101,7 +101,7 @@ export async function undoMemoryWrite(plugin: ExoPlugin, log: HarvestLog, target
       // reversed line by line after the commit is reverted.
       if (result.ok && loose.length && check?.ok) {
         const rest = await reverseWrites(vault, loose);
-        result = rest.ok ? result : { ok: false, message: `${result.message} ${rest.message}` };
+        result = rest.ok ? result : { ok: false, partial: true, message: `${result.message} ${rest.message}` };
       }
     }
   } else if (record) {
@@ -109,7 +109,9 @@ export async function undoMemoryWrite(plugin: ExoPlugin, log: HarvestLog, target
   } else {
     result = { ok: false, message: want ? `No memory harvest ${want} on record.` : "No memory harvest to undo." };
   }
-  if (result.ok && record) await log.markUndone(record.id, Date.now());
+  // A partial undo cannot be retried (the restored notes no longer hold the
+  // harvest's lines), so it closes the record like a full one.
+  if ((result.ok || result.partial) && record) await log.markUndone(record.id, Date.now());
   plugin.refreshHub();
   return result;
 }

@@ -187,7 +187,27 @@ describe("reverseWrites (no git, or uncommitted notes)", () => {
     const res = await reverseWrites(racing, [{ path: "a.md", op: "add", text: "Exo fact", lines: ["- Exo fact"] }]);
     expect(res.ok).toBe(false);
     expect(res.message).toContain("a.md changed while undoing");
+    expect(res.partial).toBeUndefined();
     expect(store.get("a.md")).toBe("- one\n- Exo fact\n- typed just now\n");
+  });
+
+  it("names the notes already restored when a later note changed while undoing", async () => {
+    const { v, store } = vault({ "a.md": "- Exo fact\n", "b.md": "- mine\n- Exo fact\n" });
+    const racing: UndoVault = {
+      ...v,
+      process: async (p, fn) => {
+        if (p === "a.md") store.set(p, "- Exo fact\n- typed just now\n");
+        store.set(p, fn(store.get(p)!));
+      },
+    };
+    const res = await reverseWrites(racing, [
+      { path: "a.md", op: "add", text: "Exo fact", lines: ["- Exo fact"] },
+      { path: "b.md", op: "add", text: "Exo fact", lines: ["- Exo fact"] },
+    ]);
+    expect(res).toMatchObject({ ok: false, partial: true });
+    expect(res.message).toBe("Undid b.md. Not undone: a.md changed while undoing. Edit it by hand instead.");
+    expect(store.get("b.md")).toBe("- mine\n");
+    expect(store.get("a.md")).toBe("- Exo fact\n- typed just now\n");
   });
 
   it("works on notes of any size (no snapshot limit)", async () => {
