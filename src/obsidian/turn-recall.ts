@@ -74,7 +74,7 @@ export function indexNotes(notes: readonly ScannedNote[]) {
 }
 
 /** One pass over the notes, minus excluded paths. */
-function scanNotes(app: App, exclude: PathFilter) {
+export function scanNotes(app: App, exclude: PathFilter) {
   const files = app.vault.getMarkdownFiles().filter((f) => !exclude(f.path));
   return indexNotes(
     files.map((f) => {

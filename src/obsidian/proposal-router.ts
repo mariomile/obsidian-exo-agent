@@ -7,6 +7,7 @@
  * Every dependency failure is converted to a route result so ProposalStore can
  * leave the record pending, keep the error, and offer Retry.
  */
+import { CorrectionFailure } from "../core/correction";
 import type { CorrectionChange, ProposalPayload, ProposalRecord } from "../core/proposals";
 import type { ProposalRouteResult } from "./proposal-store";
 
@@ -64,6 +65,7 @@ function failure(error: unknown): ProposalAcceptanceResult {
   return {
     ok: false,
     error: message || "Proposal routing failed.",
+    ...(error instanceof CorrectionFailure ? { code: error.code } : {}),
   };
 }
 

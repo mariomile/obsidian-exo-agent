@@ -77,6 +77,7 @@ export function buildCorrectionTool(app: App, convoId: string) {
       const [status] = (await propose(app, [correctionCandidate(file.path, change, "Flagged as outdated in chat.")], convoId, `tool-${Date.now()}`)) ?? [];
       if (status === "applied") return ok(`Corrected ${name}. Mario can undo it with "Undo a save to note".`);
       if (status === "duplicate") return ok(`The same correction for ${name} was already made or turned down.`);
+      if (status === "dropped") return err(`${name} changed while the correction was being made, so nothing was written. Quote the line as it is now.`);
       if (status === "appended") return err(`Could not write the correction to ${name}; it waits in the Inbox with the reason.`);
       return err(`Could not make the correction (${status ?? "suggestions off"}).`);
     },

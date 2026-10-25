@@ -44,6 +44,7 @@ import {
   type EvalCase,
 } from "../../src/core/recall-eval";
 import { indexNotes, SUPERSEDE_KEY } from "../../src/obsidian/turn-recall";
+import { planUpkeep } from "../../src/core/upkeep";
 import { parseChatScores } from "../../src/obsidian/chat-recall";
 import type { App } from "obsidian";
 
@@ -195,6 +196,29 @@ const HUB_PROMPTS = [
 
 /** A prompt that writes a note out: it must inject that note, with no vault-search hit needed. */
 const NAMED_PROMPT = { prompt: "cosa dice il file CLAUDE.md?", note: "CLAUDE.md" };
+
+/** The fingerprints of corrections already accepted or turned down, read from the plugin folder. Only reads. */
+function closedCorrections(): Set<string> {
+  try {
+    const raw = JSON.parse(readFileSync(join(PLUGIN_DIR, "proposals.json"), "utf8")) as { closedCorrections?: string[] };
+    return new Set(raw.closedCorrections ?? []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** What the daily upkeep sweep would write: per note and field, the value now and the value after. Nothing is written. */
+function upkeepLines(ctx: { live: LiveVault["names"]; supersede: ReturnType<typeof indexNotes>["supersede"] }): string[] {
+  const plan = planUpkeep(ctx.supersede, closedCorrections());
+  const now = new Map(ctx.live.map((n) => [n.path, n.frontmatter ?? {}]));
+  return [
+    `upkeep sweep (read-only): would fix ${plan.fixes.length} notes, ${plan.broken.length} broken links stay listed`,
+    ...ctx.supersede.fixes.filter((f) => !plan.fixes.some((p) => p.path === f.path)).map((f) => `  closed, skipped: ${f.path}: ${JSON.stringify(f.set)}`),
+    ...plan.fixes.flatMap((f) =>
+      Object.entries(f.set).map(([field, after]) => `  ${f.path}: ${field}: ${JSON.stringify((now.get(f.path) as Record<string, unknown>)[field] ?? null)} -> ${JSON.stringify(after)}`),
+    ),
+  ];
+}
 
 /** What a run reads once: the note index minus excluded paths (as the turn
  *  builds it), the exclusion itself, and the conversation store. */
@@ -389,4 +413,10 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     expect(cases.length).toBeGreaterThan(0);
     expect(summary.traps).toBe(0);
   }, 300_000);
+
+  it("plans the daily upkeep sweep without writing anything", () => {
+    const ctx = liveContext();
+    console.log([`supersede: ${ctx.supersede.fixes.length} notes with disagreeing markers, ${ctx.supersede.broken.length} broken links`, ...ctx.supersede.broken.map((b) => `  ${b.path}: ${b.field} -> ${b.target}`), ...upkeepLines(ctx)].join("\n"));
+    expect(ctx.live.length).toBeGreaterThan(0);
+  }, 120_000);
 });

@@ -7,6 +7,7 @@ import { HarvestLog } from "./harvest-log";
 import { checkGitRepo, gitRunner, type GitRun } from "./git";
 import { vaultBasePath } from "./tool-kit";
 import { harvestSource } from "../ui/convo-bridge";
+import { runUpkeep } from "./upkeep";
 
 /**
  * Plugin-side wiring for automatic memory: the harvester (heartbeat, catch-up,
@@ -152,9 +153,14 @@ export function registerMemory(plugin: ExoPlugin): void {
     },
   });
 
-  plugin.registerInterval(window.setInterval(() => void plugin.memoryHarvest.tick(), HARVEST_HEARTBEAT_MS));
+  // The heartbeat also carries the daily knowledge upkeep (a no-op after its first run of the day).
+  const beat = () => {
+    void plugin.memoryHarvest.tick();
+    void runUpkeep(plugin);
+  };
+  plugin.registerInterval(window.setInterval(beat, HARVEST_HEARTBEAT_MS));
   plugin.app.workspace.onLayoutReady(() => {
-    const t = window.setTimeout(() => void plugin.memoryHarvest.tick(), HARVEST_FIRST_TICK_MS);
+    const t = window.setTimeout(beat, HARVEST_FIRST_TICK_MS);
     plugin.register(() => window.clearTimeout(t));
   });
 }

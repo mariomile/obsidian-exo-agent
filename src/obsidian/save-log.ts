@@ -2,8 +2,19 @@ import type { SaveReceipt } from "../core/save-undo";
 import { WriteQueue } from "../core/write-queue";
 import type { LogFile } from "./harvest-log";
 
-/** Receipts kept: enough to undo a session's saves. */
+/** Receipts kept per kind: enough to undo a session's saves. Saves and
+ *  corrections each have their own 50, so the daily upkeep sweep can never
+ *  push Mario's own saves out of the undo window. */
 export const MAX_SAVES = 50;
+
+/** Cap each kind at `MAX_SAVES`, newest first (the list already is). */
+function capPerKind(all: readonly SaveReceipt[]): SaveReceipt[] {
+  const kept = { save: 0, correction: 0 };
+  return all.filter((r) => {
+    const kind = r.op === "insert" ? "save" : "correction";
+    return kept[kind]++ < MAX_SAVES;
+  });
+}
 
 /**
  * Receipts of "Save to note", in the plugin folder (`note-saves.json`): not in
@@ -41,7 +52,7 @@ export class SaveLog {
   record(r: SaveReceipt): Promise<void> {
     return this.queue.enqueue(async () => {
       const all = await this.load();
-      await this.file.write(JSON.stringify([r, ...all].slice(0, MAX_SAVES)));
+      await this.file.write(JSON.stringify(capPerKind([r, ...all])));
     });
   }
 

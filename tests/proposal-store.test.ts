@@ -461,3 +461,59 @@ describe("ProposalStore", () => {
     });
   });
 });
+
+describe("a correction that can no longer apply leaves the Inbox", () => {
+  const fix = (): ProposalCandidate =>
+    correctionCandidate("D/old.md", { type: "frontmatter", set: { status: "superseded" }, before: { status: "status: active" } }, "A newer note supersedes it.");
+  const failing = (code: "stale" | "line-missing" | "line-ambiguous") => async () => ({ ok: false as const, error: `no longer applies (${code})`, code });
+
+  for (const code of ["stale", "line-missing", "line-ambiguous"] as const) {
+    it(`${code}: the record is removed, not pending, and its fingerprint stays open`, async () => {
+      const { adapter } = fakeFiles();
+      const store = new ProposalStore(adapter, new WriteQueue(), failing(code));
+      const first = await store.append(fix(), source());
+      expect(first.status).toBe("dropped");
+      const snapshot = await store.load();
+      expect(snapshot.data.records).toEqual([]);
+      expect(snapshot.data.closedCorrections).toEqual([]);
+      expect(snapshot.data.metrics.routeErrors).toBe(1);
+      expect((await store.listPending()).records).toEqual([]);
+    });
+  }
+
+  it("the same correction proposed again from fresh content is accepted", async () => {
+    const { adapter } = fakeFiles();
+    await new ProposalStore(adapter, new WriteQueue(), failing("stale")).append(fix(), source());
+    const later = await new ProposalStore(adapter, new WriteQueue(), idleRoute).append(fix(), { ...source(), turnId: "later" });
+    expect(later.status).toBe("applied");
+  });
+
+  it("another failure of a correction (note missing) keeps its record and error", async () => {
+    const { adapter } = fakeFiles();
+    const store = new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "Note not found: D/old.md" }));
+    const first = await store.append(fix(), source());
+    expect(first.status).toBe("appended");
+    expect((await store.listPending()).records.map((r) => r.lastError)).toEqual(["Note not found: D/old.md"]);
+  });
+
+  it("a failed loop keeps lastError even when the route reports a code", async () => {
+    const { adapter } = fakeFiles();
+    const store = new ProposalStore(adapter, new WriteQueue(), failing("stale"));
+    const first = await store.append(loop("Call Anna"), source());
+    expect(first.status).toBe("appended");
+    expect((await store.listPending()).records.map((r) => r.lastError)).toEqual(["no longer applies (stale)"]);
+  });
+
+  it("accepting an old pending correction that no longer applies removes it too", async () => {
+    const { adapter } = fakeFiles();
+    const held = new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "Note not found" }));
+    const first = await held.append(fix(), source());
+    if (first.status !== "appended") throw new Error("expected a pending record");
+    const store = new ProposalStore(adapter, new WriteQueue(), failing("line-missing"));
+    const accepted = await store.accept(first.record.id);
+    expect(accepted.ok).toBe(false);
+    const snapshot = await store.load();
+    expect(snapshot.data.records).toEqual([]);
+    expect(snapshot.data.closedCorrections).toEqual([]);
+  });
+});

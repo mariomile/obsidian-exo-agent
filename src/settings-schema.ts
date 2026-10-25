@@ -201,6 +201,8 @@ export interface MVASettings {
   scheduledLastRun: Record<string, number>;
   /** Epoch ms of the last daily Claude-CLI update check (0 = never). */
   cliUpdateCheckAt: number;
+  /** Epoch ms of the last daily knowledge upkeep sweep (0 = never). Bookkeeping, not a setting. */
+  lastUpkeepAt: number;
   /** Latest published Claude CLI version seen by the update check ("" = unknown). */
   cliLatestKnown: string;
   /** Keep the Claude CLI current automatically. CLI drift is the recurring root
@@ -328,6 +330,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   playbookThreshold: 3,
   scheduledLastRun: {},
   cliUpdateCheckAt: 0,
+  lastUpkeepAt: 0,
   cliLatestKnown: "",
   autoUpdateCli: true,
   vaultAutoCommit: false,

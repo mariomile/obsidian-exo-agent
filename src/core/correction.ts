@@ -34,6 +34,21 @@ export function quotedLine(content: string, quoted: string): string | { error: "
 
 export type CorrectionError = "line-missing" | "line-ambiguous" | "stale" | "multi-line";
 
+/** A correction that was refused, with the reason as a code the proposal
+ *  store can act on. The message is what Mario reads. */
+export class CorrectionFailure extends Error {
+  constructor(readonly code: CorrectionError, message: string) {
+    super(message);
+    this.name = "CorrectionFailure";
+  }
+}
+
+/** Failures that mean the note moved on: the fix as proposed can never apply,
+ *  and a new derivation from the note as it reads now may. */
+export function isGoneCorrection(code: CorrectionError | undefined): boolean {
+  return code === "stale" || code === "line-missing" || code === "line-ambiguous";
+}
+
 export function planCorrection(
   content: string,
   change: CorrectionChange,
