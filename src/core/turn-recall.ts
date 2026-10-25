@@ -31,6 +31,12 @@ export const RECALL_CHAT_WINDOW_DAYS = 60;
 export const RECALL_CHAT_KEYWORDS = 4;
 const MIN_WORDS = 4;
 const MAX_KEYWORDS = 10;
+/** A message longer than {@link MAX_KEYWORDS} keywords is searched in chunks of
+ *  this many (a long OR query lets the many common words outvote the few that
+ *  name the note). */
+const QUERY_CHUNK = 8;
+/** How many keywords of a long message the vault search and the title lane read. */
+const MAX_QUERY_KEYWORDS = 24;
 
 /** Short messages ("ok", "go on") and slash commands carry nothing to recall on. */
 export function shouldRecall(message: string): boolean {
@@ -83,14 +89,14 @@ export function nameVocab(notes: readonly { basename: string; aliases: readonly 
  *  `vocab` ({@link nameVocab}), which is how "Exo" becomes searchable without
  *  "the" and "per" coming back. Operators (`-x`, `path:`) never survive, so a
  *  message can't steer the search engine's syntax by accident. */
-export function recallKeywords(message: string, vocab?: ReadonlySet<string>): string[] {
+export function recallKeywords(message: string, vocab?: ReadonlySet<string>, cap = MAX_KEYWORDS): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const w of words(message)) {
     if (STOPWORDS.has(w) || seen.has(w) || (w.length < 4 && !(w.length === 3 && vocab?.has(w)))) continue;
     seen.add(w);
     out.push(w);
-    if (out.length >= MAX_KEYWORDS) break;
+    if (out.length >= cap) break;
   }
   return out;
 }
@@ -216,10 +222,19 @@ export interface TitleHit {
   /** Set when every shared word has three letters: too weak to inject a note
    *  unless the vault search found it too ({@link rankRecall}). */
   short?: true;
-  /** The message writes the note out: `<basename>.md` or `[[<basename>`. That
-   *  is a reference, not a word that happens to be a name, so it needs no
-   *  vault-search hit ({@link rankRecall}). */
+  /** The message writes the note out: `<basename>.md` or a `[[<basename>]]`
+   *  link (also `|` or `#` after the name). That is a reference, not a word
+   *  that happens to be a name, so it needs no vault-search hit
+   *  ({@link rankRecall}). */
   explicit: boolean;
+}
+
+/** Whether the message writes the note out: a link to it (`[[name]]`,
+ *  `[[name|alias]]`, `[[name#heading]]`) or its file name (`name.md`, not the
+ *  tail of `subagents.md` or `open-core.md`). `text` is lower-cased. */
+function writesOut(text: string, base: string): boolean {
+  const name = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\[\\[${name}(\\]\\]|\\||#)|(^|[^\\p{L}\\p{N}_-])${name}\\.md`, "u").test(text);
 }
 
 /**
@@ -250,7 +265,7 @@ export function titleLane(
     }
     if (!best) continue;
     const base = note.basename.toLowerCase();
-    hits.push({ path: note.path, ...best, explicit: text.includes(`${base}.md`) || text.includes(`[[${base}`) });
+    hits.push({ path: note.path, ...best, explicit: writesOut(text, base) });
   }
   return hits
     .sort(
@@ -395,10 +410,19 @@ export function formatRecallBlock(
   return { block, notes: shown.slice(0, noteLines.length) };
 }
 
-/** The keywords of a turn: {@link recallKeywords} with the 3-letter words the
- *  vault names ({@link nameVocab}). */
-export function turnKeywords(message: string, names: readonly { basename: string; aliases: readonly string[] }[]): string[] {
-  return recallKeywords(message, nameVocab(names));
+/** The vault searches of a turn, shared by the adapter and the eval: one query
+ *  of the {@link recallKeywords} when the message has ten keywords or fewer,
+ *  else near-equal chunks of at most {@link QUERY_CHUNK} over its first
+ *  {@link MAX_QUERY_KEYWORDS} (17 keywords are 6, 6 and 5, never 8, 8 and 1: a
+ *  one-word query would rank its first hit level with a full chunk's). */
+export function recallQueries(message: string, vocab: ReadonlySet<string>): string[] {
+  const keywords = recallKeywords(message, vocab, MAX_QUERY_KEYWORDS);
+  if (keywords.length <= MAX_KEYWORDS) return keywords.length ? [keywords.join(" ")] : [];
+  const chunks = Math.ceil(keywords.length / QUERY_CHUNK);
+  const size = Math.ceil(keywords.length / chunks);
+  const out: string[] = [];
+  for (let i = 0; i < keywords.length; i += size) out.push(keywords.slice(i, i + size).join(" "));
+  return out;
 }
 
 /** What one turn recalled: the notes and chats to inject, and the lanes they
@@ -430,16 +454,23 @@ export async function recallTurn(input: {
   semantic: () => Promise<readonly { id: string; score: number }[] | null>;
 }): Promise<RecallResult | null> {
   if (!shouldRecall(input.message)) return null;
-  const keywords = turnKeywords(input.message, input.names);
+  const vocab = nameVocab(input.names);
+  const keywords = recallKeywords(input.message, vocab);
   if (!keywords.length) return null;
   const scores = input.semantic();
-  const title = titleLane(keywords, input.names, input.message).slice(0, RECALL_LANE_DEPTH);
-  let sonar: NoteRecall[] = [];
-  try {
-    sonar = await input.search(keywords.join(" "));
-  } catch {
-    /* search failed: chats and the title lane may still recall something */
-  }
+  const wide = recallKeywords(input.message, vocab, MAX_QUERY_KEYWORDS);
+  // A failed search leaves the other queries, the chats and the title lane.
+  const searched = await Promise.all(recallQueries(input.message, vocab).map((q) => input.search(q).catch((): NoteRecall[] => [])));
+  // Cut to the lane depth after fusing: `found` ({@link rankRecall}) must not widen with the chunks.
+  const sonar = (searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path)).slice(0, RECALL_LANE_DEPTH);
+  // The names the first ten keywords give stand as in a short message. A long
+  // message shares words with many names by chance: a name only the words past
+  // the tenth give comes in if the search found the note too, or the message
+  // writes it out.
+  const near = titleLane(keywords, input.names, input.message);
+  const found = new Set(sonar.map((n) => n.path));
+  const far = wide.length > MAX_KEYWORDS ? titleLane(wide, input.names, input.message).filter((t) => (t.explicit || found.has(t.path)) && !near.some((h) => h.path === t.path)) : [];
+  const title = [...near, ...far].slice(0, RECALL_LANE_DEPTH);
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
   const scored = await scores;
   const hits = scored && semanticHits(scored);

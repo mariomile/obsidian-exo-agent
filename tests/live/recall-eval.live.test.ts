@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { searchVaultNotes, type NoteHit } from "../../src/obsidian/vault-search";
 import { makeExclusion } from "../../src/core/vault-exclusions";
 import type { ChatRecord } from "../../src/core/recent-chats";
-import { recallTurn, turnKeywords, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
+import { nameVocab, recallKeywords, recallQueries, recallTurn, RECALL_LANE_DEPTH, type RecallResult } from "../../src/core/turn-recall";
 import { generateCases, type GenNote } from "../../src/core/recall-eval-gen";
 import {
   formatSummary,
@@ -188,6 +188,17 @@ const pad = (s: string, n: number) => (s.length >= n ? s : s + " ".repeat(n - s.
 /** Prompts that name a short word of the vault ("win", "log", "ask") without
  *  meaning a note: the title lane alone must inject nothing for them. */
 const SHORT_NAME_PROMPTS = ["ask Claude to rewrite this paragraph", "puoi controllare il log del bot oggi", "how do we win this deal"];
+/** Ordinary requests of more than sixteen keywords, so the wide title lane and
+ *  the chunked search are both in play. They are about taxes, an invoice, a
+ *  trip, a dinner, a workshop: none names a note of the vault, so a long
+ *  message must not inject a note on a chance overlap of words. */
+const LONG_PROMPTS = [
+  "Domani mattina ho una riunione con il commercialista per sistemare le tasse e vorrei una lista ordinata dei documenti da portare, delle scadenze fiscali più vicine e delle domande che conviene fare prima di firmare",
+  "Devo scrivere una email al cliente per spiegare che la fatturazione elettronica ha avuto un ritardo questa settimana e che stiamo sistemando il problema insieme al commercialista, tieni un tono cordiale ma professionale e chiaro",
+  "Mi serve un itinerario di quattro giorni a Lisbona a fine novembre con musei, ristoranti di pesce vicino al fiume e un paio di serate tranquille, tenendo il budget sotto i mille euro per due persone compresi voli e hotel",
+  "Sto cercando una ricetta per una cena con sei amici che comprenda un antipasto freddo, un primo di pasta fresca fatta in casa e un dolce senza forno, considerando che due ospiti sono vegetariani e uno è allergico alle noci",
+  "Vorrei una scaletta per un workshop interno di mezza giornata su come organizzare meglio le settimane di lavoro, con un'introduzione, tre esercizi pratici in piccoli gruppi e un momento finale di discussione aperta con tutti i partecipanti",
+];
 /** Prompts that name a project: its hub note must lead. */
 const HUB_PROMPTS = [
   { prompt: "Qual è lo stato attuale del progetto Exo e qual è il prossimo passo?", hub: "Active/Projects/Exo/Exo.md" },
@@ -257,14 +268,41 @@ async function runTurn(
 
 /** Live Sonar hits for what each message's turn would search for. */
 function fetchSonar(ctx: ReturnType<typeof liveContext>, messages: string[], timed = false) {
-  const queries = messages.map((m) => turnKeywords(m, ctx.names).join(" "));
+  const perMessage = messages.map((m) => recallQueries(m, nameVocab(ctx.names)));
+  const queries = perMessage.flat();
   const { hits, ms } = liveSonar(queries, timed);
-  return { map: new Map(queries.map((q, i) => [q, hits[i]])), probe: hits, ms };
+  const at: number[] = [];
+  let next = 0;
+  for (const qs of perMessage) {
+    at.push(next);
+    next += qs.length;
+  }
+  return {
+    map: new Map(queries.map((q, i) => [q, hits[i]])),
+    /** The hits of each of a message's queries, one list per query. */
+    probe: perMessage.map((qs, i) => hits.slice(at[i], at[i] + qs.length)),
+    /** What a turn pays for its searches: the sum, they share one thread. */
+    ms: timed ? perMessage.map((qs, i) => ms.slice(at[i], at[i] + qs.length).reduce((a, b) => a + b, 0)) : ms,
+  };
+}
+
+/** Where a note sits in a message's searches: its best rank in any of them (0 when in none). */
+function bestRank(searches: NoteHit[][], exclude: (path: string) => boolean, path: string): number {
+  const ranks = searches.map((hs) => hs.filter((h) => !exclude(h.path)).findIndex((h) => h.path === path) + 1).filter((r) => r > 0);
+  return ranks.length ? Math.min(...ranks) : 0;
 }
 
 /** Notes a turn injected on the title lane alone: named by the message, not found by the vault search. */
 const titleOnly = (r: RecallResult | null): string[] =>
   r ? r.notes.map((n) => n.path).filter((p) => r.lanes.title.some((t) => t.path === p) && !r.lanes.sonar.some((s) => s.path === p)) : [];
+
+/** How many of the prompt's keywords an injected note shares through its name and
+ *  the excerpt the vault search gave: a note a long message injected on a chance
+ *  overlap shares one at most. */
+const sharedWithPrompt = (n: { path: string; excerpt: string }, keywords: readonly string[]): number => {
+  const text = `${n.path.replace(/^.*\//, "")} ${n.excerpt}`.toLowerCase();
+  return keywords.filter((k) => text.includes(k)).length;
+};
 
 describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault", () => {
   it("serves the expected sources for the 10 questions", async () => {
@@ -273,7 +311,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const { supersede, exclude, store } = ctx;
     const cases = fixture.cases.map((c) => resolveChats(c, store));
     const questions = cases.map((c) => c.question);
-    const ordinaryPrompts = [...fixture.ordinary, ...SHORT_NAME_PROMPTS, ...HUB_PROMPTS.map((h) => h.prompt), NAMED_PROMPT.prompt];
+    const ordinaryPrompts = [...fixture.ordinary, ...SHORT_NAME_PROMPTS, ...LONG_PROMPTS, ...HUB_PROMPTS.map((h) => h.prompt), NAMED_PROMPT.prompt];
     const sonar = fetchSonar(ctx, [...questions, ...ordinaryPrompts], true);
     const proposed = new Set<string>();
     const stampBefore = indexStamp();
@@ -299,7 +337,6 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       scores.push(score);
 
       // Where each expected source sits in each lane, past the cut too.
-      const probe = sonar.probe[i].filter((h) => !exclude(h.path)).map((h) => h.path);
       const titlePaths = ranked.lanes.title.map((t) => t.path);
       const semIds = ranked.lanes.semanticChats && ranked.lanes.semanticChats.map((x) => x.id);
       const at = (list: readonly string[], x: string | undefined) => {
@@ -307,7 +344,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         return r < 0 ? "-" : String(r + 1);
       };
       const lanes = c.expect.map((e) => {
-        if ("note" in e) return `sonar ${at(probe, e.note)} title ${at(titlePaths, e.note)}`;
+        if ("note" in e) return `sonar ${bestRank(sonar.probe[i], exclude, e.note) || "-"} title ${at(titlePaths, e.note)}`;
         const tag = e.chat.id ? "" : "unresolved ";
         return `${tag}lexical ${at(ranked.lanes.lexicalChats.map((x) => x.id), e.chat.id)} semantic ${semIds ? at(semIds, e.chat.id) : "n/a"}`;
       });
@@ -325,6 +362,8 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const group = (prompts: string[]) => ordinary.filter((o) => prompts.includes(o.prompt));
     const fixtureOrdinary = group(fixture.ordinary);
     const shortOrdinary = group(SHORT_NAME_PROMPTS);
+    const longOrdinary = group(LONG_PROMPTS);
+    const longKeywords = (prompt: string) => recallKeywords(prompt, nameVocab(ctx.names), 24);
     const hubRanks = HUB_PROMPTS.map((h) => {
       const r = ordinary.find((o) => o.prompt === h.prompt)!.result;
       const rank = r ? r.notes.findIndex((n) => n.path === h.hub) + 1 : 0;
@@ -355,6 +394,8 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
         ...fixtureOrdinary.filter((o) => o.chats || o.titleOnly.length).map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
         `short-name prompts (${shortOrdinary.length}): ${shortOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${shortOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
         ...shortOrdinary.map((o) => `  "${o.prompt}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title-only ${JSON.stringify(o.titleOnly)}`),
+        `long prompts (${longOrdinary.length}): ${longOrdinary.reduce((n, o) => n + o.chats, 0)} chats injected, ${longOrdinary.reduce((n, o) => n + o.titleOnly.length, 0)} notes from the title lane alone`,
+        ...longOrdinary.map((o) => `  "${o.prompt.slice(0, 60)}": chats ${JSON.stringify(o.result?.chats.map((c) => c.title) ?? [])}, title lane ${o.result?.lanes.title.length ?? 0}, notes ${JSON.stringify(o.result?.notes.map((n) => `${n.path.split("/").pop()} (${sharedWithPrompt(n, longKeywords(o.prompt))})`) ?? [])}`),
         `named note "${NAMED_PROMPT.prompt}": ${NAMED_PROMPT.note} rank ${namedRank || "-"} (Sonar ${named && named.lanes.sonar.findIndex((n) => n.path === NAMED_PROMPT.note) + 1 || "-"})`,
         ...hubRanks.map((h) => `hub ${h.hub}: rank ${h.rank || "-"} (Sonar ${h.sonarFound || "-"}) for "${h.prompt}"`),
       ].join("\n"),
@@ -367,6 +408,8 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     // S4: a short word alone never injects a note, and the project hubs lead.
     expect(shortOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
     expect(fixtureOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
+    expect(longOrdinary.flatMap((o) => o.titleOnly)).toEqual([]);
+    expect(longOrdinary.reduce((n, o) => n + o.chats, 0)).toBe(0);
     expect(namedRank, `${NAMED_PROMPT.note} should be injected for "${NAMED_PROMPT.prompt}"`).toBeGreaterThan(0);
     for (const h of hubRanks) expect(h.rank, `${h.hub} should lead for "${h.prompt}"`).toBe(1);
   }, 300_000);
@@ -389,8 +432,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
     const scored: { id: string; question: string; score: CaseScore; where: string }[] = [];
     for (const [i, c] of cases.entries()) {
       const result = await runTurn(ctx, sonar.map, c.question, { chats: false, semantic: async () => null });
-      const probe = sonar.probe[i].filter((h) => !ctx.exclude(h.path)).map((h) => h.path);
-      const where = c.expect.map((e) => ("note" in e ? `sonar ${probe.indexOf(e.note) + 1 || "-"} title ${result?.lanes.title.findIndex((t) => t.path === e.note) ?? -1}` : "chat")).join(", ");
+      const where = c.expect.map((e) => ("note" in e ? `sonar ${bestRank(sonar.probe[i], ctx.exclude, e.note) || "-"} title ${result?.lanes.title.findIndex((t) => t.path === e.note) ?? -1}` : "chat")).join(", ");
       scored.push({ id: c.id, question: c.question, score: { ...scoreCase(recallItems(result ?? { notes: [], chats: [] }), c), family: c.family }, where });
     }
     const summary = summarize(scored.map((s) => s.score));
