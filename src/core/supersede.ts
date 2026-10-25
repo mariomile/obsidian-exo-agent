@@ -5,6 +5,8 @@
  * current note; the inconsistent markers it finds become correction proposals.
  * No Obsidian import: links arrive already resolved to paths.
  */
+import { frontmatterKeyLines } from "./frontmatter-patch";
+import { PROPOSAL_LIMITS } from "./proposals";
 
 /** One note's markers. Links resolved to vault paths; unresolved kept as raw text. */
 export interface NoteMarkers {
@@ -34,6 +36,29 @@ export interface BrokenLink {
   target: string;
 }
 
+/** The keys a fix writes. Given the note's text as read now, a key Mario
+ *  already filled is left alone: any non-empty `superseded_by` (however it is
+ *  written, quoted or not, which the metadata cache may not show as a link),
+ *  and a `status` that already says superseded. Empty when nothing is left. */
+export function markerKeys(fix: MarkerFix, content?: string): Record<string, string> {
+  const keys = Object.fromEntries(Object.entries(fix.set).filter((e): e is [string, string] => e[1] !== undefined));
+  if (content === undefined) return keys;
+  if (keyValue(content, "superseded_by")) delete keys.superseded_by;
+  if (keyValue(content, "status").replace(/^(["'])(.*)\1$/, "$2").toLowerCase() === "superseded") delete keys.status;
+  return keys;
+}
+
+/** A key's value as written (continuation lines joined, comments cut), "" when
+ *  the key is absent or holds nothing (`key:`, `""`, `null`, `~`, `[]`). */
+function keyValue(content: string, key: string): string {
+  const value = frontmatterKeyLines(content, key)
+    .map((line, i) => (i ? line : line.slice(line.indexOf(":") + 1)))
+    .map((line) => line.replace(/(^|\s)#.*$/, ""))
+    .join("\n")
+    .trim();
+  return /^(?:""|''|null|~|\[\s*\])?$/i.test(value) ? "" : value;
+}
+
 const FIELDS = { supersedes: "supersedes", superseded_by: "supersededBy" } as const;
 
 /** Markers from one note's frontmatter and its frontmatter links (`key` as
@@ -59,6 +84,14 @@ const fileDate = (path: string): string => /(\d{4}-\d{2}-\d{2})/.exec(basename(p
 /** Newest first: filename date, then path. */
 const newest = (a: string, b: string): number =>
   fileDate(b).localeCompare(fileDate(a)) || (a < b ? 1 : a > b ? -1 : 0);
+
+/** The explanation as one string that always passes the proposal validator:
+ *  the structural reason comes first, so a long run of broken links is what gets cut. */
+function boundedReason(parts: readonly string[]): string {
+  const text = parts.join(" ");
+  const max = PROPOSAL_LIMITS.rationale;
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
 
 export function buildSupersedeIndex(notes: readonly NoteMarkers[]): {
   index: SupersedeIndex;
@@ -114,7 +147,7 @@ export function buildSupersedeIndex(notes: readonly NoteMarkers[]): {
     for (const b of broken.filter((x) => x.path === n.path)) {
       why.push(`Broken link: ${b.field} points at ${b.target}, which does not exist.`);
     }
-    fixes.push({ path: n.path, set, because: why.join(" ") });
+    fixes.push({ path: n.path, set, because: boundedReason(why) });
   }
 
   return { index: { headOf, isSuperseded, successorOf }, fixes, broken };

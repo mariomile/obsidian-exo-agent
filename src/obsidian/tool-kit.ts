@@ -4,7 +4,7 @@ import type { AutomationConfig, AutomationRunRecord } from "../core/automations"
 import type { AgentDef } from "../core/agents";
 import type { AgentCaller } from "../core/agent-runs";
 import type { ChatRecord } from "../core/recent-chats";
-import type { ProposalCandidate, ProposalRecord } from "../core/proposals";
+import type { ProposalCandidate, ProposalRecord, ProposalValidationError } from "../core/proposals";
 import type { SaveLog } from "./save-log";
 
 /** The shape every in-process tool returns. Free-form human-readable text —
@@ -84,7 +84,7 @@ export interface ExoToolHost {
   /** Receipts of "Save to note" (obsidian/note-save). */
   noteSaves: SaveLog;
   /** The proposal store: writes a correction on append; one it cannot write waits in the Inbox. */
-  proposalStore: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string }> };
+  proposalStore: { append(candidate: ProposalCandidate, source: ProposalRecord["source"]): Promise<{ status: string; errors?: ProposalValidationError[] }> };
   inbox: { refresh(): Promise<void> };
 }
 

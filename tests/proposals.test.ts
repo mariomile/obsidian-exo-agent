@@ -280,11 +280,11 @@ describe("correction proposals", () => {
     expect(fingerprintProposal(correctionCandidate(path, line, "x").payload)).not.toBe(fingerprintProposal(a));
   });
 
-  it("deduplicates pending, accepted and also dismissed corrections, so recall never re-proposes one Mario turned down", () => {
+  it("deduplicates accepted and dismissed corrections, so recall never re-proposes one Mario turned down; a pending one (a failed write) does not block", () => {
     const value = correctionCandidate(path, frontmatter, "x");
     const existing = (status: ProposalRecord["status"]) =>
       record(status, NOW - DAY, { kind: "correction", title: value.title, payload: value.payload, rationale: value.rationale, fingerprint: fingerprintProposal(value.payload) });
-    expect(evaluateProposal(value, [existing("pending")], NOW).status).toBe("duplicate");
+    expect(evaluateProposal(value, [existing("pending")], NOW).status).toBe("ok");
     expect(evaluateProposal(value, [existing("accepted")], NOW).status).toBe("duplicate");
     expect(evaluateProposal(value, [existing("dismissed")], NOW).status).toBe("duplicate");
   });

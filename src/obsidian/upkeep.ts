@@ -13,10 +13,9 @@ import { vaultExclusion } from "./vault-search";
 export interface UpkeepRun {
   ran: boolean;
   fixes: number;
-  broken: number;
 }
 
-const SKIPPED: UpkeepRun = { ran: false, fixes: 0, broken: 0 };
+const SKIPPED: UpkeepRun = { ran: false, fixes: 0 };
 let running = false;
 
 /** The daily sweep when it is due. Never throws; a run that could not look at
@@ -34,11 +33,11 @@ export async function runUpkeep(plugin: ExoPlugin, now = Date.now()): Promise<Up
     });
     if (!found.names.length) return SKIPPED;
     const closed = new Set((await plugin.proposalStore.load()).data.closedCorrections);
-    const { fixes, broken } = planUpkeep(found.supersede, closed);
+    const { fixes } = planUpkeep(found.supersede, closed);
     if (fixes.length) await proposeMarkerFixes(app, fixes, "upkeep");
     plugin.settings.lastUpkeepAt = now;
     await plugin.saveSettings();
-    return { ran: true, fixes: fixes.length, broken: broken.length };
+    return { ran: true, fixes: fixes.length };
   } catch {
     return SKIPPED;
   } finally {

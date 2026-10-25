@@ -40,7 +40,7 @@ describe("runUpkeep", () => {
     expect(proposeMarkerFixes.mock.calls[0][1]).toEqual([fix]);
     expect(settings.lastUpkeepAt).toBe(NOW);
     expect(saved).toEqual([NOW]);
-    expect(result).toMatchObject({ ran: true, fixes: 1, broken: 1 });
+    expect(result).toEqual({ ran: true, fixes: 1 });
   });
 
   it("does nothing a second time on the same local day", async () => {

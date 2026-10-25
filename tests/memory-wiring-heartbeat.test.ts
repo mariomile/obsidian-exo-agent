@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type ExoPlugin from "../src/main";
 
-const runUpkeep = vi.fn(async () => ({ ran: false, fixes: 0, broken: 0 }));
+const runUpkeep = vi.fn(async () => ({ ran: false, fixes: 0 }));
 const tick = vi.fn(async () => {});
 vi.mock("../src/obsidian/upkeep", () => ({ runUpkeep: (...a: unknown[]) => (runUpkeep as (...x: unknown[]) => unknown)(...a) }));
 vi.mock("../src/obsidian/memory-harvest", () => ({

@@ -296,6 +296,11 @@ export class ProposalStore {
         data.metrics.duplicates += 1;
         return { status: "duplicate", duplicateOf: duplicate.duplicateOf };
       }
+      // A failed earlier write of this correction is replaced by this attempt.
+      const fingerprint = fingerprintProposal(clean.payload);
+      if (clean.kind === "correction") {
+        data.records = data.records.filter((r) => !(r.kind === "correction" && r.status === "pending" && r.fingerprint === fingerprint));
+      }
       const record: ProposalRecord = {
         id: proposalId(clean, source, data.records),
         kind: clean.kind,
@@ -303,7 +308,7 @@ export class ProposalStore {
         title: clean.title,
         payload: clean.payload,
         rationale: clean.rationale,
-        fingerprint: fingerprintProposal(clean.payload),
+        fingerprint,
         source: { ...source },
       };
       data.records.push(record);

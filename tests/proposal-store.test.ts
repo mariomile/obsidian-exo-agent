@@ -496,6 +496,33 @@ describe("a correction that can no longer apply leaves the Inbox", () => {
     expect((await store.listPending()).records.map((r) => r.lastError)).toEqual(["Note not found: D/old.md"]);
   });
 
+  it("a correction that failed once (note missing) is retried by a later append, replacing the stale record", async () => {
+    const { adapter } = fakeFiles();
+    const failed = await new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "Note not found: D/old.md" })).append(fix(), source());
+    expect(failed.status).toBe("appended");
+    const store = new ProposalStore(adapter, new WriteQueue(), idleRoute);
+    const retried = await store.append(fix(), { ...source(), turnId: "later" });
+    expect(retried.status).toBe("applied");
+    const snapshot = await store.load();
+    expect(snapshot.data.records.map((r) => r.status)).toEqual(["accepted"]);
+    expect(snapshot.data.closedCorrections).toHaveLength(1);
+    expect((await store.append(fix(), { ...source(), turnId: "again" })).status).toBe("duplicate");
+  });
+
+  it("a retry that fails again leaves one pending record, not two", async () => {
+    const { adapter } = fakeFiles();
+    const store = new ProposalStore(adapter, new WriteQueue(), async () => ({ ok: false, error: "Note not found: D/old.md" }));
+    await store.append(fix(), source());
+    expect((await store.append(fix(), { ...source(), turnId: "later" })).status).toBe("appended");
+    expect((await store.listPending()).records).toHaveLength(1);
+  });
+
+  it("a dropped correction is not remembered either: the next append goes through", async () => {
+    const { adapter } = fakeFiles();
+    expect((await new ProposalStore(adapter, new WriteQueue(), failing("stale")).append(fix(), source())).status).toBe("dropped");
+    expect((await new ProposalStore(adapter, new WriteQueue(), failing("stale")).append(fix(), { ...source(), turnId: "later" })).status).toBe("dropped");
+  });
+
   it("a failed loop keeps lastError even when the route reports a code", async () => {
     const { adapter } = fakeFiles();
     const store = new ProposalStore(adapter, new WriteQueue(), failing("stale"));

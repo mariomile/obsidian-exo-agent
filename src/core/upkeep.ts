@@ -5,7 +5,7 @@
  * fixed, because their target is unknowable. No Obsidian import.
  */
 import { correctionCandidate, fingerprintProposal } from "./proposals";
-import type { BrokenLink, MarkerFix, buildSupersedeIndex } from "./supersede";
+import { markerKeys, type BrokenLink, type MarkerFix, type buildSupersedeIndex } from "./supersede";
 
 export interface UpkeepPlan {
   fixes: MarkerFix[];
@@ -15,8 +15,7 @@ export interface UpkeepPlan {
 /** The fingerprint the proposal store gives this fix once it is a correction
  *  (`before` and the reason are not part of it). */
 export function fixFingerprint(fix: MarkerFix): string {
-  const set = Object.fromEntries(Object.entries(fix.set).filter((e): e is [string, string] => e[1] !== undefined));
-  return fingerprintProposal(correctionCandidate(fix.path, { type: "frontmatter", set, before: {} }, fix.because).payload);
+  return fingerprintProposal(correctionCandidate(fix.path, { type: "frontmatter", set: markerKeys(fix), before: {} }, fix.because).payload);
 }
 
 /** Every fix not already closed (accepted or turned down); broken links as found. */

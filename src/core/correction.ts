@@ -62,7 +62,7 @@ export function planCorrection(
     const replaced = bodyLines(content)[plan.inserted.start].replace(/\r$/, "");
     return { next: plan.next, receipt: { ...base, op: "replace", lines: [change.newLine], replaced } };
   }
-  // The validator trims `before`; a key's raw lines can end in a blank or comment line, so compare trimmed.
+  // The validator trims `before`, so compare trimmed.
   const stale = Object.keys(change.set).some((key) => frontmatterKeyLines(content, key).join("\n").trim() !== (change.before[key] ?? ""));
   if (stale) return { error: "stale" };
   const next = patchFrontmatter(content, change.set);

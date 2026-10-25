@@ -10,7 +10,7 @@ import { claudeSdk } from "../providers/sdk-loader";
 import { quotedLine } from "../core/correction";
 import { frontmatterKeyLines } from "../core/frontmatter-patch";
 import { correctionCandidate, type ProposalCandidate } from "../core/proposals";
-import { formatSupersede, type MarkerFix } from "../core/supersede";
+import { formatSupersede, markerKeys, type MarkerFix } from "../core/supersede";
 import { resolveLink } from "./graph";
 import { err, getExo, ok, today } from "./tool-kit";
 
@@ -22,21 +22,31 @@ async function propose(app: App, candidates: readonly ProposalCandidate[], convo
   if (!exo?.settings.proposalKernelEnabled) return null;
   const statuses: string[] = [];
   for (const c of candidates) {
-    statuses.push(await exo.proposalStore.append(c, { convoId, turnId, createdAt: Date.now() }).then((r) => r.status, () => "failed"));
+    const result = await exo.proposalStore.append(c, { convoId, turnId, createdAt: Date.now() }).catch((error: unknown) => {
+      console.warn("[Exo] could not save a correction.", error);
+      return null;
+    });
+    if (result?.errors) {
+      console.warn(`[Exo] correction rejected: ${result.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
+    }
+    statuses.push(result?.status ?? "failed");
   }
   if (statuses.includes("appended")) await exo.inbox.refresh().catch(() => {});
   return statuses;
 }
 
 /** Recall found notes whose supersede markers disagree: write the fix, with
- *  each key as it reads now so a write that races an edit can tell it went stale. */
+ *  each key as it reads now so a write that races an edit can tell it went stale.
+ *  The note is read from disk, not the metadata cache, which can lag it or miss
+ *  an unquoted `[[link]]`; a key Mario already filled is never overwritten. */
 export async function proposeMarkerFixes(app: App, fixes: readonly MarkerFix[], convoId: string): Promise<void> {
   const candidates: ProposalCandidate[] = [];
   for (const f of fixes) {
     const file = app.vault.getAbstractFileByPath(f.path);
     if (!(file instanceof TFile)) continue;
-    const content = await app.vault.cachedRead(file);
-    const set = Object.fromEntries(Object.entries(f.set).filter((e): e is [string, string] => e[1] !== undefined));
+    const content = await app.vault.read(file);
+    const set = markerKeys(f, content);
+    if (!Object.keys(set).length) continue;
     const before = Object.fromEntries(
       Object.keys(set).flatMap((key) => {
         const lines = frontmatterKeyLines(content, key);
