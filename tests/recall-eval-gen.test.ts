@@ -30,6 +30,7 @@ function input(notes: GenNote[], markers: NoteMarkers[] = [], canonicalPaths: st
     supersede: buildSupersedeIndex(markers).index,
     decisionsFolder: D,
     peopleFolder: P,
+    projectsFolder: "Active/Projects",
   };
 }
 
@@ -93,6 +94,34 @@ describe("generateCases: link family", () => {
     expect(cases.map((c) => c.source)).toEqual([`${NOW}:1`, `${NOW}:2`]);
   });
 
+  it("the cap counts the note a case expects: an old and its head share one budget", () => {
+    const markers: NoteMarkers[] = [
+      { path: a, supersedes: [], supersededBy: [b] },
+      { path: b, supersedes: [a], supersededBy: [] },
+    ];
+    const now = canonical(NOW, [
+      { text: `- ${LONG} prima riga`, targets: [a] },
+      { text: `- ${LONG} seconda riga`, targets: [b] },
+      { text: `- ${LONG} terza riga`, targets: [a] },
+      { text: `- ${LONG} quarta riga`, targets: [b] },
+    ]);
+    const cases = generateCases(input([now, ...notes()], markers)).filter((c) => c.family === "link");
+    expect(cases.map((c) => c.source)).toEqual([`${NOW}:1`, `${NOW}:2`]);
+    expect(cases.every((c) => c.expect.length === 1 && "note" in c.expect[0] && c.expect[0].note === b)).toBe(true);
+  });
+
+  it("a line with some capped targets keeps the others; it is dropped only when none remain", () => {
+    const now = canonical(NOW, [
+      { text: `- ${LONG} prima riga`, targets: [a] },
+      { text: `- ${LONG} seconda riga`, targets: [a] },
+      { text: `- ${LONG} terza riga`, targets: [a, b] },
+      { text: `- ${LONG} quarta riga`, targets: [a] },
+    ]);
+    const cases = generateCases(input([now, ...notes()])).filter((c) => c.family === "link");
+    expect(cases.map((c) => c.source)).toEqual([`${NOW}:1`, `${NOW}:2`, `${NOW}:3`]);
+    expect(cases[2].expect).toEqual([{ note: b }]);
+  });
+
   it("only canonical notes feed the link family", () => {
     const other = canonical("Knowledge/Other.md", [{ text: `- ${LONG}`, targets: [a] }]);
     expect(generateCases(input([other, ...notes()])).filter((c) => c.family === "link")).toEqual([]);
@@ -112,6 +141,36 @@ describe("generateCases: project family", () => {
     expect(cases[0].question).toBe("Qual è lo stato attuale del progetto Exo e qual è il prossimo passo?");
     expect(cases[0].expect).toEqual([{ note: "Active/Projects/Exo/Exo.md" }]);
     expect(cases[0].source).toBe("Active/Projects/Exo/Exo.md");
+  });
+});
+
+describe("generateCases: project family, folder from the input", () => {
+  it("hubs are found under the projects folder the input names", () => {
+    const notes = [note("Work/Exo/Exo.md"), note("Active/Projects/Old/Old.md")];
+    const cases = generateCases({ ...input(notes), projectsFolder: "Work" }).filter((c) => c.family === "project");
+    expect(cases.map((c) => c.source)).toEqual(["Work/Exo/Exo.md"]);
+  });
+});
+
+describe("generateCases: ids", () => {
+  it("person and supersede ids come from the path, so same-named notes cannot collide", () => {
+    const x = `${P}/A/Ada.md`;
+    const y = `${P}/B/Ada.md`;
+    const now = canonical(NOW, [{ text: "- Sentire Ada", targets: [x, y] }]);
+    const persons = generateCases(input([now, note(x), note(y)])).filter((c) => c.family === "person");
+    expect(new Set(persons.map((c) => c.id)).size).toBe(2);
+
+    const o1 = `${D}/a/2026-01-01-same.md`;
+    const o2 = `${D}/b/2026-01-01-same.md`;
+    const h = dec("2026-02-01-head");
+    const d = { description: "Quale strumento uso per i task di tutti i giorni" };
+    const markers: NoteMarkers[] = [
+      { path: o1, supersedes: [], supersededBy: [h] },
+      { path: o2, supersedes: [], supersededBy: [h] },
+      { path: h, supersedes: [o1, o2], supersededBy: [] },
+    ];
+    const sup = generateCases(input([note(o1, { frontmatter: d }), note(o2, { frontmatter: d }), note(h)], markers)).filter((c) => c.family === "supersede");
+    expect(new Set(sup.map((c) => c.id)).size).toBe(2);
   });
 });
 

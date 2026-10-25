@@ -58,8 +58,8 @@ import type { App } from "obsidian";
 
 const VAULT = "marioverse.ai";
 const PLUGIN_DIR = `/Users/mariomiletta/Vaults/${VAULT}/.obsidian/plugins/exo-agent`;
-/** Sonar hits fetched per question: enough to report ranks past the cut. */
-const PROBE_DEPTH = 50;
+/** Sonar hits fetched per question: what a real turn asks Sonar for when it filters exclusions (`searchVaultNotes`). */
+const PROBE_DEPTH = RECALL_LANE_DEPTH * 3;
 
 function obsidianEval<T>(code: string): T {
   let out = "";
@@ -305,7 +305,7 @@ describe.skipIf(!process.env.EXO_LIVE_EVAL)("recall eval against the live vault"
       lines: bodies.get(n.path)?.lines ?? [],
       links: bodies.get(n.path)?.links ?? [],
     }));
-    const cases = generateCases({ notes, canonicalPaths, supersede: supersede.index, decisionsFolder: "_system/memory/decisions", peopleFolder: "CRM/People" });
+    const cases = generateCases({ notes, canonicalPaths, supersede: supersede.index, decisionsFolder: "_system/memory/decisions", peopleFolder: "CRM/People", projectsFolder: "Active/Projects" });
     const keywords = cases.map((c) => recallKeywords(c.question));
     const sonarHits = liveSonar(keywords.map((k) => k.join(" ")));
 

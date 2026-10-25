@@ -31,6 +31,8 @@ export interface GenInput {
   supersede: SupersedeIndex;
   decisionsFolder: string;
   peopleFolder: string;
+  /** Holds one folder per project, each with a hub note of the same name (Active/Projects). */
+  projectsFolder: string;
 }
 
 export interface GenCase extends EvalCase {
@@ -43,7 +45,6 @@ export interface GenCase extends EvalCase {
 const MAX_CASES_PER_DECISION = 2;
 /** A line needs this many keywords to be a question: below it the line says nothing a search could use. */
 const MIN_LINE_KEYWORDS = 4;
-const PROJECTS_FOLDER = "Active/Projects";
 
 /**
  * A canonical line as a question: list marker, wikilinks (the answer's own
@@ -67,29 +68,33 @@ export function questionFromLine(line: string): string | null {
 const byPath = <T extends { path: string }>(a: T, b: T): number => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 const inFolder = (path: string, folder: string): boolean => path.startsWith(`${folder.replace(/\/$/, "")}/`);
 
-/** `Active/Projects/<P>/<P>.md`: the project's hub note. */
-function hubProject(note: GenNote): string | null {
-  const parts = note.path.split("/");
-  const [a, b, project, file] = parts;
-  return parts.length === 4 && `${a}/${b}` === PROJECTS_FOLDER && file === `${project}.md` ? project : null;
+/** `<projectsFolder>/<P>/<P>.md`: the project's hub note. */
+function hubProject(note: GenNote, projectsFolder: string): string | null {
+  const root = projectsFolder.replace(/\/$/, "");
+  if (!inFolder(note.path, root)) return null;
+  const parts = note.path.slice(root.length + 1).split("/");
+  return parts.length === 2 && parts[1] === `${parts[0]}.md` ? parts[0] : null;
 }
 
-function linkCases(input: GenInput, exists: ReadonlySet<string>): GenCase[] {
+function linkCases(input: GenInput, notes: readonly GenNote[], exists: ReadonlySet<string>): GenCase[] {
   const canonical = new Set(input.canonicalPaths);
+  /** Cases per expected note: the head of a chain, not the note a line links. */
   const used = new Map<string, number>();
+  const expectedOf = (target: string): string => input.supersede.headOf(target) ?? target;
   const out: GenCase[] = [];
-  for (const note of [...input.notes].sort(byPath)) {
+  for (const note of notes) {
     if (!canonical.has(note.path)) continue;
     for (let line = 0; line < note.lines.length; line++) {
-      const targets = [
+      const linked = [
         ...new Set(note.links.filter((l) => l.line === line && exists.has(l.target) && inFolder(l.target, input.decisionsFolder)).map((l) => l.target)),
       ];
-      if (!targets.length) continue;
+      if (!linked.length) continue;
       const question = questionFromLine(note.lines[line]);
       if (!question) continue;
-      if (targets.some((t) => (used.get(t) ?? 0) >= MAX_CASES_PER_DECISION)) continue;
-      for (const t of targets) used.set(t, (used.get(t) ?? 0) + 1);
-      const expected = [...new Set(targets.map((t) => input.supersede.headOf(t) ?? t))];
+      const targets = linked.filter((t) => (used.get(expectedOf(t)) ?? 0) < MAX_CASES_PER_DECISION);
+      if (!targets.length) continue;
+      const expected = [...new Set(targets.map(expectedOf))];
+      for (const e of expected) used.set(e, (used.get(e) ?? 0) + 1);
       const stale = targets.filter((t) => input.supersede.headOf(t) !== null && !expected.includes(t));
       out.push({
         id: `link:${note.path}:${line + 1}`,
@@ -104,10 +109,10 @@ function linkCases(input: GenInput, exists: ReadonlySet<string>): GenCase[] {
   return out;
 }
 
-function projectCases(notes: readonly GenNote[]): GenCase[] {
+function projectCases(notes: readonly GenNote[], projectsFolder: string): GenCase[] {
   return notes
     .flatMap((n) => {
-      const project = hubProject(n);
+      const project = hubProject(n, projectsFolder);
       return project ? [{ note: n, project }] : [];
     })
     .map(({ note, project }): GenCase => ({
@@ -121,6 +126,7 @@ function projectCases(notes: readonly GenNote[]): GenCase[] {
 
 function personCases(input: GenInput, notes: readonly GenNote[], exists: ReadonlySet<string>): GenCase[] {
   const canonical = new Set(input.canonicalPaths);
+  const basename = new Map(notes.map((n) => [n.path, n.basename]));
   const first = new Map<string, string>();
   for (const note of notes) {
     if (!canonical.has(note.path)) continue;
@@ -128,14 +134,13 @@ function personCases(input: GenInput, notes: readonly GenNote[], exists: Readonl
       if (exists.has(l.target) && inFolder(l.target, input.peopleFolder) && !first.has(l.target)) first.set(l.target, `${note.path}:${l.line + 1}`);
     }
   }
-  const name = (path: string): string => path.replace(/^.*\//, "").replace(/\.md$/, "");
   return [...first.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([path, source]): GenCase => ({
-      id: `person:${name(path)}`,
+      id: `person:${path}`,
       family: "person",
       source,
-      question: `Chi è ${name(path)} e che rapporto ho con questa persona?`,
+      question: `Chi è ${basename.get(path)} e che rapporto ho con questa persona?`,
       expect: [{ note: path }],
     }));
 }
@@ -148,7 +153,7 @@ function supersedeCases(input: GenInput, notes: readonly GenNote[]): GenCase[] {
     const head = input.supersede.headOf(note.path);
     if (!description || !head || !shouldRecall(description)) continue;
     out.push({
-      id: `supersede:${note.basename}`,
+      id: `supersede:${note.path}`,
       family: "supersede",
       source: note.path,
       question: description,
@@ -164,5 +169,10 @@ function supersedeCases(input: GenInput, notes: readonly GenNote[]): GenCase[] {
 export function generateCases(input: GenInput): GenCase[] {
   const notes = [...input.notes].sort(byPath);
   const exists = new Set(notes.map((n) => n.path));
-  return [...linkCases(input, exists), ...projectCases(notes), ...personCases(input, notes, exists), ...supersedeCases(input, notes)];
+  return [
+    ...linkCases(input, notes, exists),
+    ...projectCases(notes, input.projectsFolder),
+    ...personCases(input, notes, exists),
+    ...supersedeCases(input, notes),
+  ];
 }
