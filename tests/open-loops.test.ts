@@ -283,3 +283,115 @@ describe("slug ids (hand-written ledger entries)", () => {
     expect(parsed[0].note).toContain("## Notes");
   });
 });
+
+describe("ledger fidelity: the writer never rewrites what the source wrote", () => {
+  const LEDGER = [
+    "## loop-1788728477410",
+    "- title: Numeric one",
+    "- opened: 2026-09-06T21:01:17.410Z",
+    "- status: open",
+    "- resurface: 2026-09-15",
+    "- tags: domain/identity, type/content",
+    "",
+    "Numeric body.",
+    "",
+    "Stato: ancora da autenticare [dal: 2026-09-24].",
+    "",
+    "## loop-2026-09-08-clubjoy-14-set",
+    "- title: Slug, date-only opened",
+    "- opened: 2026-09-08",
+    "- status: open",
+    "- resurface: 2026-09-24",
+    "- tags: domain/career",
+    "",
+    "Collegato a `loop-2026-09-11-scommessa-clubjoy`.",
+    "",
+    "Stato: esito non catturato [dal: 2026-09-24].",
+    "",
+    "## loop-2026-10-03-turno-init",
+    "- title: Closed by hand, no closed line",
+    "- opened: 2026-10-03",
+    "- status: closed",
+    "- resurface: 2026-10-19",
+    "",
+    "Corpo.",
+    "Stato: chiuso [fonte: Mario; dal: 2026-10-25].",
+    "",
+    "## loop-2026-10-12-hand-date",
+    "- title: Unparseable hand-written date",
+    "- opened: 3 ott 2026",
+    "- status: open",
+    "",
+    "<!-- exo-proposal:proposal-1792596922408-s5s8ka -->",
+    "Body with a proposal marker.",
+    "",
+    "## loop-2026-10-13-no-opened",
+    "- title: No opened line at all",
+    "- status: open",
+    "",
+    "Body.",
+    "",
+  ].join("\n");
+
+  const write = (es: LoopEntry[]) => `${es.map(formatLoop).join("\n\n")}\n`;
+
+  it("a no-op write is byte-identical", () => {
+    expect(write(parseLoopsFile(LEDGER))).toBe(LEDGER);
+  });
+
+  it("keeps a date-only opened as written, and never invents an ISO line", () => {
+    const out = write(parseLoopsFile(LEDGER));
+    expect(out).toContain("- opened: 2026-09-08\n");
+    expect(out).toContain("- opened: 3 ott 2026\n");
+    expect(out).not.toContain("1970");
+    const noOpened = out.split("## loop-2026-10-13-no-opened")[1];
+    expect(noOpened).not.toContain("opened:");
+  });
+
+  it("derives openedAt from a loop-YYYY-MM-DD id when opened is unusable", () => {
+    const parsed = parseLoopsFile(LEDGER);
+    expect(parsed[3].openedAt).toBe(Date.parse("2026-10-12"));
+    expect(parsed[4].openedAt).toBe(Date.parse("2026-10-13"));
+  });
+
+  it("closing one loop changes only that block", () => {
+    const before = LEDGER.split("\n\n## ");
+    const closed = write(closeLoop(parseLoopsFile(LEDGER), "loop-2026-09-08-clubjoy-14-set", "done", T));
+    const after = closed.split("\n\n## ");
+    expect(after).toHaveLength(before.length);
+    const changed = before.map((b, i) => (b === after[i] ? -1 : i)).filter((i) => i >= 0);
+    expect(changed).toEqual([1]);
+    expect(after[1]).toContain("- status: closed");
+    expect(after[1]).toContain("- opened: 2026-09-08\n");
+  });
+
+  it("a new loop appended by code gets an ISO opened line and leaves the rest byte-identical", () => {
+    const fresh = loop({ id: "loop-1792000000000", openedAt: 1792000000000 });
+    const out = write([...parseLoopsFile(LEDGER), fresh]);
+    expect(out.startsWith(LEDGER.trimEnd())).toBe(true);
+    expect(out).toContain(`- opened: ${new Date(1792000000000).toISOString()}`);
+  });
+
+  it("unknown metadata lines do not end the run: a later status is read, and the lines are kept once", () => {
+    const src = [
+      "## loop-2026-10-20-extra",
+      "- title: Has extra keys",
+      "- opened: 2026-10-20",
+      "- owner: mario",
+      "- status: closed",
+      "- resurface: 2026-10-30",
+      "- priority: high",
+      "",
+      "Body.",
+      "",
+    ].join("\n");
+    const [e] = parseLoopsFile(src);
+    expect(e.status).toBe("closed");
+    expect(e.resurface).toBe("2026-10-30");
+    const out = write([e]);
+    expect(out.match(/^- owner: mario$/gm)).toHaveLength(1);
+    expect(out.match(/^- priority: high$/gm)).toHaveLength(1);
+    expect(out.match(/^## loop-2026-10-20-extra$/gm)).toHaveLength(1);
+    expect(parseLoopsFile(out)[0]).toEqual(e);
+  });
+});

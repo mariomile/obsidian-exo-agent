@@ -38,6 +38,15 @@ export interface LoopEntry {
   note: string;
   /** Creation time, epoch milliseconds. */
   openedAt: number;
+  /**
+   * How the source wrote `opened:` when it is not the canonical ISO form of `openedAt`
+   * (a hand-written `2026-09-08`, free text). `formatLoop` writes it back verbatim.
+   * `null` = the source had no `opened:` line, so none is written. Absent = the loop
+   * was created by code and gets an ISO line.
+   */
+  openedRaw?: string | null;
+  /** Unknown `- key: value` metadata lines, kept verbatim so a rewrite never drops them. */
+  extraMeta?: string[];
   /** Tickler date the loop should resurface on, `YYYY-MM-DD` (local date). Omitted = due immediately. */
   resurface?: string;
   status: LoopStatus;
@@ -49,19 +58,19 @@ export interface LoopEntry {
 /** Block header, e.g. `## loop-1720000000000` or a hand-written slug `## loop-2026-10-03-turno-init`. No `g` flag: safe for `.test`. */
 const HEADER = /^##\s+(loop-[\w-]+)\s*$/;
 /** A metadata line inside a block, e.g. `- title: Follow up with Marco`. */
-const META = /^-\s+(title|opened|resurface|status|closed|tags):\s*(.*)$/;
+const META = /^-\s+([\w-]+):\s*(.*)$/;
 
 /** Render one entry to its canonical on-disk block (no trailing newline). */
 export function formatLoop(e: LoopEntry): string {
-  const lines = [
-    `## ${e.id}`,
-    `- title: ${e.title}`,
-    `- opened: ${new Date(e.openedAt).toISOString()}`,
-    `- status: ${e.status}`,
-  ];
+  const lines = [`## ${e.id}`, `- title: ${e.title}`];
+  if (e.openedRaw !== null) {
+    lines.push(`- opened: ${e.openedRaw ?? new Date(e.openedAt).toISOString()}`);
+  }
+  lines.push(`- status: ${e.status}`);
   if (e.resurface) lines.push(`- resurface: ${e.resurface}`);
   if (e.closedAt !== undefined) lines.push(`- closed: ${new Date(e.closedAt).toISOString()}`);
   if (e.tags && e.tags.length) lines.push(`- tags: ${e.tags.join(", ")}`);
+  if (e.extraMeta) lines.push(...e.extraMeta);
   lines.push("", e.note);
   return lines.join("\n");
 }
@@ -82,6 +91,8 @@ export function parseLoopsFile(content: string): LoopEntry[] {
 
     let title = "";
     let openedAt = NaN;
+    let openedRaw: string | undefined;
+    const extraMeta: string[] = [];
     let resurface: string | undefined;
     let status: LoopStatus = "open";
     let closedAt: number | undefined;
@@ -91,7 +102,10 @@ export function parseLoopsFile(content: string): LoopEntry[] {
       const key = m[1];
       const val = m[2].trim();
       if (key === "title") title = val;
-      else if (key === "opened") openedAt = Date.parse(val);
+      else if (key === "opened") {
+        openedAt = Date.parse(val);
+        openedRaw = val;
+      }
       else if (key === "resurface") resurface = val || undefined;
       // Any value other than the literal "closed" is tolerated as "open", hand-edited
       // junk in this field must never break the rest of the parse.
@@ -100,6 +114,7 @@ export function parseLoopsFile(content: string): LoopEntry[] {
         const t = Date.parse(val);
         if (Number.isFinite(t)) closedAt = t;
       } else if (key === "tags") tags = val.split(",").map((t) => t.trim()).filter(Boolean);
+      else extraMeta.push(lines[i]);
     }
 
     // Optional single blank line separating metadata from the verbatim note.
@@ -109,18 +124,29 @@ export function parseLoopsFile(content: string): LoopEntry[] {
     while (i < lines.length && !HEADER.test(lines[i])) textLines.push(lines[i++]);
     const note = textLines.join("\n").replace(/^\n+/, "").replace(/\n+$/, "");
 
-    // Fall back to the epoch embedded in the id when `opened:` is missing/garbage.
+    // Fall back to the date or epoch embedded in the id when `opened:` is missing/garbage.
     if (!Number.isFinite(openedAt)) {
       const idm = /^loop-(\d+)$/.exec(id);
-      openedAt = idm ? Number(idm[1]) : 0;
+      const dm = /^loop-(\d{4}-\d{2}-\d{2})(?:-|$)/.exec(id);
+      openedAt = idm ? Number(idm[1]) : dm ? Date.parse(dm[1]) : 0;
+      if (!Number.isFinite(openedAt)) openedAt = 0;
     }
+    // Only keep the raw text when writing the ISO form would change it.
+    const keepRaw =
+      openedRaw === undefined
+        ? null
+        : new Date(openedAt).toISOString() === openedRaw
+          ? undefined
+          : openedRaw;
 
     entries.push({
       id,
       title,
       note,
       openedAt,
+      ...(keepRaw !== undefined ? { openedRaw: keepRaw } : {}),
       status,
+      ...(extraMeta.length ? { extraMeta } : {}),
       ...(resurface ? { resurface } : {}),
       ...(closedAt !== undefined ? { closedAt } : {}),
       ...(tags.length ? { tags } : {}),
