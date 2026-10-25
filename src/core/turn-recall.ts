@@ -405,12 +405,16 @@ export function turnKeywords(message: string, names: readonly { basename: string
 
 /** The vault searches of a turn, shared by the adapter and the eval: one query
  *  of the {@link turnKeywords} when the message has ten keywords or fewer, else
- *  chunks of {@link QUERY_CHUNK} over its first {@link MAX_QUERY_KEYWORDS}. */
-export function recallQueries(message: string, names: readonly { basename: string; aliases: readonly string[] }[]): string[] {
-  const keywords = recallKeywords(message, nameVocab(names), MAX_QUERY_KEYWORDS);
+ *  near-equal chunks of at most {@link QUERY_CHUNK} over its first
+ *  {@link MAX_QUERY_KEYWORDS} (17 keywords are 6, 6 and 5, never 8, 8 and 1: a
+ *  one-word query would rank its first hit level with a full chunk's). */
+export function recallQueries(message: string, vocab: ReadonlySet<string>): string[] {
+  const keywords = recallKeywords(message, vocab, MAX_QUERY_KEYWORDS);
   if (keywords.length <= MAX_KEYWORDS) return keywords.length ? [keywords.join(" ")] : [];
+  const chunks = Math.ceil(keywords.length / QUERY_CHUNK);
+  const size = Math.ceil(keywords.length / chunks);
   const out: string[] = [];
-  for (let i = 0; i < keywords.length; i += QUERY_CHUNK) out.push(keywords.slice(i, i + QUERY_CHUNK).join(" "));
+  for (let i = 0; i < keywords.length; i += size) out.push(keywords.slice(i, i + size).join(" "));
   return out;
 }
 
@@ -443,13 +447,20 @@ export async function recallTurn(input: {
   semantic: () => Promise<readonly { id: string; score: number }[] | null>;
 }): Promise<RecallResult | null> {
   if (!shouldRecall(input.message)) return null;
-  const keywords = turnKeywords(input.message, input.names);
+  const vocab = nameVocab(input.names);
+  const keywords = recallKeywords(input.message, vocab);
   if (!keywords.length) return null;
   const scores = input.semantic();
-  const title = titleLane(recallKeywords(input.message, nameVocab(input.names), MAX_TITLE_KEYWORDS), input.names, input.message).slice(0, RECALL_LANE_DEPTH);
+  const wide = recallKeywords(input.message, vocab, MAX_TITLE_KEYWORDS);
   // A failed search leaves the other queries, the chats and the title lane.
-  const searched = await Promise.all(recallQueries(input.message, input.names).map((q) => input.search(q).catch((): NoteRecall[] => [])));
-  const sonar = searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path);
+  const searched = await Promise.all(recallQueries(input.message, vocab).map((q) => input.search(q).catch((): NoteRecall[] => [])));
+  // Cut to the lane depth after fusing: `found` ({@link rankRecall}) must not widen with the chunks.
+  const sonar = (searched.length === 1 ? searched[0] : fuse(searched, (n) => n.path)).slice(0, RECALL_LANE_DEPTH);
+  // A long message shares words with many names by chance, so its title hits
+  // count only where the search found the note too, or the message writes it out.
+  const found = new Set(sonar.map((n) => n.path));
+  const named = titleLane(wide, input.names, input.message);
+  const title = (wide.length > MAX_KEYWORDS ? named.filter((t) => t.explicit || found.has(t.path)) : named).slice(0, RECALL_LANE_DEPTH);
   const lexicalChats = matchPastChats(input.chats, keywords, { excludeId: input.convoId, now: input.now });
   const scored = await scores;
   const hits = scored && semanticHits(scored);

@@ -18,6 +18,7 @@ import {
   titleLane,
   RECALL_CHAT_MIN_LIFT,
   RECALL_CLOSE,
+  RECALL_LANE_DEPTH,
   RECALL_MAX_CHARS,
   RECALL_MAX_CHATS,
   RECALL_MAX_NOTES,
@@ -450,14 +451,23 @@ describe("recallTurn", () => {
   it("a long message is searched in chunks, and a note found by more than one chunk leads", async () => {
     const msg = Array.from({ length: 20 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
     const lanes: Record<string, NoteRecall[]> = {
-      [msg.split(" ").slice(0, 8).join(" ")]: [hit("A.md"), hit("Shared.md")],
-      [msg.split(" ").slice(8, 16).join(" ")]: [hit("B.md"), hit("Shared.md")],
-      [msg.split(" ").slice(16).join(" ")]: [hit("C.md")],
+      [msg.split(" ").slice(0, 7).join(" ")]: [hit("A.md"), hit("Shared.md")],
+      [msg.split(" ").slice(7, 14).join(" ")]: [hit("B.md"), hit("Shared.md")],
+      [msg.split(" ").slice(14).join(" ")]: [hit("C.md")],
     };
     const search = vi.fn((q: string) => Promise.resolve(lanes[q] ?? []));
     const r = await recallTurn({ ...base, message: msg, search });
     expect(search).toHaveBeenCalledTimes(3);
     expect(r!.notes.map((n) => n.path)).toEqual(["Shared.md", "A.md", "B.md", "C.md"]);
+  });
+  it("the fused lane is cut to the lane depth: a short name found only far down a later chunk is not 'found'", async () => {
+    const filler = Array.from({ length: 12 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const lane = (tag: string, last?: NoteRecall) => [...Array.from({ length: RECALL_LANE_DEPTH - 1 }, (_, i) => hit(`${tag}${i}.md`)), last ?? hit(`${tag}z.md`)];
+    const lanes = [lane("a"), lane("b"), lane("c", hit("R/How to Win in the Ai Age.md"))];
+    let n = 0;
+    const r = await recallTurn({ ...base, message: `${filler} how do we win in the ai age`, search: () => Promise.resolve(lanes[n++ % 3]) });
+    expect(r!.lanes.sonar).toHaveLength(RECALL_LANE_DEPTH);
+    expect(r!.notes.map((x) => x.path)).not.toContain("R/How to Win in the Ai Age.md");
   });
   it("one chunk failing leaves the others", async () => {
     const msg = Array.from({ length: 20 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
@@ -465,11 +475,25 @@ describe("recallTurn", () => {
     const r = await recallTurn({ ...base, message: msg, search });
     expect(r!.notes.map((n) => n.path)).toEqual(["B.md"]);
   });
-  it("the title lane reads the whole message: a name past the tenth keyword is still named", async () => {
+  it("the title lane reads the whole message: a name past the tenth keyword counts once the search found the note too", async () => {
     const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
-    const withNames = [...names, { path: "D/Turno SaaS Open Core.md", basename: "Turno SaaS Open Core", aliases: [] }];
-    const r = await recallTurn({ ...base, names: withNames, message: `${filler} turno saas open core` });
-    expect(r!.lanes.title.map((t) => t.path)).toContain("D/Turno SaaS Open Core.md");
+    const note = "D/Turno SaaS Open Core.md";
+    const withNames = [...names, { path: note, basename: "Turno SaaS Open Core", aliases: [] }];
+    const message = `${filler} turno saas open core`;
+    const found = await recallTurn({ ...base, names: withNames, message, search: () => Promise.resolve([hit(note)]) });
+    expect(found!.lanes.title.map((t) => t.path)).toContain(note);
+    expect(found!.notes.map((n) => n.path)).toEqual([note]);
+  });
+  it("a long message names notes by chance: a name the search did not find is dropped, unless the message writes it out; a short one keeps it", async () => {
+    const filler = Array.from({ length: 14 }, (_, i) => `termine${String.fromCharCode(97 + i)}`).join(" ");
+    const withNames = [...names, { path: "D/Open Core.md", basename: "Open Core", aliases: [] }];
+    const long = await recallTurn({ ...base, names: withNames, message: `${filler} open core` });
+    expect(long!.lanes.title).toEqual([]);
+    expect(long!.notes).toEqual([]);
+    const written = await recallTurn({ ...base, names: withNames, message: `${filler} leggi [[open core]]` });
+    expect(written!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
+    const short = await recallTurn({ ...base, names: withNames, message: "cosa dice open core" });
+    expect(short!.notes.map((n) => n.path)).toEqual(["D/Open Core.md"]);
   });
   it("past chats are still matched on the first ten keywords only", async () => {
     const chat: ChatRecord = { id: "c", title: "t", messages: [{ role: "user", text: "tardiva zeta tardiva zeta", at: NOW - DAY }] };
@@ -492,16 +516,20 @@ describe("recallTurn", () => {
 
 describe("recallQueries", () => {
   const nums = (n: number, from = 0): string => Array.from({ length: n }, (_, i) => `parola${String.fromCharCode(97 + from + i)}`).join(" ");
+  const none = new Set<string>();
   it("a message of ten keywords or fewer is one query, the same words recall always searched", () => {
     const msg = `cosa abbiamo deciso su ${nums(6)} ieri`;
-    expect(recallQueries(msg, [])).toEqual([turnKeywords(msg, []).join(" ")]);
-    expect(recallQueries(msg, [])).toHaveLength(1);
-    expect(recallQueries(`mmm ${nums(10)}`, [])).toEqual([nums(10)]);
+    expect(recallQueries(msg, none)).toEqual([turnKeywords(msg, []).join(" ")]);
+    expect(recallQueries(`mmm ${nums(10)}`, none)).toEqual([nums(10)]);
+    expect(recallQueries("mmm", none)).toEqual([]);
   });
-  it("a longer message is searched in chunks of eight keywords, three at most, so no word is drowned by the rest", () => {
-    const q = recallQueries(`mmm ${nums(26)}`, []);
-    expect(q).toEqual([nums(8), nums(8, 8), nums(8, 16)]);
-    expect(recallQueries(`mmm ${nums(14)}`, [])).toEqual([nums(8), nums(6, 8)]);
+  it("a longer message is searched in near-equal chunks of at most eight keywords, three at most, so no word is drowned by the rest", () => {
+    expect(recallQueries(`mmm ${nums(30)}`, none)).toEqual([nums(8), nums(8, 8), nums(8, 16)]);
+    expect(recallQueries(`mmm ${nums(14)}`, none)).toEqual([nums(7), nums(7, 7)]);
+  });
+  it("never leaves a tail of one or two keywords: 17 keywords are 6, 6 and 5", () => {
+    expect(recallQueries(`mmm ${nums(17)}`, none)).toEqual([nums(6), nums(6, 6), nums(5, 12)]);
+    expect(recallQueries(`mmm ${nums(11)}`, none)).toEqual([nums(6), nums(5, 6)]);
   });
 });
 
