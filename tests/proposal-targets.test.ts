@@ -28,9 +28,10 @@ function fakeVault(initial: Record<string, string> = {}) {
       if (files.has(path)) throw new Error(`already exists: ${path}`);
       files.set(path, content);
     },
-    modify: async (path, content) => {
-      if (!files.has(path)) throw new Error(`missing: ${path}`);
-      files.set(path, content);
+    process: async (path, fn) => {
+      const current = files.get(path);
+      if (current === undefined) throw new Error(`missing: ${path}`);
+      files.set(path, fn(current));
     },
     ensureFolder: async (path) => {
       const slash = path.lastIndexOf("/");
@@ -63,6 +64,58 @@ describe("OpenLoopProposalTarget", () => {
       "Three",
     ]);
     expect(folders).toContain("_system/memory");
+  });
+
+  it("computes the append against the content seen inside process, not an earlier read", async () => {
+    const { adapter, files } = fakeVault();
+    const target = new OpenLoopProposalTarget(adapter, new WriteQueue(), vi.fn(), () => 1_720_000_000_000);
+    await target.create({ proposalId: "proposal-one", title: "One", note: "First" });
+
+    // An editor autosave lands between this target's read and its write.
+    const stale = files.get(OPEN_LOOPS_PATH)!;
+    const edited = `${stale}\n## loop-1720000000001\n- title: Typed by hand\n- opened: 2024-07-03T09:46:40.001Z\n- status: open\n\nMine\n`;
+    const seenInProcess: string[] = [];
+    const racing: ProposalTargetVaultAdapter = {
+      ...adapter,
+      read: async () => stale,
+      process: async (path, fn) => {
+        files.set(path, edited);
+        seenInProcess.push(files.get(path)!);
+        files.set(path, fn(files.get(path)!));
+      },
+    };
+    const racer = new OpenLoopProposalTarget(racing, new WriteQueue(), vi.fn(), () => 1_720_000_000_000);
+
+    const created = await racer.create({ proposalId: "proposal-two", title: "Two", note: "Second" });
+
+    const entries = parseLoopsFile(files.get(OPEN_LOOPS_PATH)!);
+    expect(seenInProcess).toEqual([edited]);
+    expect(entries.map(({ title }) => title)).toEqual(["One", "Typed by hand", "Two"]);
+    // The hand-written loop took 1720000000001, so the new id skips past it.
+    expect(created.id).toBe("loop-1720000000002");
+  });
+
+  it("dedupes against the content seen inside process when the proposal landed meanwhile", async () => {
+    const { adapter, files } = fakeVault();
+    const noteWrite = vi.fn();
+    const first = new OpenLoopProposalTarget(adapter, new WriteQueue(), vi.fn(), () => 1_720_000_000_000);
+    const landed = await first.create({ proposalId: "proposal-dup", title: "One", note: "First" });
+    const withLoop = files.get(OPEN_LOOPS_PATH)!;
+    files.set(OPEN_LOOPS_PATH, "");
+
+    const racing: ProposalTargetVaultAdapter = {
+      ...adapter,
+      process: async (path, fn) => {
+        files.set(path, withLoop);
+        files.set(path, fn(files.get(path)!));
+      },
+    };
+    const retry = new OpenLoopProposalTarget(racing, new WriteQueue(), noteWrite);
+    const again = await retry.create({ proposalId: "proposal-dup", title: "One", note: "First" });
+
+    expect(again).toEqual(landed);
+    expect(parseLoopsFile(files.get(OPEN_LOOPS_PATH)!)).toHaveLength(1);
+    expect(noteWrite).not.toHaveBeenCalled();
   });
 
   it("returns the existing loop when the same proposal is retried", async () => {

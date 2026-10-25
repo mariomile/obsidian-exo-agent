@@ -113,7 +113,11 @@ describe("reverseWrites (no git, or uncommitted notes)", () => {
     const store = new Map(Object.entries(files));
     const v: UndoVault = {
       read: async (p) => store.get(p) ?? null,
-      write: async (p, c) => void store.set(p, c),
+      process: async (p, fn) => {
+        const cur = store.get(p);
+        if (cur === undefined) throw new Error(`missing: ${p}`);
+        store.set(p, fn(cur));
+      },
       remove: async (p) => void store.delete(p),
     };
     return { v, store };
@@ -169,6 +173,21 @@ describe("reverseWrites (no git, or uncommitted notes)", () => {
     expect(store.get("a.md")).toBe("- Exo fact\n");
     const dup = vault({ "a.md": "- x\n- x\n" });
     expect((await reverseWrites(dup.v, [{ path: "a.md", op: "add", text: "x", lines: ["- x"] }])).ok).toBe(false);
+  });
+
+  it("fails visibly, keeping the user's edit, when the note changed between the read and the write", async () => {
+    const { v, store } = vault({ "a.md": "- one\n- Exo fact\n" });
+    const racing: UndoVault = {
+      ...v,
+      process: async (p, fn) => {
+        store.set(p, "- one\n- Exo fact\n- typed just now\n");
+        store.set(p, fn(store.get(p)!));
+      },
+    };
+    const res = await reverseWrites(racing, [{ path: "a.md", op: "add", text: "Exo fact", lines: ["- Exo fact"] }]);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("a.md changed while undoing");
+    expect(store.get("a.md")).toBe("- one\n- Exo fact\n- typed just now\n");
   });
 
   it("works on notes of any size (no snapshot limit)", async () => {

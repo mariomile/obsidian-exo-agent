@@ -19,7 +19,8 @@ type GitRun = (args: string[]) => Promise<string>;
 export interface UndoVault {
   /** Current content, or null when the file is gone. */
   read(path: string): Promise<string | null>;
-  write(path: string, content: string): Promise<void>;
+  /** Atomic read-compute-write against the file's current content (`vault.process`). `fn` must be synchronous; a throw aborts the write. */
+  process(path: string, fn: (current: string) => string): Promise<void>;
   remove(path: string): Promise<void>;
 }
 
@@ -119,9 +120,11 @@ export async function reverseWrites(
   if (!writes.length) return { ok: false, message: "That harvest wrote nothing to undo." };
   const next = new Map<string, string>();
   const created = new Map<string, string>();
+  const original = new Map<string, string>();
   for (const w of [...writes].reverse()) {
     const current = next.get(w.path) ?? (await vault.read(w.path));
     if (current === null) return { ok: false, message: `Not undone: ${w.path} no longer exists.` };
+    if (!original.has(w.path)) original.set(w.path, current);
     const lines = current.split("\n");
     const at = uniqueRun(lines, w.lines);
     if (at < 0) {
@@ -140,7 +143,20 @@ export async function reverseWrites(
   for (const [path, content] of next) {
     const starter = created.get(path);
     if (starter !== undefined && content.trim() === starter.trim()) await vault.remove(path);
-    else await vault.write(path, content);
+    else {
+      // The check runs inside the atomic write: an edit that landed after the
+      // read above (the open editor's autosave) fails the undo instead of
+      // being overwritten.
+      const before = original.get(path);
+      try {
+        await vault.process(path, (current) => {
+          if (current !== before) throw new Error("changed");
+          return content;
+        });
+      } catch {
+        return { ok: false, message: `Not undone: ${path} changed while undoing. Edit it by hand instead.` };
+      }
+    }
   }
   return { ok: true, message: `Undid ${writes.length} memory write(s) in ${next.size} note(s).` };
 }
