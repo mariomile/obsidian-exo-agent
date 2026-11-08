@@ -1,12 +1,12 @@
-import { App, DropdownComponent, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting } from "obsidian";
 import type ExoPlugin from "./main";
 import type { PermissionMode, ProviderId } from "./providers/types";
-import { ADAPTERS } from "./providers/registry";
-import { providerModels, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
-import { renderCliDiagnostics } from "./ui/settings-cli";
+import { BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
+import { PROFILES, PROVIDER_IDS } from "./providers/profiles";
+import { renderProviderSettings } from "./ui/settings-provider";
 import { renderComposerModels } from "./ui/settings-composer-models";
 
-import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, defaultModel, type MVASettings } from "./settings-schema";
+import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, type MVASettings } from "./settings-schema";
 
 export { DEFAULT_SETTINGS, type MVASettings };
 
@@ -84,118 +84,17 @@ export class MVASettingTab extends PluginSettingTab {
       .setName("Default provider")
       .setDesc("The CLI backend every new conversation starts with.")
       .addDropdown((d) =>
-        d
-          .addOption("claude", "Claude")
-          .addOption("codex", "Codex")
-          .setValue(s.provider)
-          .onChange(async (v) => {
+        {
+          for (const p of PROVIDER_IDS) d.addOption(p, PROFILES[p].label);
+          d.setValue(s.provider).onChange(async (v) => {
             s.provider = v as ProviderId;
             await this.plugin.saveSettings();
-          })
+          });
+        }
       );
 
-    // The model each new chat starts with, per provider. Options = the provider's
-    // built-ins + the custom ids from the textareas below; editing those textareas
-    // repopulates these dropdowns live via fill().
-    let claudeDd: DropdownComponent | undefined;
-    let codexDd: DropdownComponent | undefined;
     let refreshComposerModels = () => {};
-    const fill = (d: DropdownComponent, provider: ProviderId) => {
-      d.selectEl.empty();
-      const cur = defaultModel(s, provider);
-      const opts = providerModels(
-        ADAPTERS[provider].models(),
-        provider === "codex" ? this.plugin.lastSessionCaps?.models : undefined,
-        provider === "claude" ? s.claudeCustomModels : s.codexCustomModels
-      );
-      for (const o of opts) d.addOption(o.id, o.label);
-      // Keep the current selection valid even if it isn't in the option list.
-      if (cur && !opts.some((o) => o.id === cur)) d.addOption(cur, cur);
-      d.setValue(cur);
-    };
-
-    new Setting(el)
-      .setName("Default Claude model")
-      .setDesc("Which Claude model new conversations start with — includes any custom Claude models set below.")
-      .addDropdown((d) => {
-        claudeDd = d;
-        fill(d, "claude");
-        d.onChange(async (v) => {
-          s.claudeModel = v;
-          await this.plugin.saveSettings();
-        });
-      });
-
-    new Setting(el)
-      .setName("Default Codex model")
-      .setDesc("Which Codex model new conversations start with — includes any custom Codex models set below.")
-      .addDropdown((d) => {
-        codexDd = d;
-        fill(d, "codex");
-        d.onChange(async (v) => {
-          s.codexModel = v;
-          await this.plugin.saveSettings();
-        });
-      });
-
-    new Setting(el)
-      .setName("Claude binary path")
-      .setDesc("Path to the `claude` CLI. Leave empty to auto-detect; run `which claude` (`where claude` on Windows) if detection fails.")
-      .addText((t) =>
-        t
-          .setPlaceholder("auto-detect")
-          .setValue(s.claudeBin)
-          .onChange(async (v) => {
-            s.claudeBin = v.trim();
-            await this.plugin.saveSettings();
-          })
-      );
-    renderCliDiagnostics(this.plugin, el, "claude", s.claudeBin);
-
-    new Setting(el)
-      .setName("Codex binary path")
-      .setDesc("Path to the `codex` CLI. Leave empty to auto-detect; run `which codex` (`where codex` on Windows) if detection fails.")
-      .addText((t) =>
-        t
-          .setPlaceholder("auto-detect")
-          .setValue(s.codexBin)
-          .onChange(async (v) => {
-            s.codexBin = v.trim();
-            await this.plugin.saveSettings();
-          })
-      );
-    renderCliDiagnostics(this.plugin, el, "codex", s.codexBin);
-
-    new Setting(el)
-      .setName("Custom Claude models")
-      .setDesc("Extra Claude model ids (comma- or newline-separated) added to the model picker and the default-model dropdown above.")
-      .addTextArea((t) =>
-        t
-          .setPlaceholder("claude-opus-4-7\nclaude-opus-4-6")
-          .setValue(s.claudeCustomModels)
-          .onChange(async (v) => {
-            s.claudeCustomModels = v;
-            await this.plugin.saveSettings();
-            if (claudeDd) fill(claudeDd, "claude");
-            refreshComposerModels();
-          })
-      );
-
-    new Setting(el)
-      .setName("Custom Codex models")
-      .setDesc("Extra Codex model ids (comma- or newline-separated) added to the model picker and the default-model dropdown above.")
-      .addTextArea((t) =>
-        t
-          .setPlaceholder("gpt-5.5\ngpt-5.6-terra")
-          .setValue(s.codexCustomModels)
-          .onChange(async (v) => {
-            s.codexCustomModels = v;
-            await this.plugin.saveSettings();
-            if (codexDd) fill(codexDd, "codex");
-            refreshComposerModels();
-          })
-      );
-
+    for (const p of PROVIDER_IDS) renderProviderSettings(this.plugin, el, p, () => refreshComposerModels());
     refreshComposerModels = renderComposerModels(this.plugin, el);
   }
 
@@ -549,7 +448,7 @@ export class MVASettingTab extends PluginSettingTab {
     new Setting(el)
       .setName("Background AI model")
       .setDesc(
-        "Model used by background LLM passes (automatic memory and the other background passes). Floor is Sonnet."
+        "Model used by background LLM passes (automatic memory and the other background passes) when Claude is the default provider. Floor is Sonnet. Codex and opencode use their default model."
       )
       .addDropdown((d) => {
         for (const o of BACKGROUND_MODEL_OPTIONS) d.addOption(o.id, o.label);

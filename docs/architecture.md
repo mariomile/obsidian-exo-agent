@@ -21,14 +21,27 @@ That one decision drives everything below. Whenever Exo behaves worse than Claud
 │       with its own live session, messages, perms   │
 ├────────────────────────────────────────────────────┤
 │ providers/ — the adapter layer                     │
-│   claude.ts (Agent SDK → Claude Code CLI)          │
-│   codex.ts  (Codex CLI)                            │
+│   claude.ts   (Agent SDK → Claude Code CLI)        │
+│   codex.ts    (codex app-server, JSON-RPC)         │
+│   opencode.ts (opencode acp, Agent Client Protocol)│
+│   profiles.ts — per-provider choices (settings     │
+│     keys, tool wiring, agent binding, wording)     │
 │   One AgentSession interface; the view never       │
 │   knows which engine is running.                   │
 └────────────────────────────────────────────────────┘
 ```
 
-The adapter translates each engine's native stream into neutral events (`text-delta`, `thinking-delta`, `tool-call-start`, `permission-request`, `usage`, `turn-end`, `error`). Adding a provider means one new file and zero UI changes.
+The adapter translates each engine's native stream into neutral events (`text-delta`, `thinking-delta`, `tool-call-start`, `permission-request`, `usage`, `turn-end`, `error`). Behaviour that genuinely differs per provider is in one table, `providers/profiles.ts`, not in `claude ? … : …` checks at the call sites. That table is a `Record<ProviderId, …>`, so a new provider doesn't compile until each of its choices is made. Adding one takes an adapter, a registry entry, a profile row and its settings keys.
+
+| | Claude | Codex | opencode |
+|---|---|---|---|
+| Transport | Agent SDK `query()` | `codex app-server`, JSON-RPC over stdio | `opencode acp`, ACP (JSON-RPC 2.0) over stdio |
+| Obsidian tools | in-process SDK MCP server | MCP bridge via stdio relay script (needs `node`) | MCP bridge over HTTP (`/mcp`), Code Mode off |
+| Permissions | `canUseTool` → Exo cards | sandbox + approvals → Exo cards | injected rules ask for every call → Exo cards |
+| Bound agent | isolated subagent | turn's system prompt | instructions ahead of the turn's text |
+| Models | pinned list | live `model/list` | live config options / `opencode models` |
+
+The Obsidian tools bridge (`obsidian/mcp-bridge.ts`, hosted by `obsidian/mcp-bridge-host.ts`) is one loopback executor per session, with a random port and a bearer token. It runs the same tool handlers as the Claude SDK server, and `obsidian/tool-wiring.ts` decides which transport a session gets. opencode's injected config is built in `providers/opencode-config.ts`, and `providers/opencode-tools.ts` maps opencode's tool names onto Exo's (`read` → `Read`, `obsidian_read_note` → `mcp__obsidian__read_note`), so read auto-allow and edit checkpoints apply to opencode too.
 
 ## Session model
 

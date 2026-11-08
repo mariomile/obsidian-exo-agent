@@ -123,7 +123,7 @@ describe("codex MCP tool-call approvals", () => {
   });
 
   it("lets ask_user through a READ-ONLY sandbox: it is a question, not a write", () => {
-    // The sandbox toolset (codexSessionToolset) deliberately KEEPS ask_user in a
+    // The sandbox toolset (bridgeSessionToolset) deliberately KEEPS ask_user in a
     // read-only session. The router has to agree, or the tool is offered and
     // then refused on every call.
     const params = approval(

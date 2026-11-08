@@ -8,13 +8,13 @@
 import type { ProviderId } from "../providers/types";
 import type { MVASettings } from "../settings-schema";
 import { effortFor } from "./model-tuning";
+import { PROFILES, providerStr } from "../providers/profiles";
 
 export function sessionSignature(
   c: { id: string; provider: ProviderId; model: string },
   s: MVASettings,
   memoryCapsJson: string
 ): string {
-  const codex = c.provider === "codex";
   return [
     c.provider,
     c.model,
@@ -29,10 +29,9 @@ export function sessionSignature(
     memoryCapsJson,
     s.autoCompactEnabled,
     s.contextSavingMode,
-    codex ? s.codexSandbox : "",
-    codex ? s.codexApproval : "",
+    ...PROFILES[c.provider].signatureExtras(s),
     s.browserEnabled,
-    codex ? s.codexBin : s.claudeBin,
+    providerStr(s, c.provider, "bin"),
     c.id,
   ].join("|");
 }

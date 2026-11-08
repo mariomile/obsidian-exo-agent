@@ -9,6 +9,7 @@ import { retiredFromStrip } from "../core/working-set";
 import { visibleSelection } from "../core/retention";
 import { projectDirName, resumeStatus, eligibleForFreeing } from "../core/resume-status";
 import type { ResumeStatus } from "../core/resume-status";
+import { PROFILES } from "../providers/profiles";
 import { readdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 
@@ -131,7 +132,7 @@ export class GalleryView {
    *  "New chat" card would permanently wear a warning about losing nothing. */
   resumeStatusOf(c: Convo): ResumeStatus {
     if (c.messages.length === 0) return "unknown";
-    return resumeStatus(c, c.provider === "claude" ? this.sessionsOnDisk : null);
+    return resumeStatus(c, PROFILES[c.provider].resumeProbe === "claude-jsonl" ? this.sessionsOnDisk : null);
   }
 
   /** `preset` accepts one filter or a set of them: a single value is what the
@@ -369,7 +370,7 @@ export class GalleryView {
     // every search keystroke, and the selection can be the entire history.
     const byId = new Map(this.view.convos.map((c) => [c.id, c] as const));
     const freeable = eligibleForFreeing(
-      selected.filter((id) => byId.get(id)?.provider === "claude"),
+      selected.filter((id) => { const c = byId.get(id); return !!c && PROFILES[c.provider].resumeProbe === "claude-jsonl"; }),
       (id) => byId.get(id)?.sessionId,
       this.sessionsOnDisk ?? new Set(),
       this.view.active.id,

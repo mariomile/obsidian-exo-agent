@@ -7,11 +7,16 @@ describe("fixedPathCandidates", () => {
   it("lists canonical install locations in priority order", () => {
     expect(fixedPathCandidates("claude", HOME)).toEqual([
       "/home/u/.claude/local/claude",
+      "/home/u/.claude/bin/claude",
       "/home/u/.local/bin/claude",
       "/home/u/.local/node/bin/claude",
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
     ]);
+  });
+
+  it("covers the opencode curl installer's ~/.opencode/bin", () => {
+    expect(fixedPathCandidates("opencode", HOME)).toContain("/home/u/.opencode/bin/opencode");
   });
 });
 

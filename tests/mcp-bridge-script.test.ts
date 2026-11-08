@@ -4,8 +4,8 @@ import { createServer, type Server } from "http";
 import { writeFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { CODEX_BRIDGE_SCRIPT } from "../src/obsidian/codex-bridge-script";
-import { startCodexBridge } from "../src/obsidian/codex-bridge";
+import { MCP_BRIDGE_SCRIPT } from "../src/obsidian/mcp-bridge-script";
+import { startMcpBridge } from "../src/obsidian/mcp-bridge";
 
 const TOKEN = "test-token";
 let server: Server;
@@ -28,7 +28,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   port = (server.address() as { port: number }).port;
   script = join(tmpdir(), `exo-bridge-test-${process.pid}.mjs`);
-  await writeFile(script, CODEX_BRIDGE_SCRIPT);
+  await writeFile(script, MCP_BRIDGE_SCRIPT);
 });
 
 afterAll(async () => {
@@ -53,7 +53,7 @@ function rpc(child: ChildProcess, msg: object): Promise<Record<string, unknown>>
   });
 }
 
-describe("codex-bridge script (real node child)", () => {
+describe("mcp-bridge script (real node child)", () => {
   it("answers initialize, tools/list, tools/call end-to-end", async () => {
     const child = spawn(process.execPath, [script], {
       env: { ...process.env, EXO_BRIDGE_PORT: String(port), EXO_BRIDGE_TOKEN: TOKEN, ELECTRON_RUN_AS_NODE: "1" },
@@ -77,13 +77,13 @@ describe("codex-bridge script (real node child)", () => {
 
 describe("no-timeout posture", () => {
   it("the script keeps the hand-rolled node:http transport (undici's hidden 300s headersTimeout is the documented regression)", () => {
-    expect(CODEX_BRIDGE_SCRIPT).toContain("node:http");
-    expect(CODEX_BRIDGE_SCRIPT).toContain("req.setTimeout(0)");
-    expect(CODEX_BRIDGE_SCRIPT).not.toContain("fetch(");
+    expect(MCP_BRIDGE_SCRIPT).toContain("node:http");
+    expect(MCP_BRIDGE_SCRIPT).toContain("req.setTimeout(0)");
+    expect(MCP_BRIDGE_SCRIPT).not.toContain("fetch(");
   });
 
   it("a call whose handler resolves only after a human-scale delay still answers, through the REAL bridge and the REAL script", async () => {
-    const bridge = await startCodexBridge();
+    const bridge = await startMcpBridge();
     bridge.setTools([
       {
         name: "ask_user",

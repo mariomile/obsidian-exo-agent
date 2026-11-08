@@ -10,7 +10,7 @@
  *  the provider can hand it to Exo's ONE permission decision (`decidePermission`)
  *  instead of growing a second, codex-shaped rule set. */
 
-import { INTERACTION_TOOLS } from "./codex-toolset";
+import { INTERACTION_TOOLS } from "./bridge-toolset";
 
 /** Bridge server name registered in `mcpOverride` (`mcp_servers.obsidian=…`).
  *  Bridge tools run inside the Obsidian process, so they bypass codex's own

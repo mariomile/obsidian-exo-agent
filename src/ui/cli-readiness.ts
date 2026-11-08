@@ -9,6 +9,8 @@
 import { setIcon } from "obsidian";
 import { cliDiagnostics } from "../cli";
 import type { ProviderId } from "../providers/types";
+import { PROFILES, providerStr } from "../providers/profiles";
+import type { MVASettings } from "../settings-schema";
 import { clickable } from "./dom";
 
 const ROW = "mva-cli-missing";
@@ -17,12 +19,13 @@ const probeGen = new WeakMap<HTMLElement, number>(); // per view: the latest pro
 export function showCliReadiness(
   composerEl: HTMLElement,
   provider: ProviderId,
-  bins: { claudeBin: string; codexBin: string },
+  settings: MVASettings,
   openSettings: () => void
 ): void {
   const gen = (probeGen.get(composerEl) ?? 0) + 1;
   probeGen.set(composerEl, gen);
-  void cliDiagnostics(provider, provider === "codex" ? bins.codexBin : bins.claudeBin)
+  const profile = PROFILES[provider];
+  void cliDiagnostics(profile.cliName, providerStr(settings, provider, "bin"))
     .then((d) => d.found)
     .catch(() => false)
     .then((found) => {
@@ -31,14 +34,14 @@ export function showCliReadiness(
       if (found) return;
       const row = createDiv({ cls: ROW });
       setIcon(row.createSpan(), "triangle-alert");
-      row.createSpan({ text: `${provider === "codex" ? "Codex" : "Claude"} CLI not found. Exo needs it to answer.` });
+      row.createSpan({ text: `${profile.label} CLI not found. Exo needs it to answer.` });
       const act = row.createSpan({ cls: "mva-cli-missing-act", text: "Open settings" });
       clickable(act, openSettings);
       composerEl.prepend(row);
       composerEl.addEventListener(
         "focusin",
         () => {
-          if (gen === probeGen.get(composerEl)) showCliReadiness(composerEl, provider, bins, openSettings);
+          if (gen === probeGen.get(composerEl)) showCliReadiness(composerEl, provider, settings, openSettings);
         },
         { once: true }
       );

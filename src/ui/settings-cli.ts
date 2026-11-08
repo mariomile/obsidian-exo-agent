@@ -8,6 +8,7 @@ import type ExoPlugin from "../main";
 import { cliDiagnostics, updateClaudeCli, resolveCli } from "../cli";
 import { maybeCheckCliUpdate } from "../cli-maintenance";
 import { compareSemver } from "../core/semver";
+import { OPENCODE_MIN_VERSION } from "../providers/opencode-acp";
 
 /** When the resolved Claude CLI is older than the latest known published
  *  version, offer a one-click `npm i -g …@latest` update (never auto-run). */
@@ -64,6 +65,10 @@ export function renderCliDiagnostics(
           : "Not found — set the path explicitly"
       );
       if (name === "claude" && d.found && d.version) maybeRenderCliUpdate(plugin, containerEl, d.version);
+      // opencode 1.x speaks a different protocol and config: say so up front.
+      if (name === "opencode" && d.version && compareSemver(d.version.replace(/^v/, ""), OPENCODE_MIN_VERSION) < 0) {
+        el.setText(`${el.getText()} — Exo needs opencode ${OPENCODE_MIN_VERSION} or newer: run \`opencode upgrade\`.`);
+      }
     })
     .catch(() => el.setText("Not found — set the path explicitly"));
 

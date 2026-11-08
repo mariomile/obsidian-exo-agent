@@ -6,13 +6,33 @@
  * Returns `null` for anything unrecognized — the caller then shows the raw text
  * unchanged. All matching is case-insensitive.
  */
-export function describeCliFailure(raw: string): { message: string; hint?: string } | null {
+export function describeCliFailure(
+  raw: string,
+  who: { name: string; login: string; localModels?: boolean } = { name: "Claude", login: "claude auth login" }
+): { message: string; hint?: string } | null {
   const m = (raw || "").toLowerCase();
 
   // Auth first: an auth failure can also mention "error"/"exited", so it must win
   // over the generic crash patterns below.
   if (isCliAuthFailure(m)) {
-    return { message: "The CLI isn't logged in, or its login expired. Run `claude auth login` in a terminal, then retry." };
+    return { message: `The ${who.name} CLI isn't logged in, or its login expired. Run \`${who.login}\` in a terminal, then retry.` };
+  }
+
+  // A provider that runs local models (opencode) found no model to run: nothing
+  // configured, or the configured local server's model is gone.
+  if (who.localModels && /providermodelnotfound|model not found|no providers? (configured|available)|no default model/.test(m)) {
+    return {
+      message: `${who.name} has no usable model.`,
+      hint: "Start your local model server (Ollama, LM Studio…) or add a provider in opencode.json, then pick a model in Settings.",
+    };
+  }
+
+  // A local model server that isn't running (Ollama 11434, LM Studio 1234, vLLM/oMLX 8000…).
+  if (who.localModels && /econnrefused|connection refused|fetch failed|cannot connect to api/.test(m)) {
+    return {
+      message: "The model server isn't reachable.",
+      hint: "If you use a local model, start its server (Ollama, LM Studio…) and retry.",
+    };
   }
 
   // Claude-plan usage limit (claude.ai subscription). Distinct from an API-key
@@ -33,7 +53,7 @@ export function describeCliFailure(raw: string): { message: string; hint?: strin
 
   // Binary can't be found / launched.
   if (/enoent|command not found|not found|no such file/.test(m)) {
-    return { message: "Claude CLI not found — set the binary path in Settings." };
+    return { message: `${who.name} CLI not found — set the binary path in Settings.` };
   }
 
   // The SDK stream disappeared without a final result. Exo has already kept the
@@ -41,7 +61,7 @@ export function describeCliFailure(raw: string): { message: string; hint?: strin
   // ladder, so the useful action is a retry — not a wall of transport detail.
   if (isEndedSessionFailure(m)) {
     return {
-      message: "The Claude CLI session ended unexpectedly — retry to resume.",
+      message: `The ${who.name} CLI session ended unexpectedly — retry to resume.`,
       hint: "Your conversation is safe; Exo will reconnect with its saved context.",
     };
   }
@@ -81,11 +101,11 @@ export function describeCliFailure(raw: string): { message: string; hint?: strin
  *  not be refreshed"). Not a session death: resuming or recapping cannot heal
  *  it, only a new `claude auth login` can. */
 export function isCliAuthFailure(raw: string): boolean {
-  return /not logged in|invalid api key|please run \/login|\/login\b|unauthorized|not authenticated|failed to authenticate|oauth session expired|oauth token (has )?expired/.test(
+  return /not logged in|invalid api key|please run \/login|\/login\b|unauthorized|not authenticated|failed to authenticate|oauth session expired|oauth token (has )?expired|auth_required|authentication required/.test(
     (raw || "").toLowerCase(),
   );
 }
 
 export function isEndedSessionFailure(raw: string): boolean {
-  return /claude session ended|session stream ended/.test((raw || "").toLowerCase());
+  return /claude session ended|opencode session ended|session stream ended/.test((raw || "").toLowerCase());
 }

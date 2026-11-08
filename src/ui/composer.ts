@@ -13,6 +13,7 @@ import { buildDescIndex, codexSkillNames, type DescIndex } from "../core/capabil
 import { mergeSlashEntries } from "../core/slash";
 import type ExoPlugin from "../main";
 import { setProviderMark } from "./provider-mark";
+import { PROFILES } from "../providers/profiles";
 import type {
   ContextUsage,
   ImageAttachment,
@@ -858,7 +859,7 @@ export class Composer {
             value: m.id,
             label: m.label,
             mark: m.provider,
-            group: m.provider === "claude" ? "Claude" : "Codex",
+            group: PROFILES[m.provider].label,
           })),
           this.host.model,
           {
@@ -956,11 +957,10 @@ export class Composer {
     pop.hide();
 
     const refreshLabel = () => {
-      const risk = this.host.provider === "codex" ? Composer.codexSandboxRisk(s.codexSandbox) : Composer.permRisk(s.permissionMode);
+      const sandbox = this.sandboxChip();
+      const risk = sandbox ? Composer.codexSandboxRisk(s.codexSandbox) : Composer.permRisk(s.permissionMode);
       chip.className = `mva-sel-chip${risk ? ` ${risk}` : ""}`;
-      chip.setText(
-        this.host.provider === "codex" ? Composer.codexSandboxLabel(s.codexSandbox) : Composer.permLabel(s.permissionMode)
-      );
+      chip.setText(sandbox ? Composer.codexSandboxLabel(s.codexSandbox) : Composer.permLabel(s.permissionMode));
     };
 
     const popover = openablePopover({
@@ -968,11 +968,15 @@ export class Composer {
       pop,
       wrap,
       onOpen: () => {
-        const options =
-          this.host.provider === "codex"
-            ? Composer.CODEX_SANDBOX_OPTS.map(([v, l]) => ({ value: v, label: l, risk: Composer.codexSandboxRisk(v) }))
-            : Composer.PERM_OPTS.map(([v, l]) => ({ value: v, label: l, risk: Composer.permRisk(v) }));
-        const current = this.host.provider === "codex" ? s.codexSandbox : s.permissionMode;
+        const sandbox = this.sandboxChip();
+        const options = sandbox
+          ? Composer.CODEX_SANDBOX_OPTS.map(([v, l]) => ({ value: v, label: l, risk: Composer.codexSandboxRisk(v) }))
+          : Composer.PERM_OPTS.filter(([v]) => (PROFILES[this.host.provider].permModes as readonly string[]).includes(v)).map(([v, l]) => ({
+              value: v,
+              label: l,
+              risk: Composer.permRisk(v),
+            }));
+        const current = sandbox ? s.codexSandbox : s.permissionMode;
         this.renderOptionRows(pop, options, current, {
           onPick: (v) => {
             this.applyPermChoice(v);
@@ -1024,9 +1028,13 @@ export class Composer {
 
   /** Apply a permission (Claude) or sandbox (Codex) pick; keeps setting, live
    *  session, and the permission chip in sync. */
+  private sandboxChip(): boolean {
+    return PROFILES[this.host.provider].permissionChip === "codex-sandbox";
+  }
+
   private applyPermChoice(v: string): void {
     const s = this.host.plugin.settings;
-    if (this.host.provider === "codex") {
+    if (this.sandboxChip()) {
       s.codexSandbox = v;
       void this.host.plugin.saveSettings();
     } else {
@@ -1611,7 +1619,7 @@ export class Composer {
 
   private modelLabel(): string {
     const found = this.host.allModelChoices().find((m) => m.id === this.host.model);
-    return found?.label || this.host.model || "Model";
+    return found?.label || this.host.model || "Default model";
   }
 }
 

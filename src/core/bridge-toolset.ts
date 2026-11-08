@@ -20,7 +20,7 @@ export const INTERACTION_TOOLS = new Set(["ask_user"]);
 
 const MCP_PREFIX = "mcp__obsidian__";
 
-export function codexSessionToolset<T extends { name: string }>(
+export function bridgeSessionToolset<T extends { name: string }>(
   all: T[],
   readOnlySandbox: boolean,
   readToolNames: Iterable<string>
