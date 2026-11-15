@@ -243,6 +243,13 @@ export interface MVASettings {
   /** Vault-relative note path to the document it was shared as, so re-sharing
    *  the same note reconnects instead of creating a second document. */
   collaboShares: Record<string, CollaboShare>;
+  /** OpenAI API key for composer dictation (speech to text). Empty keeps the
+   *  mic button but makes it point at this setting instead of recording. */
+  dictationApiKey: string;
+  /** Transcription model id, see `TRANSCRIBE_MODELS`. */
+  dictationModel: string;
+  /** ISO-639-1 language hint ("it", "en"); empty lets the model detect it. */
+  dictationLanguage: string;
 }
 
 /** The model new chats and background runs of `provider` start from. */
@@ -339,6 +346,9 @@ export const DEFAULT_SETTINGS: MVASettings = {
   collaboUrl: "",
   collaboApiKey: "",
   collaboShares: {},
+  dictationApiKey: "",
+  dictationModel: "gpt-4o-mini-transcribe",
+  dictationLanguage: "",
 };
 
 /** Keys of settings that no longer exist (the pre-harvest memory subsystem:

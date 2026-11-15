@@ -25,6 +25,7 @@ import { registerFormatCommands } from "./editor/format-commands";
 import { registerExoIcons } from "./ui/icons";
 import { AgentPicker, PlaybookPicker } from "./ui/pickers";
 import * as convoBridge from "./ui/convo-bridge";
+import { registerDictationCommand } from "./ui/dictation";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
 import { defaultModel, stripObsoleteSettings } from "./settings-schema";
 import { pluginMemoryCaps, registerMemory, undoMemoryWrite } from "./obsidian/memory-wiring";
@@ -445,6 +446,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       callback: () => this.activateView(),
     });
 
+    registerDictationCommand(this);
     this.addCommand({
       id: "open-connections",
       name: "Open Capabilities",
