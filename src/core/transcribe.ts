@@ -1,23 +1,17 @@
 /**
  * Speech to text for composer dictation: one recorded clip in, plain text out,
- * through OpenAI's `/v1/audio/transcriptions` endpoint.
+ * through a LOCAL transcription server that speaks the OpenAI
+ * `/v1/audio/transcriptions` format (Parlo's on-device engine by default, or
+ * any compatible local server). Nothing goes to a cloud API unless the user
+ * points the endpoint there.
  *
  * Deliberately Obsidian-free: the plugin passes a `requestUrl` adapter (desktop
  * CSP and proxy safe), tests pass a fake. The multipart body is built by hand
  * because `requestUrl` takes a string or ArrayBuffer, not FormData.
  */
 
-export const TRANSCRIBE_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
-
-/** Models the setting offers. The first is the default: cheapest and fast,
- *  accurate enough for dictating a prompt. */
-export const TRANSCRIBE_MODELS = [
-  { id: "gpt-4o-mini-transcribe", label: "GPT-4o mini Transcribe (fast, cheapest)" },
-  { id: "gpt-4o-transcribe", label: "GPT-4o Transcribe (most accurate)" },
-  { id: "whisper-1", label: "Whisper" },
-] as const;
-
-export const DEFAULT_TRANSCRIBE_MODEL = TRANSCRIBE_MODELS[0].id;
+/** Parlo's local endpoint (127.0.0.1 only, never the network). */
+export const DEFAULT_TRANSCRIBE_ENDPOINT = "http://127.0.0.1:47821/v1/audio/transcriptions";
 
 export interface TranscribeRequest {
   url: string;
@@ -36,10 +30,14 @@ export interface TranscribeResponse {
 export type TranscribeFetch = (req: TranscribeRequest) => Promise<TranscribeResponse>;
 
 export interface TranscribeOptions {
-  apiKey: string;
+  /** Full URL of the transcriptions endpoint. Empty uses Parlo's. */
+  endpoint?: string;
+  /** Bearer token, only for a server that wants one. Local Parlo doesn't. */
+  apiKey?: string;
   audio: ArrayBuffer;
-  /** MIME type of the clip, e.g. `audio/webm;codecs=opus`. */
+  /** MIME type of the clip, e.g. `audio/wav`. */
   mimeType: string;
+  /** Model id the server should use. Empty lets the server use its active one. */
   model?: string;
   /** ISO-639-1 code ("it", "en"). Empty lets the model detect it. */
   language?: string;
@@ -107,16 +105,14 @@ function apiErrorMessage(text: string): string | null {
 }
 
 /** Transcribe one clip. Resolves to the trimmed text ("" for silence); throws
- *  `TranscribeError` on a missing key, an HTTP error or an unreadable reply. */
+ *  `TranscribeError` on an unreachable server, an HTTP error or a bad reply. */
 export async function transcribe(fetchFn: TranscribeFetch, opts: TranscribeOptions): Promise<string> {
-  const apiKey = opts.apiKey.trim();
-  if (!apiKey) throw new TranscribeError("No OpenAI API key set for dictation.");
   if (opts.audio.byteLength === 0) return "";
+  const url = opts.endpoint?.trim() || DEFAULT_TRANSCRIBE_ENDPOINT;
 
-  const fields: Record<string, string> = {
-    model: opts.model?.trim() || DEFAULT_TRANSCRIBE_MODEL,
-    response_format: "json",
-  };
+  const fields: Record<string, string> = { response_format: "json" };
+  const model = opts.model?.trim();
+  if (model) fields.model = model;
   const language = opts.language?.trim().toLowerCase();
   if (language) fields.language = language;
 
@@ -126,31 +122,72 @@ export async function transcribe(fetchFn: TranscribeFetch, opts: TranscribeOptio
     { name: `dictation.${audioExtension(opts.mimeType)}`, mimeType: opts.mimeType, data: opts.audio },
     boundary,
   );
+  const headers: Record<string, string> = {};
+  const apiKey = opts.apiKey?.trim();
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const res = await fetchFn({
-    url: TRANSCRIBE_ENDPOINT,
-    method: "POST",
-    contentType: `multipart/form-data; boundary=${boundary}`,
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body,
-    throw: false,
-  });
+  let res: TranscribeResponse;
+  try {
+    res = await fetchFn({
+      url,
+      method: "POST",
+      contentType: `multipart/form-data; boundary=${boundary}`,
+      headers,
+      body,
+      throw: false,
+    });
+  } catch {
+    throw new TranscribeError(`can't reach the transcription server at ${url}. Is Parlo running?`);
+  }
 
   if (res.status < 200 || res.status >= 300) {
     const detail = apiErrorMessage(res.text);
-    if (res.status === 401) throw new TranscribeError("OpenAI rejected the API key (401).", 401);
-    throw new TranscribeError(
-      `Transcription failed (${res.status})${detail ? `: ${detail}` : "."}`,
-      res.status,
-    );
+    throw new TranscribeError(`transcription failed (${res.status})${detail ? `: ${detail}` : "."}`, res.status);
   }
 
   try {
     const parsed = JSON.parse(res.text) as { text?: unknown };
     return typeof parsed.text === "string" ? parsed.text.trim() : "";
   } catch {
-    throw new TranscribeError("Transcription reply was not valid JSON.");
+    throw new TranscribeError("the transcription reply was not valid JSON.");
   }
+}
+
+/** Mix to mono and resample to `rate` Hz by linear interpolation. Speech
+ *  models want 16 kHz mono; doing it here keeps uploads ~10x smaller than the
+ *  48 kHz stereo the mic delivers. */
+export function toMono16k(channels: Float32Array[], inRate: number, rate = 16000): Float32Array {
+  const n = channels[0]?.length ?? 0;
+  const mono = new Float32Array(n);
+  for (const ch of channels) for (let i = 0; i < n; i++) mono[i] += ch[i] / channels.length;
+  if (inRate === rate || n === 0) return mono;
+  const outLen = Math.max(1, Math.round((n * rate) / inRate));
+  const out = new Float32Array(outLen);
+  const step = inRate / rate;
+  for (let i = 0; i < outLen; i++) {
+    const x = i * step;
+    const i0 = Math.min(n - 1, Math.floor(x));
+    const i1 = Math.min(n - 1, i0 + 1);
+    out[i] = mono[i0] + (mono[i1] - mono[i0]) * (x - i0);
+  }
+  return out;
+}
+
+/** 16-bit PCM WAV: the one format every local engine (AVFoundation, whisper.cpp,
+ *  FluidAudio) reads without a decoder. */
+export function encodeWav(samples: Float32Array, rate: number): ArrayBuffer {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + samples.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
 }
 
 /** Join dictated text onto a draft at the caret: a space before it unless the

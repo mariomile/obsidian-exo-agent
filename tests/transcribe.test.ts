@@ -5,8 +5,9 @@ import {
   spliceDictation,
   transcribe,
   TranscribeError,
-  TRANSCRIBE_ENDPOINT,
-  DEFAULT_TRANSCRIBE_MODEL,
+  DEFAULT_TRANSCRIBE_ENDPOINT,
+  encodeWav,
+  toMono16k,
   type TranscribeFetch,
   type TranscribeRequest,
 } from "../src/core/transcribe";
@@ -25,53 +26,75 @@ function fake(status: number, text: string) {
 const decode = (b: ArrayBuffer) => new TextDecoder().decode(b);
 
 describe("transcribe", () => {
-  it("posts multipart audio with the key and default model, returns trimmed text", async () => {
+  it("posts WAV to the local Parlo endpoint by default, no key, no model", async () => {
     const { fn, seen } = fake(200, JSON.stringify({ text: "  ciao Exo  " }));
-    const out = await transcribe(fn, { apiKey: " sk-test ", audio, mimeType: "audio/webm;codecs=opus" });
+    const out = await transcribe(fn, { audio, mimeType: "audio/wav" });
     expect(out).toBe("ciao Exo");
-    expect(seen).toHaveLength(1);
     const req = seen[0];
-    expect(req.url).toBe(TRANSCRIBE_ENDPOINT);
-    expect(req.headers.Authorization).toBe("Bearer sk-test");
+    expect(req.url).toBe(DEFAULT_TRANSCRIBE_ENDPOINT);
+    expect(req.url.startsWith("http://127.0.0.1:")).toBe(true);
+    expect(req.headers.Authorization).toBeUndefined();
     expect(req.contentType).toMatch(/^multipart\/form-data; boundary=/);
     const body = decode(req.body);
-    expect(body).toContain(`name="model"\r\n\r\n${DEFAULT_TRANSCRIBE_MODEL}\r\n`);
-    expect(body).toContain('filename="dictation.webm"');
-    expect(body).toContain("Content-Type: audio/webm\r\n");
+    expect(body).toContain('filename="dictation.wav"');
+    expect(body).toContain("Content-Type: audio/wav\r\n");
+    expect(body).not.toContain('name="model"');
     expect(body).not.toContain('name="language"');
   });
 
-  it("sends the language when set", async () => {
+  it("honours a custom endpoint, key, model and language", async () => {
     const { fn, seen } = fake(200, JSON.stringify({ text: "x" }));
-    await transcribe(fn, { apiKey: "k", audio, mimeType: "audio/webm", language: "IT", model: "gpt-4o-transcribe" });
+    await transcribe(fn, {
+      endpoint: " http://localhost:9000/v1/audio/transcriptions ", apiKey: " k ",
+      audio, mimeType: "audio/wav", language: "IT", model: "parakeet-v3",
+    });
+    expect(seen[0].url).toBe("http://localhost:9000/v1/audio/transcriptions");
+    expect(seen[0].headers.Authorization).toBe("Bearer k");
     const body = decode(seen[0].body);
     expect(body).toContain('name="language"\r\n\r\nit\r\n');
-    expect(body).toContain('name="model"\r\n\r\ngpt-4o-transcribe\r\n');
+    expect(body).toContain('name="model"\r\n\r\nparakeet-v3\r\n');
   });
 
-  it("refuses without a key and never calls the network", async () => {
+  it("returns empty for an empty clip without calling the server", async () => {
     const { fn, seen } = fake(200, "{}");
-    await expect(transcribe(fn, { apiKey: "  ", audio, mimeType: "audio/webm" })).rejects.toBeInstanceOf(TranscribeError);
+    expect(await transcribe(fn, { audio: new ArrayBuffer(0), mimeType: "audio/wav" })).toBe("");
     expect(seen).toHaveLength(0);
   });
 
-  it("returns empty for an empty clip without calling the network", async () => {
-    const { fn, seen } = fake(200, "{}");
-    expect(await transcribe(fn, { apiKey: "k", audio: new ArrayBuffer(0), mimeType: "audio/webm" })).toBe("");
-    expect(seen).toHaveLength(0);
+  it("names an unreachable server and suggests Parlo", async () => {
+    const fn: TranscribeFetch = async () => { throw new Error("ECONNREFUSED"); };
+    await expect(transcribe(fn, { audio, mimeType: "audio/wav" })).rejects.toThrow(/Is Parlo running\?/);
   });
 
-  it("surfaces the API error message and status", async () => {
-    const { fn } = fake(400, JSON.stringify({ error: { message: "Invalid file format." } }));
-    await expect(transcribe(fn, { apiKey: "k", audio, mimeType: "audio/webm" })).rejects.toMatchObject({
-      status: 400,
-      message: "Transcription failed (400): Invalid file format.",
+  it("surfaces the server's error message and status", async () => {
+    const { fn } = fake(503, JSON.stringify({ error: { message: "Model still loading." } }));
+    await expect(transcribe(fn, { audio, mimeType: "audio/wav" })).rejects.toMatchObject({
+      status: 503,
+      message: "transcription failed (503): Model still loading.",
     });
+    await expect(transcribe(fn, { audio, mimeType: "audio/wav" })).rejects.toBeInstanceOf(TranscribeError);
   });
+});
 
-  it("names a rejected key plainly", async () => {
-    const { fn } = fake(401, "nope");
-    await expect(transcribe(fn, { apiKey: "k", audio, mimeType: "audio/webm" })).rejects.toMatchObject({ status: 401 });
+describe("toMono16k + encodeWav", () => {
+  it("averages channels and resamples 48k to 16k", () => {
+    const l = new Float32Array(480).fill(0.5);
+    const r = new Float32Array(480).fill(-0.5);
+    const out = toMono16k([l, r], 48000);
+    expect(out.length).toBe(160);
+    expect(Array.from(out).every((x) => Math.abs(x) < 1e-6)).toBe(true);
+  });
+  it("writes a valid 16-bit mono WAV header and clamps samples", () => {
+    const wav = new DataView(encodeWav(new Float32Array([0, 1, -1, 2]), 16000));
+    const tag = (o: number) => String.fromCharCode(...[0, 1, 2, 3].map((i) => wav.getUint8(o + i)));
+    expect(tag(0)).toBe("RIFF");
+    expect(tag(8)).toBe("WAVE");
+    expect(wav.getUint16(22, true)).toBe(1);
+    expect(wav.getUint32(24, true)).toBe(16000);
+    expect(wav.getUint32(40, true)).toBe(8);
+    expect(wav.getInt16(46, true)).toBe(0x7fff);
+    expect(wav.getInt16(48, true)).toBe(-0x8000);
+    expect(wav.getInt16(50, true)).toBe(0x7fff);
   });
 });
 

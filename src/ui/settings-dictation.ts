@@ -1,46 +1,47 @@
 import { Setting } from "obsidian";
 import type ExoPlugin from "../main";
-import { TRANSCRIBE_MODELS, DEFAULT_TRANSCRIBE_MODEL } from "../core/transcribe";
+import type { MVASettings } from "../settings-schema";
+import { DEFAULT_TRANSCRIBE_ENDPOINT } from "../core/transcribe";
+import { chatView } from "./convo-bridge";
 
-/** The Chat tab's Dictation section: key, model, language. Free function, like
- *  `ui/settings-cli.ts`, because it reads nothing but `plugin.settings`. */
+type TextKey = "dictationEndpoint" | "dictationApiKey" | "dictationModel" | "dictationLanguage";
+
+/** The Chat tab's Dictation section. Free function, like `ui/settings-cli.ts`,
+ *  because it reads nothing but `plugin.settings`. */
 export function renderDictationSettings(el: HTMLElement, plugin: ExoPlugin): void {
   const s = plugin.settings;
   new Setting(el)
     .setName("Dictation")
     .setDesc(
-      "The mic button beside Send records your voice and types the transcript into the composer, unsent. Audio goes to OpenAI's transcription API with your own key (GPT-4o mini Transcribe costs about $0.003 per minute)."
+      "A mic button beside Send: speak, click again, and the transcript lands in the draft, unsent. Transcription runs on this Mac through a local server, Parlo by default, so audio never leaves the device."
     )
     .setHeading();
-  new Setting(el)
-    .setName("OpenAI API key")
-    .setDesc("Stored in this plugin's data.json on this device. Create one at platform.openai.com/api-keys.")
-    .addText((t) => {
-      t.inputEl.type = "password";
-      t.setPlaceholder("sk-...")
-        .setValue(s.dictationApiKey)
+  const detail = el.createDiv();
+  const text = (key: TextKey, name: string, desc: string, placeholder: string, secret = false) =>
+    new Setting(detail).setName(name).setDesc(desc).addText((t) => {
+      if (secret) t.inputEl.type = "password";
+      t.setPlaceholder(placeholder)
+        .setValue(s[key])
         .onChange(async (v) => {
-          s.dictationApiKey = v.trim();
+          (s as Pick<MVASettings, TextKey>)[key] = key === "dictationLanguage" ? v.trim().toLowerCase() : v.trim();
           await plugin.saveSettings();
         });
     });
-  new Setting(el).setName("Transcription model").addDropdown((d) => {
-    for (const m of TRANSCRIBE_MODELS) d.addOption(m.id, m.label);
-    d.setValue(s.dictationModel || DEFAULT_TRANSCRIBE_MODEL).onChange(async (v) => {
-      s.dictationModel = v;
-      await plugin.saveSettings();
-    });
-  });
   new Setting(el)
-    .setName("Language")
-    .setDesc("Two-letter code such as it or en. Setting it improves accuracy and speed; empty detects the language.")
-    .addText((t) =>
-      t
-        .setPlaceholder("auto")
-        .setValue(s.dictationLanguage)
-        .onChange(async (v) => {
-          s.dictationLanguage = v.trim().toLowerCase();
-          await plugin.saveSettings();
-        })
+    .setName("Enable dictation")
+    .setDesc("Off by default. When off there is no mic button and Exo never opens the microphone.")
+    .addToggle((t) =>
+      t.setValue(s.dictationEnabled).onChange(async (v) => {
+        s.dictationEnabled = v;
+        detail.toggle(v);
+        await plugin.saveSettings();
+        chatView(plugin.app)?.composer.dictation?.refresh();
+      })
     );
+  el.appendChild(detail);
+  detail.toggle(s.dictationEnabled);
+  text("dictationEndpoint", "Transcription server", "Any local server with the OpenAI /v1/audio/transcriptions format. Empty uses Parlo on this Mac.", DEFAULT_TRANSCRIBE_ENDPOINT);
+  text("dictationLanguage", "Language", "Two-letter code such as it or en. Empty detects the language.", "auto");
+  text("dictationModel", "Model", "Optional. Empty uses the model active in the server (in Parlo, the one picked in Settings, Models).", "server default");
+  text("dictationApiKey", "API key", "Only for a server that requires one. Parlo doesn't.", "none", true);
 }

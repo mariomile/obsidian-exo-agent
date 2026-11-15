@@ -1,12 +1,13 @@
-import { Notice, requestUrl, setIcon, setTooltip, type App } from "obsidian";
+import { Notice, requestUrl, setIcon, setTooltip } from "obsidian";
 import type ExoPlugin from "../main";
-import { spliceDictation, transcribe, TranscribeError, type TranscribeFetch } from "../core/transcribe";
+import { encodeWav, spliceDictation, toMono16k, transcribe, TranscribeError, type TranscribeFetch } from "../core/transcribe";
 import { chatView } from "./convo-bridge";
 
 /**
  * Composer dictation: a mic button beside Send. Click to record, click again
- * (or Esc) to stop; the clip goes to OpenAI's transcription endpoint and the
- * text lands at the caret, unsent, so the user can still edit it.
+ * (or Esc to cancel); the clip is converted to 16 kHz mono WAV, sent to a LOCAL
+ * transcription server (Parlo by default) and the text lands at the caret,
+ * unsent, so the user can still edit it. Off unless `dictationEnabled`.
  *
  * Desktop only, like the plugin. Recording uses the renderer's MediaRecorder;
  * the first use triggers the macOS microphone prompt for Obsidian.
@@ -26,14 +27,8 @@ export function registerDictationCommand(plugin: ExoPlugin): void {
   });
 }
 
-function openExoSettings(app: App, id: string): void {
-  const setting = (app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
-  setting?.open();
-  setting?.openTabById(id);
-}
-
 /** Pick a recorder format the renderer supports. Opus in WebM is Chromium's
- *  native choice and the endpoint accepts it as-is. */
+ *  native choice; it is decoded and re-encoded as WAV before upload. */
 function pickMimeType(): string {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
   for (const c of candidates) {
@@ -94,9 +89,22 @@ export class Dictation {
     el.setSelectionRange(next.caret, next.caret);
   }
 
-  private settings(): { apiKey: string; model: string; language: string } {
-    const s = this.plugin.settings;
-    return { apiKey: s.dictationApiKey, model: s.dictationModel, language: s.dictationLanguage };
+  /** Show or hide the button after the setting flips; stops a live clip. */
+  refresh(): void {
+    if (!this.plugin.settings.dictationEnabled) this.cancel();
+    this.render();
+  }
+
+  /** Recorded clip (any Chromium format) to 16 kHz mono WAV. */
+  private async toWav(blob: Blob): Promise<ArrayBuffer> {
+    const ctx = new AudioContext();
+    try {
+      const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+      const chans = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
+      return encodeWav(toMono16k(chans, decoded.sampleRate), 16000);
+    } finally {
+      void ctx.close();
+    }
   }
 
   /** Start, or stop and transcribe. Ignored while a clip is being transcribed. */
@@ -113,12 +121,7 @@ export class Dictation {
   }
 
   private async start(): Promise<void> {
-    const { apiKey } = this.settings();
-    if (!apiKey.trim()) {
-      const n = new Notice("Dictation needs an OpenAI API key. Click to open Exo settings.", 8000);
-      n.messageEl.addEventListener("click", () => openExoSettings(this.plugin.app, this.plugin.manifest.id));
-      return;
-    }
+    if (!this.plugin.settings.dictationEnabled) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       new Notice("Dictation isn't available here: this device can't record audio.");
       return;
@@ -168,13 +171,16 @@ export class Dictation {
     }
     this.setState("transcribing");
     try {
-      const audio = await new Blob(chunks, { type: mimeType }).arrayBuffer();
-      const { apiKey, model, language } = this.settings();
-      const text = await transcribe(obsidianFetch, { apiKey, audio, mimeType, model, language });
+      const audio = await this.toWav(new Blob(chunks, { type: mimeType }));
+      const s = this.plugin.settings;
+      const text = await transcribe(obsidianFetch, {
+        endpoint: s.dictationEndpoint, apiKey: s.dictationApiKey, model: s.dictationModel,
+        language: s.dictationLanguage, audio, mimeType: "audio/wav",
+      });
       if (text) this.insert(text);
       else new Notice("Dictation: no speech recognised.");
     } catch (e) {
-      const msg = e instanceof TranscribeError ? e.message : "Transcription failed: network error.";
+      const msg = e instanceof TranscribeError ? e.message : "couldn't decode or send the recording.";
       new Notice(`Dictation: ${msg}`, 8000);
     } finally {
       this.setState("idle");
@@ -188,6 +194,7 @@ export class Dictation {
 
   private render(): void {
     if (!this.btn) return;
+    this.btn.toggle(this.plugin.settings.dictationEnabled);
     const s = this.state;
     this.btn.toggleClass("is-recording", s === "recording");
     this.btn.toggleClass("is-busy", s === "transcribing");
