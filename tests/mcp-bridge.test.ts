@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
-import { toolsManifest, callBridgeTool, authOk, startCodexBridge } from "../src/obsidian/codex-bridge";
+import { toolsManifest, callBridgeTool, authOk, startMcpBridge } from "../src/obsidian/mcp-bridge";
 import { buildObsidianTools } from "../src/obsidian/tools";
 import type { App } from "obsidian";
 
@@ -65,9 +65,9 @@ describe("authOk", () => {
   });
 });
 
-describe("startCodexBridge (live http)", () => {
+describe("startMcpBridge (live http)", () => {
   it("serves /tools and /call with auth, 401 without", async () => {
-    const b = await startCodexBridge();
+    const b = await startMcpBridge();
     try {
       b.setTools([echo]);
       const base = `http://127.0.0.1:${b.port}`;
@@ -83,6 +83,29 @@ describe("startCodexBridge (live http)", () => {
       ).json();
       expect(call.content[0].text).toBe("echo:x");
       expect((await fetch(`${base}/tools`)).status).toBe(401);
+    } finally {
+      b.stop();
+    }
+  });
+
+  it("speaks MCP over HTTP on /mcp, with the same auth", async () => {
+    const b = await startMcpBridge();
+    try {
+      b.setTools([echo]);
+      const url = `http://127.0.0.1:${b.port}/mcp`;
+      const h = { Authorization: `Bearer ${b.token}`, "Content-Type": "application/json" };
+      const rpc = (body: unknown) => fetch(url, { method: "POST", headers: h, body: JSON.stringify(body) });
+      const init = await (await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } })).json();
+      expect(init.result.protocolVersion).toBe("2025-03-26");
+      expect(init.result.capabilities).toHaveProperty("tools");
+      expect((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
+      const list = await (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
+      expect(list.result.tools[0].name).toBe("echo");
+      const call = await (await rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "echo", arguments: { text: "y" } } })).json();
+      expect(call).toMatchObject({ id: 3, result: { content: [{ type: "text", text: "echo:y" }] } });
+      const unknown = await (await rpc({ jsonrpc: "2.0", id: 4, method: "resources/list" })).json();
+      expect(unknown.error.code).toBe(-32601);
+      expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(401);
     } finally {
       b.stop();
     }

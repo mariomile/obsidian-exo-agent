@@ -16,6 +16,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { claudeCliEnv, configuredMcpServers, obsidianMcpDenyList, type DeniedMcpServer } from "../core/mcp-guard";
 import { mcpDenyList } from "../core/mcp-scope";
+import { EXO_HOUSE_RULES } from "./house-rules";
 
 /** Read a JSON file, or undefined when absent / unreadable / not JSON. */
 function readJson(path: string): unknown {
@@ -43,13 +44,6 @@ function obsidianMcpDenials(cwd: string, only?: { allow: string[]; known: string
 /** Built-in file tools disabled in "native-first" mode (use Obsidian tools). */
 const NATIVE_FIRST_DISALLOW = ["Read", "Grep", "Glob", "LS", "Edit", "MultiEdit", "Write", "NotebookEdit"];
 
-/** Fixed house rule prepended to the system-prompt append: Exo already renders
- *  every touched file as chips under each turn, so the agent restating them in
- *  prose duplicates the native UI. Kept to one short paragraph (cache-friendly). */
-const EXO_HOUSE_RULES =
-  'Exo renders every file you read, create, or edit as chips below your message. ' +
-  'Do NOT restate them as a prose list, a "Files touched"/"File toccati" section, ' +
-  'or a details/accordion — it duplicates the native UI.';
 
 function parseClaudeReset(value: string | null | undefined): number | undefined {
   if (!value) return undefined;

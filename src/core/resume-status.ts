@@ -10,6 +10,7 @@
  * died. This module makes the second case visible, which is the dangerous one:
  * nothing warns you today, you find out by writing.
  */
+import { PROFILES, isProviderId } from "../providers/profiles";
 
 /** What would happen if the user wrote in this conversation right now. */
 export type ResumeStatus =
@@ -97,10 +98,10 @@ export function resumableFrom(s: {
 }): boolean {
   // No session was ever created: nothing to resume, and nothing to look up.
   if (!s.sessionId) return false;
-  // A Codex session id names a thread under ~/.codex, not a Claude CLI session
-  // file. Searching the Claude project directory for it would find nothing and
-  // declare every Codex chat dead — unknowable from here, so leave it alone.
-  if (s.provider !== "claude") return true;
+  // A Codex (or opencode) session id names a thread in that CLI's own store,
+  // not a Claude CLI session file. Searching the Claude project directory for it
+  // would find nothing and declare every such chat dead — leave it alone.
+  if (!isProviderId(s.provider) || PROFILES[s.provider].resumeProbe !== "claude-jsonl") return true;
   // "" (mobile, or any non-FileSystemAdapter) encodes to "" and would aim the
   // lookup at ~/.claude/projects itself: a path that reads perfectly fine and
   // holds no session file, i.e. a confident and wrong "gone".

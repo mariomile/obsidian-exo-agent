@@ -1,6 +1,6 @@
 import type { ResolvedCli } from "../cli";
 
-export type ProviderId = "claude" | "codex";
+export type ProviderId = "claude" | "codex" | "opencode";
 
 export interface ModelOption {
   id: string; // value passed to the CLI ("" / "default" = CLI default)
@@ -165,7 +165,7 @@ export interface SessionOpts {
   /** Codex ↔ Obsidian tools bridge (Tranche B1): loopback executor coordinates
    *  + the generated stdio script path. Present only for Codex sessions with
    *  obsidian tools enabled. */
-  codexBridge?: { port: number; token: string; scriptPath: string; stop?: () => void };
+  mcpBridge?: { port: number; token: string; scriptPath: string; stop?: () => void };
   /** OBSIDIAN_READ_TOOLS: the read-classified bridge tools. Codex asks the
    *  client to approve every MCP tool call, and the read-only sandbox must
    *  never let a mutating bridge tool through (bridge writes run in the

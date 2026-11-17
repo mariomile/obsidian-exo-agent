@@ -291,6 +291,11 @@ const ACRONYMS = new Set(["gpt", "o1", "o3"]);
 export function modelLabel(provider: string, model: string): string {
   const raw = model.trim();
   if (!raw) return "";
+  // opencode ids are `<provider>/<model>` (`ollama/qwen3-coder`): the model
+  // half is the name; the serving provider is noise in a narrow row. Its own
+  // spelling stays, since local model ids carry meaningful case and dots.
+  const slash = raw.indexOf("/");
+  if (slash > 0) return raw.slice(slash + 1);
   const prefix = `${provider.trim().toLowerCase()}-`;
   const body = raw.toLowerCase().startsWith(prefix) ? raw.slice(prefix.length) : raw;
   const parts = body.split("-").filter(Boolean);

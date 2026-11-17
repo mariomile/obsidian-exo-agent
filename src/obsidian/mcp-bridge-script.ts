@@ -7,7 +7,7 @@
  * with UND_ERR_HEADERS_TIMEOUT and the answer is lost). Env: EXO_BRIDGE_PORT,
  * EXO_BRIDGE_TOKEN.
  */
-export const CODEX_BRIDGE_SCRIPT = `#!/usr/bin/env node
+export const MCP_BRIDGE_SCRIPT = `#!/usr/bin/env node
 // Exo ↔ Codex obsidian-tools bridge (generated — do not edit; regenerated on plugin load).
 import http from "node:http";
 

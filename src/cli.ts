@@ -95,6 +95,7 @@ async function resolveWindowsCli(name: string, configured: string, home: string)
 export function fixedPathCandidates(name: string, home: string): string[] {
   return [
     `${home}/.${name}/local/${name}`, // e.g. ~/.claude/local/claude
+    `${home}/.${name}/bin/${name}`, // e.g. ~/.opencode/bin/opencode (curl installer)
     `${home}/.local/bin/${name}`,
     `${home}/.local/node/bin/${name}`,
     `/opt/homebrew/bin/${name}`,

@@ -1,5 +1,5 @@
 import type { MVASettings } from "./settings";
-import type { SessionCaps } from "./providers/types";
+import type { ModelOption, ProviderId, SessionCaps } from "./providers/types";
 
 /**
  * Last session capability snapshot (skills/commands/agents/tools/mcpServers),
@@ -37,13 +37,28 @@ export function sessionCapsCacheFile(pluginDir: string | undefined): string {
   return `${pluginDir}/session-caps-cache.json`;
 }
 
+/** Runtime model catalogs, per provider. Kept apart from the last snapshot:
+ *  that one belongs to whichever provider spawned last, and a Claude spawn
+ *  must not wipe the Codex catalog. */
+export type ModelCatalogs = Partial<Record<ProviderId, ModelOption[]>>;
+
+/** The catalogs stored beside a cached snapshot. A cache written before they
+ *  had their own field carries only `models`, which only Codex ever filled. */
+export function catalogsFromCache(raw: unknown): ModelCatalogs {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as { catalogs?: unknown; models?: unknown };
+  if (r.catalogs && typeof r.catalogs === "object") return r.catalogs;
+  return Array.isArray(r.models) && r.models.length ? { codex: r.models } : {};
+}
+
 export async function writeSessionCapsCache(
   adapter: SessionCapsCacheAdapter,
   pluginDir: string | undefined,
   caps: SessionCaps,
+  catalogs: ModelCatalogs = {},
 ): Promise<boolean> {
   try {
-    await adapter.write(sessionCapsCacheFile(pluginDir), JSON.stringify(caps));
+    await adapter.write(sessionCapsCacheFile(pluginDir), JSON.stringify({ ...caps, catalogs }));
     return true;
   } catch {
     return false;

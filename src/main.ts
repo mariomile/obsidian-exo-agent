@@ -34,11 +34,10 @@ import type { HarvestLog } from "./obsidian/harvest-log";
 import type { MemoryCaps } from "./core/memory-caps";
 import type { ChatRecord } from "./core/recent-chats";
 import { ADAPTERS } from "./providers/registry";
-import { resolveCli, cliDiagnostics } from "./cli";
+import { cliDiagnostics } from "./cli";
 import { runCliUpdate, maybeAutoUpdateCli } from "./cli-maintenance";
 import { cliVerifyStatus, VERIFIED_CLAUDE_CLI } from "./core/semver";
 import { InlineEditModal } from "./ui/inline-edit";
-import type { AgentEvent } from "./providers/types";
 import {
   AGENT_BLOCK_NAMES,
   buildSeedPrompt,
@@ -65,8 +64,9 @@ import { selectionObserverExtension } from "./editor/selection-observer";
 import { WriteQueue } from "./core/write-queue";
 import { WorkflowSignalStore } from "./obsidian/workflow-signal-store";
 import { registerCollaboCommands } from "./obsidian/collabo-commands";
-import { startCodexBridge, type CodexBridge } from "./obsidian/codex-bridge";
-import { CODEX_BRIDGE_SCRIPT } from "./obsidian/codex-bridge-script";
+import { McpBridgeHost } from "./obsidian/mcp-bridge-host";
+import { runTransient } from "./providers/transient";
+import { PROFILES, PROVIDER_IDS } from "./providers/profiles";
 import { AgentStore, createAgentStore, readAgentBrainBody } from "./obsidian/agent-store";
 import type { AgentDef } from "./core/agents";
 import { AgentTriggerDriver, makeNoteReader, todayDailyNotePath } from "./obsidian/agent-triggers";
@@ -126,11 +126,14 @@ import {
 } from "./core/foundry-distill";
 import { ProposalsModal } from "./ui/proposals-modal";
 import {
+  catalogsFromCache,
   readSessionCapsCache,
   removeSessionCapsCache,
   stripLegacyCachedSessionCaps,
   writeSessionCapsCache,
+  type ModelCatalogs,
 } from "./session-caps-cache";
+import type { ProviderId } from "./providers/types";
 import { checkGitRepo, gitRunner, isWorktreeDirty, runGitCommit } from "./obsidian/git";
 import {
   initialAutoCommitState,
@@ -206,13 +209,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
    *  view) — lets settings show live per-server MCP status. Best-effort: null
    *  until a session has spawned this app run. */
   lastSessionCaps: import("./providers/types").SessionCaps | null = null;
+  /** Runtime model catalogs, per provider (session-caps-cache.ts). */
+  modelCatalogs: ModelCatalogs = {};
 
-  /** Codex ↔ Obsidian tool bridges, isolated per session and stopped on unload. */
-  private codexBridges = new Set<CodexBridge>();
-  private codexBridgeScriptPath: string | null = null;
-
-  /** One-time guard for the codex-bridge node preflight Notice. */
-  private nodeWarned = false;
+  /** Loopback MCP bridges to the Obsidian tools, one per session. */
+  readonly bridges = new McpBridgeHost(this.app, () => this.manifest.dir ?? "", () => this.vaultPath());
   /** Deferred boot maintenance must never outlive a hot unload/reload. */
   /** Handles for idle-scheduled startup chores (requestIdleCallback ids or
    *  setTimeout ids); cancelled on unload. */
@@ -330,6 +331,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     // are rich before the first session's init arrives (refreshed on every init).
     // Own file (session-caps-cache.json), not settings — see saveSessionCapsCache.
     this.lastSessionCaps = await this.loadSessionCapsCache();
+    this.modelCatalogs = catalogsFromCache(this.lastSessionCaps);
 
     this.agentStore = createAgentStore(
       this.app,
@@ -976,36 +978,17 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     onDelta: (text: string) => void
   ): Promise<string> {
     const provider = this.settings.provider;
-    const bin = provider === "claude" ? this.settings.claudeBin : this.settings.codexBin;
-    const cli = await resolveCli(provider, bin);
-    const session = ADAPTERS[provider].createSession({
-      cli,
+    return runTransient({
+      provider,
+      settings: this.settings,
+      cwd: this.vaultPath(),
       model: defaultModel(this.settings, provider),
       effort: "default",
-      cwd: this.vaultPath(),
-      permissionMode: "default",
-      toolsEnabled: false, // pure text transform — no tools needed
-      fastStartup: true,
+      prompt,
+      signal,
+      tag: "utility",
+      onDelta,
     });
-    signal.addEventListener("abort", () => {
-      try {
-        session.dispose("utility-aborted");
-      } catch {
-        /* already torn down */
-      }
-    });
-    let out = "";
-    try {
-      await session.send(prompt, (e: AgentEvent) => {
-        if (e.kind === "text-delta") {
-          out += e.text;
-          onDelta(e.text);
-        }
-      });
-    } finally {
-      session.dispose("utility-run-end");
-    }
-    return out;
   }
 
   /** One-shot text transform (no streaming): returns the trimmed result. Used by
@@ -1052,10 +1035,10 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     convoBridge.chatView(this.app)?.setCurrentSelection(text, sourcePath);
   }
 
-  /** Generate a concise 3-6 word chat title with Haiku. ALWAYS runs on the Claude
-   *  CLI (its own model), regardless of the conversation's provider — a cheap,
+  /** Generate a concise 3-6 word chat title on the DEFAULT provider (Haiku on
+   *  Claude; see `utility.title` in providers/profiles.ts) — a cheap,
    *  latency-sensitive one-liner. Transient, tool-less session (same shape as
-   *  `oneShot`). Never throws: if the Claude CLI can't be resolved or the call
+   *  `oneShot`). Never throws: if the CLI can't be resolved or the call
    *  errors/aborts/times out it resolves to "" and the caller keeps the truncated
    *  placeholder. An internal 90s timeout (plus the caller's `signal`) guarantees
    *  a hung call can't leak.
@@ -1109,42 +1092,26 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     let resultTitle = "";
     let errDetail = "";
     try {
-      const cli = await resolveCli("claude", this.settings.claudeBin);
-      const session = ADAPTERS.claude.createSession({
-        cli,
-        model: "claude-haiku-5-5", // product default — cheap/fast one-liner
-        effort: "low", // Haiku 5.5 thinks by default; a title doesn't need it
+      // The default provider's title model (providers/profiles.ts): Haiku on
+      // Claude, the chat model elsewhere — an opencode-only user needs no Claude.
+      const provider = this.settings.provider;
+      const out = await runTransient({
+        provider,
+        settings: this.settings,
         cwd: this.vaultPath(),
-        permissionMode: "default",
-        toolsEnabled: false, // title only — no tools
-        fastStartup: true,
+        ...PROFILES[provider].utility.title(this.settings),
+        prompt: buildTitlePrompt(input),
+        signal: ctrl.signal,
+        tag: "title",
+        // The real "did the CLI process come up" signal: createSession() is
+        // synchronous, so timing its return would always read ~0ms.
+        onCaps: () => {
+          if (spawnMs < 0) spawnMs = Date.now() - t0;
+        },
+        onDelta: () => {
+          if (deltaMs < 0) deltaMs = Date.now() - t0;
+        },
       });
-      // The real "did the CLI process come up" signal — createSession() itself
-      // is synchronous (it only builds the query() object), so timing right
-      // after it returns would always read ~0ms and could never confirm or
-      // rule out a cold-spawn stall.
-      session.onCaps = () => {
-        if (spawnMs < 0) spawnMs = Date.now() - t0;
-      };
-      ctrl.signal.addEventListener("abort", () => {
-        try {
-          session.dispose("title-aborted");
-        } catch {
-          /* already torn down */
-        }
-      });
-      const prompt = buildTitlePrompt(input);
-      let out = "";
-      try {
-        await session.send(prompt, (e: AgentEvent) => {
-          if (e.kind === "text-delta") {
-            if (deltaMs < 0) deltaMs = Date.now() - t0;
-            out += e.text;
-          }
-        });
-      } finally {
-        session.dispose("title-run-end");
-      }
       resultTitle = sanitizeTitle(out);
       return resultTitle;
     } catch (err) {
@@ -1165,7 +1132,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   }
 
   /**
-   * Run a prompt on a cheap, transient, tool-less Claude CLI session (same
+   * Run a prompt on a cheap, transient, tool-less session of the default provider (same
    * lifecycle shape as {@link generateTitle}). The reusable chassis behind every
    * background utility pass: memory harvest, turn suggestions, playbook
    * distillation. Returns the raw model text, or "" on any failure: never throws,
@@ -1191,45 +1158,27 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     // init + the API round trip. A 15s default could never succeed, so every
     // call site already overrode it; the default was a trap for the next one.
     const { signal, timeoutMs = 90_000, onUsage } = opts;
-    const model = opts.model || this.settings.backgroundModel || "claude-sonnet-5-5";
+    // Runs on the default provider; `opts.model` is honoured on Claude only
+    // (callers pass Claude ids), elsewhere the pass uses the chat model.
+    const provider = this.settings.provider;
+    const model = PROFILES[provider].utility.pass(this.settings, opts.model);
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     if (signal.aborted) ctrl.abort();
     else signal.addEventListener("abort", onAbort);
     const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const cli = await resolveCli("claude", this.settings.claudeBin);
-      const session = ADAPTERS.claude.createSession({
-        cli,
+      return await runTransient({
+        provider,
+        settings: this.settings,
+        cwd: this.vaultPath(),
         model,
         effort: "default",
-        cwd: this.vaultPath(),
-        permissionMode: "default",
-        toolsEnabled: false, // read-only extraction — no tools
-        fastStartup: true,
+        prompt,
+        signal: ctrl.signal,
+        tag: "utility-pass",
+        onUsage,
       });
-      ctrl.signal.addEventListener("abort", () => {
-        try {
-          session.dispose("utility-pass-aborted");
-        } catch {
-          /* already torn down */
-        }
-      });
-      let out = "";
-      try {
-        await session.send(prompt, (e: AgentEvent) => {
-          if (e.kind === "text-delta") out += e.text;
-        });
-        // Read BEFORE dispose — contextUsage() is an async control round-trip
-        // that a disposed session may never resolve; lastTurnTokens() is
-        // populated synchronously by the `result` message that just settled
-        // send() above.
-        const tokens = session.lastTurnTokens?.();
-        if (typeof tokens === "number") onUsage?.(tokens);
-      } finally {
-        session.dispose("utility-pass-run-end");
-      }
-      return out;
     } catch (err) {
       // Caller treats "" as no-op, but NEVER swallow the reason silently —
       // an instantly-empty utility pass is indistinguishable from a healthy
@@ -1279,7 +1228,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     // seeding is one-shot and high-stakes, so it uses the frontier model.
     const raw = await this.runUtilityPass(buildSeedPrompt(sources), {
       signal: ctrl.signal,
-      model: this.settings.claudeModel,
+      model: defaultModel(this.settings, this.settings.provider),
       timeoutMs: 120_000,
     });
     const blocks = parseSeedBlocks(raw);
@@ -1645,9 +1594,12 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     // Migrate the old "Default" model option (empty id — silently let the CLI's
     // own default apply): the picker no longer offers an ambiguous unlabeled
-    // state, so an empty saved id resolves to that provider's first real model.
-    if (!this.settings.claudeModel) this.settings.claudeModel = ADAPTERS.claude.models()[0].id;
-    if (!this.settings.codexModel) this.settings.codexModel = ADAPTERS.codex.models()[0].id;
+    // state, so an empty saved id resolves to that provider's first real model
+    // (a provider with no built-ins keeps "": its CLI's own default).
+    for (const p of PROVIDER_IDS) {
+      const k = PROFILES[p].keys.model;
+      if (!this.settings[k]) this.settings[k] = ADAPTERS[p].models()[0]?.id ?? "";
+    }
     // Seed a few example reusable prompts on first run (once) so "Your prompts"
     // isn't empty. They're editable/deletable in Settings; never re-seeded.
     if (!this.settings.seededPrompts && this.settings.customPrompts.length === 0) {
@@ -1774,9 +1726,13 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
   // Mechanics (file path, read/write/corrupt-handling) live in
   // session-caps-cache.ts — these three are thin wrappers that own only the
   // WriteQueue serialization, same division of labor as workflow-signal-store.
-  async saveSessionCapsCache(caps: import("./providers/types").SessionCaps): Promise<boolean> {
+  /** A session's init snapshot: the latest overall, plus its provider's model
+   *  catalog when it reports one. Persisted for the next app run. */
+  async recordSessionCaps(provider: ProviderId, caps: import("./providers/types").SessionCaps): Promise<boolean> {
+    this.lastSessionCaps = caps;
+    if (caps.models?.length) this.modelCatalogs[provider] = caps.models;
     return this.sessionCapsWriteQueue.enqueue(() =>
-      writeSessionCapsCache(this.app.vault.adapter, this.manifest.dir, caps)
+      writeSessionCapsCache(this.app.vault.adapter, this.manifest.dir, caps, this.modelCatalogs)
     );
   }
   async loadSessionCapsCache(): Promise<import("./providers/types").SessionCaps | null> {
@@ -1838,7 +1794,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
     const startedAt = Date.now();
     new Notice(`Running playbook "${name}"…`);
-    const headlessOpts: HeadlessOpts = { write: opts.write, codexBridge: await this.headlessBridge(), runName: name };
+    const headlessOpts: HeadlessOpts = { write: opts.write, mcpBridge: await this.headlessBridge(), runName: name };
     const result = await runHeadlessPlaybook(this.app, this.settings, prompt, headlessOpts);
     if (result.writes.length) this.noteVaultWrite(result.writes);
     const path = await writeReport(this.app, name, result, this.paths.reports);
@@ -1882,7 +1838,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     this.exoQueueBusy = true;
     try {
       await drainExoQueue(this.app, this.settings, {
-        codexBridge: () => this.headlessBridge(),
+        mcpBridge: () => this.headlessBridge(),
         noteWrite: (paths) => this.noteVaultWrite(paths),
       });
     } catch (err) {
@@ -1892,59 +1848,11 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
     }
   }
 
-  /** True when `node` resolves on the given PATH — the codex child must be able
-   *  to spawn the bridge script. On failure, warn ONCE per app run. */
-  async checkNodeForBridge(pathEnv: string): Promise<boolean> {
-    try {
-      await execFileAsync("node", ["--version"], { env: { ...process.env, PATH: pathEnv } });
-      return true;
-    } catch {
-      if (!this.nodeWarned) {
-        this.nodeWarned = true;
-        new Notice("Obsidian tools bridge unavailable for Codex — `node` not found on PATH. Codex runs without vault tools.");
-      }
-      return false;
-    }
-  }
-
-  /** The vault-tools bridge a headless run needs: one per run on Codex with the
-   *  Obsidian tools on, none otherwise (Claude gets its tools in-process). */
-  private async headlessBridge(): Promise<HeadlessOpts["codexBridge"]> {
-    if (this.settings.provider !== "codex" || !this.settings.obsidianToolsEnabled) return undefined;
-    return (await this.ensureCodexBridge()) ?? undefined;
-  }
-
-  /** Start an isolated loopback executor and materialize the shared stdio script
-   *  the codex child spawns. Null when anything fails — Codex then runs without
-   *  Obsidian tools. The owning session must call `release` on teardown. */
-  async ensureCodexBridge(): Promise<{
-    bridge: CodexBridge;
-    scriptPath: string;
-    release: () => void;
-  } | null> {
-    try {
-      if (!this.codexBridgeScriptPath) {
-        const rel = `${this.manifest.dir}/codex-bridge.mjs`;
-        await this.app.vault.adapter.write(rel, CODEX_BRIDGE_SCRIPT);
-        this.codexBridgeScriptPath = `${this.vaultPath()}/${rel}`;
-      }
-      const bridge = await startCodexBridge();
-      this.codexBridges.add(bridge);
-      let released = false;
-      return {
-        bridge,
-        scriptPath: this.codexBridgeScriptPath,
-        release: () => {
-          if (released) return;
-          released = true;
-          this.codexBridges.delete(bridge);
-          bridge.stop();
-        },
-      };
-    } catch (e) {
-      console.warn("[Exo] codex bridge unavailable:", e);
-      return null;
-    }
+  /** The vault-tools bridge a headless run needs: one per run when the provider
+   *  reaches the Obsidian tools through it, none otherwise (Claude: in-process). */
+  private async headlessBridge(): Promise<HeadlessOpts["mcpBridge"]> {
+    if (PROFILES[this.settings.provider].toolWiring === "in-process" || !this.settings.obsidianToolsEnabled) return undefined;
+    return (await this.bridges.lease()) ?? undefined;
   }
 
   async listPendingProposals(): Promise<PendingProposals> {
@@ -2119,8 +2027,7 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       window.clearTimeout(h);
     }
     this.startupIdleHandles = [];
-    for (const bridge of this.codexBridges) bridge.stop();
-    this.codexBridges.clear();
+    this.bridges.stopAll();
   }
 
   /** Pending queue requests (for the Autonomy card). */
@@ -2503,21 +2410,21 @@ export default class ExoPlugin extends Plugin implements ExoToolHost {
       const headlessOpts: HeadlessOpts = {
         write, runName: agent.brain.name,
         agentCaller: { slug: agent.brain.slug, depth: callerDepth + 1 },
-        codexBridge: await this.headlessBridge(),
+        mcpBridge: await this.headlessBridge(),
         mcp: agent.contract.mcp,
       };
       // Claude delegates to a true isolated subagent via an inline Agent()
-      // instruction (buildAgentRunPrompt). Codex has no such primitive — its own
-      // `collabAgentToolCall` is unrelated and has no notion of a named persona
-      // file — so a Codex run instead adopts the agent's own instructions as
-      // this session's system prompt and gets a plain first-person task prompt.
-      // An inline brain has neither a subagent nor instructions to adopt: both
-      // engines get the direct prompt with its own prompt as the task.
+      // instruction (buildAgentRunPrompt). A provider without that primitive
+      // (Codex's `collabAgentToolCall` has no notion of a named persona file)
+      // adopts the agent's own instructions as this session's system prompt and
+      // gets a plain first-person task prompt. An inline brain has neither a
+      // subagent nor instructions to adopt: every engine gets the direct prompt.
+      const bySystemPrompt = PROFILES[this.settings.provider].agentBinding === "system-prompt";
       const prompt =
-        this.settings.provider === "codex" || inline
+        bySystemPrompt || inline
           ? buildDirectAgentRunPrompt(agent, reason, memory, task, this.paths.reports, propose)
           : buildAgentRunPrompt(agent, reason, memory, task, this.paths.reports, propose);
-      if (this.settings.provider === "codex" && !inline) {
+      if (bySystemPrompt && !inline) {
         headlessOpts.systemPrompt = buildAgentSystemPrompt(
           agent.brain,
           await readAgentBrainBody(this.app, agent.brain)

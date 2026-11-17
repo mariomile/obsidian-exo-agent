@@ -110,7 +110,7 @@ export async function drainExoQueue(
   settings: MVASettings,
   deps: {
     /** A fresh vault-tools bridge per request (Codex), so queue runs get the same tools as chat. */
-    codexBridge: () => Promise<HeadlessOpts["codexBridge"]>;
+    mcpBridge: () => Promise<HeadlessOpts["mcpBridge"]>;
     /** Reports the answered note to the git safety net. */
     noteWrite: (paths: readonly string[]) => void;
   }
@@ -132,7 +132,7 @@ export async function drainExoQueue(
 
     const { fm, body } = parseNote(content);
     const prompt = queueRequestBody(body);
-    const result = await runHeadlessPlaybook(app, settings, prompt, { codexBridge: await deps.codexBridge() });
+    const result = await runHeadlessPlaybook(app, settings, prompt, { mcpBridge: await deps.mcpBridge() });
     const iso = new Date().toISOString().slice(0, 16).replace("T", " ");
 
     const previousAttempts = Number(fm.match(/^exo-attempts:\s*(\d+)/m)?.[1] ?? 0) || 0;

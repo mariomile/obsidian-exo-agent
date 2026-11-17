@@ -792,7 +792,7 @@ describe("CodexSession app-server lifecycle", () => {
     const child = new FakeCodexProcess();
     const spawn = vi.fn(() => child as never);
     const session = new CodexSession(
-      { ...OPTS, codexBridge: { port: 4321, token: "tok", scriptPath: "/bridge.mjs" } },
+      { ...OPTS, mcpBridge: { port: 4321, token: "tok", scriptPath: "/bridge.mjs" } },
       { spawn, requestTimeoutMs: 500, turnStartTimeoutMs: 500 }
     );
     try {
@@ -812,7 +812,7 @@ describe("CodexSession app-server lifecycle", () => {
   it("releases its per-session Obsidian bridge exactly once", async () => {
     const stop = vi.fn();
     const { session } = await readySession({
-      codexBridge: { port: 1234, token: "secret", scriptPath: "/bridge.mjs", stop },
+      mcpBridge: { port: 1234, token: "secret", scriptPath: "/bridge.mjs", stop },
     });
     session.dispose();
     session.dispose();

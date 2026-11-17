@@ -4,7 +4,7 @@
 
 # Exo Agent
 
-An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** or the **Codex CLI** you already use. Your vault is the agent's working directory: it reads, links and writes your notes from a theme-aware chat, no terminal needed.
+An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI**, the **Codex CLI** or **opencode** (including local models) you already use. Your vault is the agent's working directory: it reads, links and writes your notes from a theme-aware chat, no terminal needed.
 
 ## Screenshots
 
@@ -31,24 +31,25 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 ## Features
 
 **Chat**
-- **Claude or Codex, per chat.** Claude runs through the Claude Agent SDK on your installed CLI; Codex through a persistent `codex app-server` thread. Pick any model from the composer: the choice belongs to that chat, and new chats start from the defaults in settings. Choose which models the picker lists in Settings, *Models in the composer*.
+- **Claude, Codex or opencode, per chat.** Claude runs through the Claude Agent SDK on your installed CLI; Codex through a persistent `codex app-server` thread; opencode through `opencode acp` (the Agent Client Protocol). Pick any model from the composer: the choice belongs to that chat, and new chats start from the defaults in settings. Choose which models the picker lists in Settings, *Models in the composer*.
 - **Agentic, with permission gating.** The agent can read, write, edit, search and run shell commands in your vault. Every tool call is a card; sensitive ones ask **Allow once / Always allow / Deny**. Edits show a diff, shell calls show command and output.
 - **Context that follows the screen.** The note you are looking at rides along with your message as a *Current Document* card. Behind a full-page chat it is only offered (click to attach), so a note you can't see is never sent by surprise. Add more with `@` or the `+` menu (notes, files, folders, images).
 - **Composer.** `/` opens your prompts plus the vault's `.claude/` commands and skills; messages typed while the agent works are queued. Effort and permission mode sit next to the model.
-- **Persistent sessions.** Conversations survive reloads and resume their CLI session; Claude keeps one warm process across turns. Live context-window usage, streamed reasoning, parallel chats, and a history gallery.
+- **Local models through opencode.** opencode (v2 or newer) runs whatever its own config provides: Ollama, LM Studio and vLLM servers it finds on this machine, any OpenAI-compatible endpoint in `opencode.json`, or a cloud provider. Exo lists those models in the picker and doesn't need its own endpoint settings. For a local model, set `limit.context` in `opencode.json`, because opencode assumes 200k tokens for a model it doesn't know. With opencode as the default provider, AI titles and the background passes run on it too, so you don't need Claude installed.
+- **Persistent sessions.** Conversations survive reloads and resume their CLI session; each chat keeps one warm process across turns. Live context-window usage, streamed reasoning, parallel chats, and a history gallery.
 - **Interactive UI previews.** HTML and SVG blocks in replies have **Preview**, **Code**, reload and expand controls. Generated `.html`, `.htm` and `.svg` files preview in the chat and refresh when edited. Use self-contained markup with inline CSS and JavaScript; external assets, API requests and framework imports are unavailable in the sandbox.
 
 **Obsidian-native** (all toggleable in settings)
-- **Vault tools**: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note`, `save_to_note`, `update_frontmatter`, `add_links`, `open_note`. `search_vault` uses the [Sonar](https://github.com/mariomile/obsidian-sonar) index when installed. Codex reaches the same tools through a local MCP bridge.
+- **Vault tools**: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note`, `save_to_note`, `update_frontmatter`, `add_links`, `open_note`. `search_vault` uses the [Sonar](https://github.com/mariomile/obsidian-sonar) index when installed. Codex and opencode reach the same tools through a local MCP bridge: Codex over stdio, which needs `node` on your `PATH`, and opencode over HTTP, which doesn't.
 - **Touched notes**: after each turn, a footer lists what the agent edited (with diff and revert) and read. Replies link the notes they mention.
 - **Memory**: your vault is Exo's memory. See [Memory](#memory).
 - **Capabilities hub**: skills, MCP servers, playbooks, automations and memory in one pane, also callable by the agent.
-- **Named agents** *(off by default)*: your `.claude/agents/*.md` become teammates. `@agent` routes one turn, `/as <agent>` binds the chat. Each agent has a contract (triggers, autonomy tier `notify`/`propose`/`act`, read/write globs); unattended runs are checkpointed and logged. On Claude a bound agent is an isolated subagent; on Codex it hands the turn the agent's instructions, with no isolation. See `docs/specs/2026-08-01-agents-design.md`.
+- **Named agents** *(off by default)*: your `.claude/agents/*.md` become teammates. `@agent` routes one turn, `/as <agent>` binds the chat. Each agent has a contract (triggers, autonomy tier `notify`/`propose`/`act`, read/write globs); unattended runs are checkpointed and logged. On Claude a bound agent is an isolated subagent; on Codex and opencode it hands the turn the agent's instructions, with no isolation. See `docs/specs/2026-08-01-agents-design.md`.
 
 ## Requirements
 
-- **Desktop Obsidian only** (`isDesktopOnly`): Exo spawns the local `claude`/`codex` CLI with Node's `child_process`, which mobile doesn't have.
-- The `claude` and/or `codex` CLI installed and signed in. Paths are detected automatically; override them in settings.
+- **Desktop Obsidian only** (`isDesktopOnly`): Exo spawns the local `claude`/`codex`/`opencode` CLI with Node's `child_process`, which mobile doesn't have.
+- At least one of: the `claude` or `codex` CLI, installed and signed in; or `opencode` v2 or newer with a model it can run (a local model server, or `opencode auth login` for a cloud provider). Paths are detected automatically; override them in settings.
 - Optional: [Sonar](https://github.com/mariomile/obsidian-sonar) for better vault search.
 
 ## Install
@@ -61,17 +62,17 @@ To try it without touching your vault, use the [Obsidianverse sample vault](http
 
 ## Privacy & Security
 
-**Network.** Exo sends no telemetry and never contacts its author. Model traffic comes from the `claude` or `codex` CLI on your machine, using **your own login or API key**: `claude` talks to Anthropic, `codex` to OpenAI. Exo itself makes two kinds of request, both via Obsidian's `requestUrl`:
+**Network.** Exo sends no telemetry and never contacts its author. Model traffic comes from the `claude`, `codex` or `opencode` CLI on your machine, using **your own login or API key**: `claude` talks to Anthropic, `codex` to OpenAI, and `opencode` to whatever its config names. With a local model server, nothing leaves your machine. Exo itself makes two kinds of request, both via Obsidian's `requestUrl`:
 - **CLI update check**: at most once a day, a GET to `https://registry.npmjs.org/@anthropic-ai/claude-code/latest` for the latest version number. Nothing about you or your vault is sent.
 - **Exo Collabo** (opt-in, off until you set a service URL and API key): the note you choose to share goes to the service URL *you* configured.
 
-**What leaves your machine.** Your message plus the context Exo attaches (the visible note, `@`-mentioned files, tool results and, with the Obsidian-native layer on, your memory folder) goes to the CLI, which forwards it to Anthropic or OpenAI within your own account. Nothing reaches the Exo author.
+**What leaves your machine.** Your message plus the context Exo attaches (the visible note, `@`-mentioned files, tool results and, with the Obsidian-native layer on, your memory folder) goes to the CLI, which forwards it to Anthropic, OpenAI or the model server opencode is configured for, within your own account. Nothing reaches the Exo author.
 
-**What the agent can do.** The CLI runs with your vault as its working directory, so the agent can read, write and edit vault files and run shell commands. On Claude, each tool call passes through Exo's permission cards (per-session allowlist; only read-only tools can be auto-allowed). On Codex, its sandbox plus command/file approvals are routed through the same UI.
+**What the agent can do.** The CLI runs with your vault as its working directory, so the agent can read, write and edit vault files and run shell commands. On Claude, each tool call passes through Exo's permission cards (per-session allowlist; only read-only tools can be auto-allowed). On Codex, its sandbox plus command/file approvals are routed through the same UI. On opencode, Exo starts a private opencode process with its own settings, which ask before every tool call. Those requests go through the same cards. It also turns off opencode's git snapshots of the vault, its formatters and its language servers. Your `opencode.json` and opencode's shared background service aren't changed. Your own MCP servers in opencode run through its *Code Mode*, so their calls ask for permission as a generic `execute` card.
 
 **Capabilities outside the Obsidian API**, and why:
 - **Shell (`child_process`)**: spawning the CLIs is the plugin. It also runs `node --version` / `<cli> --version` to find them, `npm install -g @anthropic-ai/claude-code` or `claude update` when you click *Update now*, `claude mcp login/logout` from the Connections pane, and `node chat-recall.mjs` for the optional semantic chat search.
-- **Filesystem outside the vault (`fs`)**: resolves CLI install locations; reads `~/.claude/` (skills, agents, MCP config, transcripts) for the hub and resume checks, and deletes a chat's transcript there only when you free that chat; writes two helper scripts (`codex-bridge.mjs`, `chat-recall.mjs`) into the plugin folder.
+- **Filesystem outside the vault (`fs`)**: resolves CLI install locations; reads `~/.claude/` (skills, agents, MCP config, transcripts) for the hub and resume checks, and deletes a chat's transcript there only when you free that chat; writes two helper scripts (`exo-mcp-bridge.mjs`, `chat-recall.mjs`) into the plugin folder; for an opencode chat, writes Exo's instructions to a temporary file that is deleted when the chat's session ends.
 - **Environment**: the CLIs inherit your environment with an augmented `PATH` (GUI apps don't get your shell's `PATH`); `$SHELL` helps locate them. Nothing is read to identify you.
 - **Vault enumeration**: `@`-mentions, the daily pulse, agent triggers and the vault tools list files locally; content leaves only when a prompt sends it to your provider.
 - **Clipboard**: *Copy* buttons write to it; *Import a document from Collabo* reads a share link from it, only when you run that command.
@@ -104,7 +105,7 @@ pnpm test     # vitest
 
 Put the absolute path of your vault's `.obsidian/plugins/exo-agent` folder in a `.obsidian-plugin-dir` file to deploy on every build. Release steps: `docs/release-checklist.md`.
 
-**Layout.** `src/main.ts` is the plugin entry; `src/view.ts` the chat view; `src/ui/` its components (composer, tool cards, the Capabilities hub in `src/ui/hub/`); `src/providers/` the Claude and Codex adapters, normalized into one `AgentEvent` stream; `src/obsidian/` vault tools, memory and agents; `src/core/` pure, unit-tested logic.
+**Layout.** `src/main.ts` is the plugin entry; `src/view.ts` the chat view; `src/ui/` its components (composer, tool cards, the Capabilities hub in `src/ui/hub/`); `src/providers/` the Claude, Codex and opencode adapters, normalized into one `AgentEvent` stream, with each provider's choices in `profiles.ts`; `src/obsidian/` vault tools, memory and agents; `src/core/` pure, unit-tested logic.
 
 ## License
 

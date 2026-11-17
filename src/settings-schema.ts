@@ -5,6 +5,7 @@
  * `from "./settings"` path.
  */
 import type { PermissionMode, ProviderId } from "./providers/types";
+import { providerStr } from "./providers/profiles";
 import type { AutomationConfig } from "./core/automations";
 import { initialDailyPulseReviewState, type DailyPulseReviewState } from "./core/daily-pulse";
 import type { MemorySetup } from "./core/vault-setup";
@@ -42,6 +43,12 @@ export interface MVASettings {
    *  than a show list, so a model added to the catalog appears by default. */
   claudeHiddenModels: string[];
   codexHiddenModels: string[];
+  /** opencode: binary, default model ("" = opencode's own default from its
+   *  config), custom ids and hidden ids — same roles as the two above. */
+  opencodeBin: string;
+  opencodeModel: string;
+  opencodeCustomModels: string;
+  opencodeHiddenModels: string[];
   effort: string;
   systemPrompt: string;
   /** User-defined prompt templates surfaced in the "/" menu. */
@@ -246,8 +253,8 @@ export interface MVASettings {
 }
 
 /** The model new chats and background runs of `provider` start from. */
-export function defaultModel(s: Pick<MVASettings, "claudeModel" | "codexModel">, provider: ProviderId): string {
-  return provider === "claude" ? s.claudeModel : s.codexModel;
+export function defaultModel(s: MVASettings, provider: ProviderId): string {
+  return providerStr(s, provider, "model");
 }
 
 export const DEFAULT_SETTINGS: MVASettings = {
@@ -260,6 +267,10 @@ export const DEFAULT_SETTINGS: MVASettings = {
   codexCustomModels: "",
   claudeHiddenModels: [],
   codexHiddenModels: [],
+  opencodeBin: "",
+  opencodeModel: "",
+  opencodeCustomModels: "",
+  opencodeHiddenModels: [],
   effort: "default",
   systemPrompt: "",
   customPrompts: [],

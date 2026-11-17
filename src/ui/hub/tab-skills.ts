@@ -18,6 +18,7 @@ import {
   type NamedItem,
 } from "../../core/capability-scan";
 import { skillSections, matchesQuery } from "../../core/hub-sections";
+import { PROFILES } from "../../providers/profiles";
 import { reconcileList, type CardModel } from "../keyed-reconcile";
 import { buildAccordionGroupHeader, buildGroupHeader, buildRowScaffold, buildSearchBox, type HubTabContext } from "./shared";
 
@@ -180,7 +181,8 @@ function chipList(body: HTMLElement, items: NamedItem[], prefix: string, ctx?: H
 async function vocabularySections(ctx: HubTabContext): Promise<CardModel[]> {
   const s = ctx.plugin.settings;
   const caps = ctx.plugin.lastSessionCaps;
-  const claude = s.provider === "claude";
+  // `nativeFirst` and the "native" badge describe the in-process server.
+  const claude = PROFILES[s.provider].toolWiring === "in-process";
   const agentic = s.toolsEnabled;
   const nativeOn = s.obsidianToolsEnabled && agentic && claude;
 

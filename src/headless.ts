@@ -3,7 +3,7 @@ import { resolveCli, describeError } from "./cli";
 import { ADAPTERS } from "./providers/registry";
 import type { AgentEvent } from "./providers/types";
 import { buildObsidianTools, createObsidianToolServer, OBSIDIAN_READ_TOOLS, type ObsidianToolOpts } from "./obsidian/tools";
-import type { CodexBridge } from "./obsidian/codex-bridge";
+import type { BridgeLease } from "./obsidian/mcp-bridge-host";
 import { READ_ONLY_TOOLS, toolFilePath, toolFilePaths } from "./ui/tools";
 import { isReadOnlyExternalTool } from "./core/headless-tools";
 import { rememberMcpServers, toolInMcpScope } from "./core/mcp-scope";
@@ -15,6 +15,8 @@ import { effortFor } from "./core/model-tuning";
 import { toVaultRelative } from "./core/vault-path";
 import type { MVASettings } from "./settings";
 import { defaultModel } from "./settings-schema";
+import { PROFILES, providerStr } from "./providers/profiles";
+import { wireProviderTools } from "./obsidian/tool-wiring";
 import type { AgentCaller } from "./core/agent-runs";
 
 /** Per-step idle timeout — no event for this long aborts the run (bounded autonomy). */
@@ -35,8 +37,8 @@ export interface HeadlessResult {
 
 export interface HeadlessOpts {
   write?: boolean;
-  /** Isolated Codex bridge owned by this run; released with the session. */
-  codexBridge?: { bridge: CodexBridge; scriptPath: string; release: () => void };
+  /** Isolated tools bridge owned by this run; released with the session. */
+  mcpBridge?: BridgeLease;
   /** Session-level system prompt override — a named agent's own instructions
    *  for a Codex run, which has no subagent primitive to delegate to instead
    *  (see `buildAgentSystemPrompt`). Ignored by Claude, which keeps its
@@ -103,7 +105,6 @@ export async function runHeadlessPlaybook(
 ): Promise<HeadlessResult> {
   const provider = settings.provider;
   const write = opts.write === true;
-  const bin = provider === "claude" ? settings.claudeBin : settings.codexBin;
   const steps = prompt.split(/\s+>>>\s+/).map((s) => s.trim()).filter(Boolean);
   const reads = new Set<string>();
   const writes = new Set<string>();
@@ -124,21 +125,17 @@ export async function runHeadlessPlaybook(
 
   let session: import("./providers/types").AgentSession | null = null;
   try {
-    const cli = await resolveCli(provider, bin);
-    let codexBridge: import("./providers/types").SessionOpts["codexBridge"];
-    if (provider === "codex" && settings.obsidianToolsEnabled && opts.codexBridge) {
-      const readNames = new Set([...OBSIDIAN_READ_TOOLS].map((name) => name.replace("mcp__obsidian__", "")));
-      const tools = buildObsidianTools(app, toolOpts).filter(
-        (tool) => readNames.has(tool.name) || (write && WRITE_TOOLS.test(tool.name))
-      );
-      opts.codexBridge.bridge.setTools(tools);
-      codexBridge = {
-        port: opts.codexBridge.bridge.port,
-        token: opts.codexBridge.bridge.token,
-        scriptPath: opts.codexBridge.scriptPath,
-        stop: opts.codexBridge.release,
-      };
-    }
+    const cli = await resolveCli(PROFILES[provider].cliName, providerStr(settings, provider, "bin"));
+    const readNames = new Set([...OBSIDIAN_READ_TOOLS].map((name) => name.replace("mcp__obsidian__", "")));
+    const { obsidianServer, mcpBridge } = await wireProviderTools({
+      provider,
+      enabled: settings.obsidianToolsEnabled,
+      inProcess: () => createObsidianToolServer(app, toolOpts),
+      // Bridge handlers bypass any CLI sandbox: reads, plus note writes in write mode.
+      bridgeTools: () =>
+        buildObsidianTools(app, toolOpts).filter((tool) => readNames.has(tool.name) || (write && WRITE_TOOLS.test(tool.name))),
+      lease: async () => opts.mcpBridge,
+    });
     const model = defaultModel(settings, provider);
     session = ADAPTERS[provider].createSession({
       cli,
@@ -154,16 +151,12 @@ export async function runHeadlessPlaybook(
       fastStartup: opts.mcp ? opts.mcp.length === 0 : !settings.playbookExternalTools,
       waitForMcp: opts.mcp ? opts.mcp.length > 0 : settings.playbookExternalTools,
       ...(opts.mcp?.length ? { mcpOnly: { allow: opts.mcp, known: settings.knownMcpServers ?? [] } } : {}),
-      // Claude: in-process vault tools, same options as the Codex bridge above.
-      obsidianServer:
-        provider === "claude" && settings.obsidianToolsEnabled
-          ? createObsidianToolServer(app, toolOpts)
-          : undefined,
+      obsidianServer,
       // Codex: the sandbox is the gate — workspace-write only in write mode,
       // never ask (nothing can answer).
       sandboxMode: write ? "workspace-write" : "read-only",
       approvalPolicy: "never",
-      codexBridge,
+      mcpBridge,
     });
 
     // Learn the server roster from what this session loaded, so a later
@@ -253,7 +246,7 @@ export async function runHeadlessPlaybook(
     session?.dispose("headless-run-end");
     // Idempotent: a no-op when the session already released it, and the only
     // release when the bridge never reached a session (no session, or tools off).
-    opts.codexBridge?.release();
+    opts.mcpBridge?.release();
   }
 }
 

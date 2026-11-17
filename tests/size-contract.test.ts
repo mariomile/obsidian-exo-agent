@@ -75,7 +75,13 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 3, S1 recall apribile): `jumpToTurn` vive
   // ora in `ui/turn-jump.ts` insieme a `revealMessage`. 5929 -> 5921 righe
   // reali, tetto 5921.
-  "src/view.ts": 5921,
+  // Abbassato il 2026-11-08 (profili dei provider): i ternari claude/codex
+  // vivono in `providers/profiles.ts`, il wiring dei tool in
+  // `obsidian/tool-wiring.ts`, le liste dei modelli in
+  // `providers/model-lists.ts`. 5921 -> 5892 righe reali. Tetto 5907: 15 righe
+  // sono il budget dichiarato per il wiring di opencode, non un permesso di
+  // ricrescita.
+  "src/view.ts": 5907,
   // Abbassato il 2026-08-07 dopo l'estrazione della registrazione e
   // attivazione delle view in `ui/view-registry.ts`, e di nuovo il 2026-08-08
   // dopo l'estrazione degli SVG di addIcon in `ui/icons.ts` (3492 -> 3460
@@ -122,7 +128,12 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 3, save_to_note): `createQueueRequest`
   // vive in `queue.ts`; il log dei salvataggi entra in `obsidian/note-save.ts`.
   // 2816 -> 2805 righe reali, tetto 2805.
-  "src/main.ts": 2805,
+  // Abbassato il 2026-11-08 (profili dei provider): i bridge MCP vivono in
+  // `obsidian/mcp-bridge-host.ts`, il ciclo di vita delle sessioni usa-e-getta
+  // (runStream, titoli, utility pass) in `providers/transient.ts`.
+  // 2805 -> 2702 righe reali. Tetto 2717: 15 righe di budget per il routing
+  // dei pass di utilità per provider (opencode, fase 3).
+  "src/main.ts": 2717,
   // Abbassato il 2026-08-11 dopo l'estrazione del merge command+skill del menu
   // `/` in `core/slash.ts` (`mergeSlashEntries`): la lista non è UI, è la
   // riconciliazione di due roster che si sovrappongono, e lì è testabile senza
@@ -186,7 +197,10 @@ const CEILINGS: Record<string, number> = {
   // Abbassato il 2026-10-24 (Release 2, MCP in un posto solo): l'editor raw di
   // `.mcp.json` e l'avviso Fast startup escono dai settings (l'avviso va nel
   // tab MCP). 882 -> 806 righe reali, tetto 811.
-  "src/settings.ts": 811,
+  // Abbassato il 2026-11-08 (profili dei provider): modello, binario e modelli
+  // custom di ogni provider vivono in `ui/settings-provider.ts`, resi in loop
+  // dalla tabella dei profili. 787 -> 686 righe reali, tetto 691.
+  "src/settings.ts": 691,
   // Aggiunto il 2026-08-12. Questo file era l'UNICO pannello del repo senza
   // tetto, e nell'ondata chat+cosmos e' passato da 859 a 1020 righe senza che
   // niente lo fermasse — mentre lo stesso commit ABBASSAVA quello di main.ts.

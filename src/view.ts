@@ -37,7 +37,7 @@ import { AgentFolder, type BlockWrite } from "./obsidian/agent-folder";
 import { BootPreambleCache } from "./obsidian/memory";
 import type { SavedMemory } from "./obsidian/proposal-producer";
 import { memoryCaps, type MemoryCaps } from "./core/memory-caps";
-import { composerModelChoices, providerModels, type ComposerModelChoice } from "./core/model-options";
+import { composerModelChoices, type ComposerModelChoice } from "./core/model-options";
 import { setProviderMark } from "./ui/provider-mark";
 import { effortFor } from "./core/model-tuning";
 import { sessionSignature } from "./core/session-signature";
@@ -69,7 +69,10 @@ import { StepsRun } from "./ui/steps";
 import { firstErrorLine, stepPlacement, isSubagentTool, shouldFoldStepsRun } from "./core/steps";
 import { agentTaskRow } from "./core/agent-task";
 import { hoistSlashCommand, expandVaultCommand } from "./core/slash";
-import { codexSessionToolset, mapUserInputAnswers } from "./core/codex-toolset";
+import { bridgeSessionToolset, mapUserInputAnswers } from "./core/bridge-toolset";
+import { wireProviderTools } from "./obsidian/tool-wiring";
+import { PROFILES, PROVIDER_IDS, isProviderId, providerHidden, providerStr } from "./providers/profiles";
+import { fallbackModel, providerModelList } from "./providers/model-lists";
 import { setGoal, clearGoal, advance, resumeGoal, buildContinuationPrompt } from "./core/goal-loop";
 import { applyWorkflowProgress, createWorkflowRun, summarizeWorkflowRun, type WorkflowRun } from "./core/workflow-progress";
 import { classifyTurnOutput } from "./core/workflow-classify";
@@ -714,20 +717,10 @@ export class ChatView extends ItemView {
     this.diag.push("session", `spawn provider=${c.provider} resume=${c.sessionId ? c.sessionId.slice(0, 8) : "no"}`);
     c.session?.dispose("respawn");
     const s = this.plugin.settings;
-    const bin = c.provider === "claude" ? s.claudeBin : s.codexBin;
-    const cli = await resolveCli(c.provider, bin);
-
+    const cli = await resolveCli(PROFILES[c.provider].cliName, providerStr(s, c.provider, "bin"));
     const hasObsidianTools = s.obsidianToolsEnabled && s.toolsEnabled;
-    // Claude receives the native in-process MCP server; Codex receives the same
-    // registry through its isolated loopback bridge below.
-    const useObsidian = hasObsidianTools && c.provider === "claude";
-    // The createSdkMcpServer instance binds to its first session's transport and
-    // is NOT reusable across query() sessions — a cached instance means every
-    // session after the first (new tabs, post-error respawns) boots without the
-    // obsidian tools. Build a FRESH server per spawn; it's cheap (plain object +
-    // zod schemas), and the settings it depends on are read at creation time.
-    // ONE tool configuration per spawn, shared by the Claude server and the
-    // Codex bridge below (which only narrows it for a read-only sandbox).
+    // ONE tool configuration per spawn, shared by the in-process server and the
+    // bridge (which only narrows it for a read-only sandbox).
     const caps = this.memoryCaps();
     const toolOpts: ObsidianToolOpts = {
       alwaysLoad: !s.contextSavingMode,
@@ -744,40 +737,25 @@ export class ChatView extends ItemView {
       browserBridge: browserBridgeFor(this.plugin, c.id), // undefined when off/mobile
       onSaved: (r) => c.currentCtx && mountSaveReceipt(this.app, this.plugin.noteSaves, c.currentCtx.el, r),
     };
-    const obsidianServer = useObsidian ? createObsidianToolServer(this.app, toolOpts) : undefined;
-
+    // A FRESH in-process server per spawn: a createSdkMcpServer instance binds to
+    // its first session's transport, so a cached one leaves later sessions
+    // without tools. Bridge writes run in the Obsidian process and bypass a CLI
+    // sandbox, so a read-only Codex sandbox gets read tools only.
+    const readOnlySandbox = PROFILES[c.provider].permissionChip === "codex-sandbox" && s.codexSandbox === "read-only";
+    const { obsidianServer, mcpBridge } = await wireProviderTools({
+      provider: c.provider,
+      enabled: hasObsidianTools,
+      inProcess: () => createObsidianToolServer(this.app, toolOpts),
+      bridgeTools: () =>
+        bridgeSessionToolset(buildObsidianTools(this.app, { ...toolOpts, memory: this.memoryCaps(readOnlySandbox) }), readOnlySandbox, OBSIDIAN_READ_TOOLS),
+      lease: () => this.plugin.bridges.lease(),
+      host: this.plugin.bridges,
+      pathEnv: cli.pathEnv,
+    });
     // Provider-agnostic since Tranche A (Codex parity): Claude appends it to
     // the system prompt; Codex prefixes it to the session's first turn.
     const memoryPreamble =
       (await this.bootPreamble.get(this.app, { caps, tools: hasObsidianTools, paths: this.plugin.paths })) || undefined;
-
-    // Codex ↔ Obsidian tools bridge (Tranche B1): same registry as Claude's SDK
-    // server, swapped per session. SANDBOX HONESTY: bridge writes happen in the
-    // Obsidian process and bypass codex's sandbox, so a read-only sandbox gets
-    // read tools only.
-    let codexBridge: { port: number; token: string; scriptPath: string; stop?: () => void } | undefined;
-    if (
-      c.provider === "codex" &&
-      s.obsidianToolsEnabled &&
-      s.toolsEnabled &&
-      (await this.plugin.checkNodeForBridge(cli.pathEnv))
-    ) {
-      const b = await this.plugin.ensureCodexBridge();
-      if (b) {
-        const readOnlySandbox = s.codexSandbox === "read-only";
-        const all = buildObsidianTools(this.app, {
-          ...toolOpts,
-          memory: this.memoryCaps(readOnlySandbox),
-        });
-        b.bridge.setTools(codexSessionToolset(all, readOnlySandbox, OBSIDIAN_READ_TOOLS));
-        codexBridge = {
-          port: b.bridge.port,
-          token: b.bridge.token,
-          scriptPath: b.scriptPath,
-          stop: b.release,
-        };
-      }
-    }
 
     const session = ADAPTERS[c.provider].createSession({
       cli,
@@ -791,13 +769,13 @@ export class ChatView extends ItemView {
       runHooks: s.runHooks,
       resumeSessionId: c.sessionId,
       obsidianServer,
-      nativeFirst: useObsidian && s.nativeFirst,
+      nativeFirst: !!obsidianServer && s.nativeFirst,
       memoryPreamble,
       autoCompact: s.autoCompactEnabled,
       sandboxMode: s.codexSandbox,
       obsidianReadTools: OBSIDIAN_READ_TOOLS,
       approvalPolicy: s.codexApproval,
-      codexBridge,
+      mcpBridge,
       requestUserInput: async (questions) =>
         mapUserInputAnswers(questions, await this.askBridge(c, questions)),
     });
@@ -809,9 +787,7 @@ export class ChatView extends ItemView {
       c.caps = caps; // the Capabilities "This chat" rows read the chat's own
       // Settings MCP manager + cockpit read live status here; the persisted copy
       // seeds menus/panels on the next app run, before any session has spawned.
-      this.plugin.lastSessionCaps = caps;
-      // Own file, not settings — see main.ts saveSessionCapsCache.
-      void this.plugin.saveSessionCapsCache(caps);
+      void this.plugin.recordSessionCaps(c.provider, caps); // own file, not settings
       // A registered MCP server reporting a failure status means its tools are
       // silently absent — the "all my vault tools vanished, senza motivo" case.
       // Surface it once (not just as a dot in a panel). "unknown" is skipped: it's
@@ -988,19 +964,13 @@ export class ChatView extends ItemView {
     this.prewarm();
   }
 
-  /** All selectable models across BOTH providers (built-in + custom + current,
-   *  minus the ones hidden in settings), for the unified model picker —
+  /** All selectable models across every provider (built-in or live + custom +
+   *  current, minus the hidden ones), for the unified model picker —
    *  selecting one implicitly picks its provider. */
   private allModelChoices(): ComposerModelChoice[] {
     const s = this.plugin.settings;
-    const runtime = this.plugin.lastSessionCaps?.models;
-    return composerModelChoices(
-      [
-        { provider: "claude", options: providerModels(ADAPTERS.claude.models(), undefined, s.claudeCustomModels), hidden: s.claudeHiddenModels },
-        { provider: "codex", options: providerModels(ADAPTERS.codex.models(), runtime, s.codexCustomModels), hidden: s.codexHiddenModels },
-      ],
-      { provider: this.provider, model: this.model }
-    );
+    const lists = PROVIDER_IDS.map((p) => ({ provider: p, options: providerModelList(s, p, this.plugin.modelCatalogs), hidden: providerHidden(s, p) }));
+    return composerModelChoices(lists, { provider: this.provider, model: this.model });
   }
 
   private refreshProviderUI(): void {
@@ -1037,11 +1007,11 @@ export class ChatView extends ItemView {
     for (const d of raw) {
       if (!d || !Array.isArray(d.messages)) continue;
       const id = idAlloc.assign(d.id, seenIds);
-      const provider: ProviderId = d.provider === "codex" ? "codex" : "claude";
+      const provider: ProviderId = isProviderId(d.provider) ? d.provider : "claude";
       // Pre-0.11.2 conversations persisted an empty model id (the old, now-removed
       // "Default" option — silently let the CLI pick). Repair to a real model so
       // the chip never falls back to displaying an unlabeled/empty selection.
-      const model = d.model || ADAPTERS[provider].models()[0].id;
+      const model = d.model || fallbackModel(provider, this.plugin.modelCatalogs);
       const c: Convo = {
         id,
         listEl: createDiv({ cls: "mva-list" }),
@@ -2173,7 +2143,7 @@ export class ChatView extends ItemView {
     void this.plugin.saveSettings();
     this.composer.refreshPerm();
     this.active.session?.setPermissionMode?.(next);
-    new Notice(next === "plan" ? `Plan mode on${this.active.provider === "codex" ? " from the next turn" : ""} — the agent will propose before acting.` : "Plan mode off.");
+    new Notice(next === "plan" ? `Plan mode on${PROFILES[this.active.provider].planFromNextTurn ? " from the next turn" : ""} — the agent will propose before acting.` : "Plan mode off.");
   }
 
   /** Research Mode is isolated to the active conversation and persists with it. */
@@ -2201,12 +2171,12 @@ export class ChatView extends ItemView {
       new Notice("Send a message first — nothing to compact yet.");
       return;
     }
-    // Codex's thread/compact/start takes no instructions. Rather than refuse
-    // them, carry the focus into the next turn (pendingSendPrefix, consumed once):
-    // the summary is written by then, but steering what survives it is the point.
-    const codex = c.provider === "codex";
-    if (codex && instructions) c.pendingSendPrefix = `The conversation was just compacted. Keep this in focus: ${instructions}`;
-    c.session.compact(codex ? undefined : instructions);
+    // A compact that takes no instructions (Codex's thread/compact/start): rather
+    // than refuse them, carry the focus into the next turn (pendingSendPrefix,
+    // consumed once) — steering what survives the summary is the point.
+    const takes = PROFILES[c.provider].compactTakesInstructions;
+    if (!takes && instructions) c.pendingSendPrefix = `The conversation was just compacted. Keep this in focus: ${instructions}`;
+    c.session.compact(takes ? instructions : undefined);
     // Any compaction retires the proactive nudge for good.
     c.compactNudged = true;
     this.composer.hideCompactNudge();
@@ -4866,11 +4836,12 @@ export class ChatView extends ItemView {
     // doc comment) — binding instead overrides THIS turn's system prompt with the
     // agent's own instructions. Read once here; undefined for Claude turns (which
     // keep true subagent delegation) and for unbound turns.
+    const profile = PROFILES[c.provider];
     const codexAgentSystemPrompt =
-      boundAgent && c.provider === "codex"
+      boundAgent && profile.agentBinding === "system-prompt"
         ? buildAgentSystemPrompt(boundAgent.brain, await readAgentBrainBody(this.app, boundAgent.brain))
         : undefined;
-    const sendText = await expandVaultCommand(this.hoistOutbound(text), c.provider === "codex" ? (p) => this.app.vault.adapter.read(p) : null);
+    const sendText = await expandVaultCommand(this.hoistOutbound(text), profile.expandVaultCommands ? (p) => this.app.vault.adapter.read(p) : null);
     // Active-context assembly (2026-07-30): attached-note paths AND the ambient
     // selection the chip is showing — both read from the same composer state the
     // UI renders from, so what the user sees is exactly what the model receives.
@@ -5467,7 +5438,7 @@ export class ChatView extends ItemView {
       // user's text — and, like Research Mode, it never touches the visible or
       // persisted bubble.
       const agentMessage =
-        boundAgent && c.provider === "claude" ? buildAgentBindingOutbound(boundAgent, researchMessage) : researchMessage;
+        boundAgent && PROFILES[c.provider].agentBinding === "subagent" ? buildAgentBindingOutbound(boundAgent, researchMessage) : researchMessage;
       const outbound = [opts?.sendPrefix, coldRecap, compactPrefix, recallBlock, agentMessage].filter(Boolean).join("\n\n");
       // A note body counts as
       // "already provided" only once the send that carried it is real.
@@ -5784,7 +5755,7 @@ export class ChatView extends ItemView {
       card.createDiv({ cls: "mva-onboard-title", text: `${ADAPTERS[c.provider].displayName} isn't ready` });
       card.createDiv({ cls: "mva-onboard-msg", text: message });
       const steps = card.createEl("ol", { cls: "mva-onboard-steps" });
-      steps.createEl("li", { text: `Open a terminal and run \`${c.provider}\` once to sign in.` });
+      steps.createEl("li", { text: PROFILES[c.provider].signIn });
       steps.createEl("li", { text: "If it's installed elsewhere, set the binary path in settings." });
       const btn = card.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Open settings" });
       btn.onclick = () => this.openSettings();
@@ -5793,7 +5764,7 @@ export class ChatView extends ItemView {
       // Keep failures visible without turning them into a dominant red card. The
       // compact row carries the human-readable state + retry; raw diagnostics stay
       // available behind a disclosure for the rare case they are needed.
-      const friendly = describeCliFailure(message);
+      const friendly = describeCliFailure(message, PROFILES[c.provider].failureWho);
       const box = body.createDiv({ cls: "mva-inline-error" });
       const row = box.createDiv({ cls: "mva-error-row" });
       setIcon(row.createSpan({ cls: "mva-error-icon" }), "triangle-alert");
