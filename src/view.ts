@@ -59,7 +59,7 @@ import { buildRecap as buildConvoRecap } from "./core/recap";
 import { assembleContext, formatContextDebug, selectUnchangedPaths } from "./core/context-assembly";
 import { describeActivity } from "./core/activity";
 import { toVaultRelative } from "./core/vault-path";
-import { clickable, flashIcon } from "./ui/dom";
+import { clickable, flashIcon, isComposingKey } from "./ui/dom";
 import { mountSaveReceipt } from "./ui/save-receipt";
 import { bindSaveToNote } from "./ui/save-panel";
 import { swapTailChild } from "./ui/tail-child";
@@ -4010,7 +4010,7 @@ export class ChatView extends ItemView {
       send.onclick = submit;
       // Cmd/Ctrl+Enter sends (a bare Enter should add a newline in the textarea).
       ta.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+        if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey) && !isComposingKey(ev)) {
           ev.preventDefault();
           submit();
         }
@@ -4196,7 +4196,7 @@ export class ChatView extends ItemView {
         // Single-question single-select has no Submit button — let Enter resolve it.
         if (single) {
           otherInput.addEventListener("keydown", (ev) => {
-            if (ev.key === "Enter") {
+            if (ev.key === "Enter" && !isComposingKey(ev)) {
               ev.preventDefault();
               maybeSubmit();
             }

@@ -10,6 +10,7 @@ import { Notice, setIcon, setTooltip } from "obsidian";
 import type { ChatView } from "../view";
 import type { Convo } from "./convo-types";
 import { canSteer, nextRunnable, takeAt, type QueuedMessage } from "../core/queue";
+import { isComposingKey } from "../core/ime";
 import { clickable } from "./dom";
 
 export interface QueueHandlers {
@@ -120,7 +121,7 @@ function editInPlace(row: HTMLElement, textEl: HTMLElement, q: QueuedMessage, h:
   };
   input.addEventListener("input", () => drafts.set(q, input.value));
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey && !isComposingKey(e)) {
       e.preventDefault();
       finish(true);
     } else if (e.key === "Escape") {

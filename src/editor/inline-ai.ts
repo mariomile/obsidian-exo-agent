@@ -37,6 +37,7 @@ import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { MarkdownView, setIcon } from "obsidian";
 import type ExoPlugin from "../main";
 import { computeHunks, hunkCount, type DiffPart } from "../core/inline-ai";
+import { isComposingKey } from "../core/ime";
 import { COMMANDS } from "./format/registry";
 import { applyFormatCommand } from "./format-commands";
 import { editorForView } from "./format/resolve-editor";
@@ -265,7 +266,7 @@ class InlineAiController {
     runBtn.onclick = go;
     input.addEventListener("input", () => this.autosize(input));
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !isComposingKey(e)) {
         e.preventDefault();
         go();
       } else if (e.key === "Escape") {

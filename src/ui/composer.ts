@@ -39,6 +39,7 @@ import { buildOptionRows, type SelectOption } from "../core/option-filter";
 import { queryWords, matchesWords } from "../core/ac-token";
 import { clampEffort, effortOptionsFor } from "../core/model-tuning";
 import { activeNoteState, contextModel, type ContextModel } from "../core/active-note";
+import { isComposingKey } from "../core/ime";
 import { isNoteVisible } from "../obsidian/note-visibility";
 import { ContextCards, isExternalPath, type ContextCardSpec } from "./context-cards";
 
@@ -359,7 +360,7 @@ export class Composer {
         this.host.stop("esc");
         return;
       }
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !isComposingKey(e)) {
         e.preventDefault();
         void this.host.send(); // send() queues if the active conversation is streaming
       }
@@ -1107,7 +1108,7 @@ export class Composer {
       } else if (ev.key === "ArrowUp") {
         ev.preventDefault();
         setActive(activeIdx - 1);
-      } else if (ev.key === "Enter") {
+      } else if (ev.key === "Enter" && !isComposingKey(ev)) {
         ev.preventDefault();
         const o = optionEls[activeIdx];
         if (o) pick(o.value);
