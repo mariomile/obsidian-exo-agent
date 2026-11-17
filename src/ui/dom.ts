@@ -1,5 +1,6 @@
 /** Shared DOM helpers for the chat UI. */
 import { setIcon } from "obsidian";
+export { isComposingKey } from "../core/ime";
 
 /**
  * Make a non-button element keyboard- and screen-reader-operable: role=button,

@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 import { parseAcToken } from "../core/ac-token";
+import { isComposingKey } from "../core/ime";
 
 export interface AcItem {
   label: string;
@@ -129,7 +130,7 @@ export class Autocomplete {
       e.stopPropagation();
       this.sel = (this.sel - 1 + this.items.length) % this.items.length;
       this.render();
-    } else if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+    } else if ((e.key === "Enter" && !isComposingKey(e)) || (e.key === "Tab" && !e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation();
       this.choose(this.sel);

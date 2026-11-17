@@ -1,5 +1,6 @@
 import { App, Modal, Notice, setIcon } from "obsidian";
 import { wordDiff } from "../core/inline-ai";
+import { isComposingKey } from "../core/ime";
 
 export { wordDiff };
 
@@ -94,7 +95,7 @@ export class InlineEditModal extends Modal {
 
     runBtn.onclick = () => void generate();
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !isComposingKey(e)) {
         e.preventDefault();
         void generate();
       }
