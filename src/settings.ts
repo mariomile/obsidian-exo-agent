@@ -5,6 +5,7 @@ import { ADAPTERS } from "./providers/registry";
 import { providerModels, BACKGROUND_MODEL_OPTIONS } from "./core/model-options";
 import { renderCliDiagnostics } from "./ui/settings-cli";
 import { renderComposerModels } from "./ui/settings-composer-models";
+import { renderDictationSettings } from "./ui/settings-dictation";
 
 import { DEFAULT_SETTINGS, LEGACY_QUEUE_FOLDER, defaultModel, type MVASettings } from "./settings-schema";
 
@@ -329,6 +330,7 @@ export class MVASettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+    renderDictationSettings(el, this.plugin);
   }
 
   /* ------------------------- Agent & Permissions ------------------------ */

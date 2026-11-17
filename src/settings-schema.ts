@@ -243,6 +243,16 @@ export interface MVASettings {
   /** Vault-relative note path to the document it was shared as, so re-sharing
    *  the same note reconnects instead of creating a second document. */
   collaboShares: Record<string, CollaboShare>;
+  /** Composer dictation master flag, default OFF: no mic button, no audio. */
+  dictationEnabled: boolean;
+  /** Local transcription endpoint (OpenAI-compatible). Default: Parlo's. */
+  dictationEndpoint: string;
+  /** Bearer token, only for a server that requires one. Empty for Parlo. */
+  dictationApiKey: string;
+  /** Model id sent to the server; empty uses the server's active model. */
+  dictationModel: string;
+  /** ISO-639-1 language hint ("it", "en"); empty lets the model detect it. */
+  dictationLanguage: string;
 }
 
 /** The model new chats and background runs of `provider` start from. */
@@ -339,6 +349,11 @@ export const DEFAULT_SETTINGS: MVASettings = {
   collaboUrl: "",
   collaboApiKey: "",
   collaboShares: {},
+  dictationEnabled: false,
+  dictationEndpoint: "",
+  dictationApiKey: "",
+  dictationModel: "",
+  dictationLanguage: "",
 };
 
 /** Keys of settings that no longer exist (the pre-harvest memory subsystem:

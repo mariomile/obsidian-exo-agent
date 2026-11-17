@@ -581,7 +581,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* The spinner turns only when nothing else on this tab is moving. While the tab
    is streaming the mark owns the motion and the count is a static numeral —
    one moving element per tab, or they compete instead of informing. */
-.mva-tab-agents-icon.is-spinning .svg-icon {
+.mva-tab-agents-icon.is-spinning .svg-icon, .mva-dictate.is-busy .svg-icon {
   animation: mva-spin 1.1s linear infinite;
 }
 /* Dense mode: every non-active tab keeps a short title instead of shrinking to
@@ -6372,7 +6372,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 /* Utilities that replaced inline styles (Obsidian plugin review). */
 .mva-spacer { flex: 1; }
 .mva-mono-input { font-family: var(--font-monospace); }
-.mva-full-width { width: 100%; }
+.mva-dictate.is-recording { color: var(--text-on-accent); background: var(--mva-danger); border-radius: 50%; }
 .setting-item-description.mod-error { color: var(--text-error); }
 
 /* Interactive HTML/SVG previews share the artifact and button recipes. */

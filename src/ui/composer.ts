@@ -42,6 +42,7 @@ import { activeNoteState, contextModel, type ContextModel } from "../core/active
 import { isComposingKey } from "../core/ime";
 import { isNoteVisible } from "../obsidian/note-visibility";
 import { ContextCards, isExternalPath, type ContextCardSpec } from "./context-cards";
+import { Dictation } from "./dictation";
 
 /** Semantic risk modifier class for a toolbar selector option/chip ("" = neutral). */
 type RiskLevel = "" | "is-caution" | "is-danger";
@@ -141,6 +142,8 @@ export class Composer {
   private expandBtn!: HTMLButtonElement;
   private inputExpanded = false;
   private sendBtn!: HTMLButtonElement;
+  /** Mic beside Send (ui/dictation); public for the "Dictate" palette command. */
+  dictation: Dictation | null = null;
   // Three independent toolbar chips — Model, Effort, Permission — each expose a
   // refresh fn so external changes (provider switch, plan-mode toggle, model
   // pick) can re-sync their label without opening the chip's popover.
@@ -755,6 +758,8 @@ export class Composer {
     this.rateBadgeEl.hide();
     this.updateRateBadge();
 
+    this.dictation = new Dictation(this.host.plugin, this.inputEl, (v) => this.setInputValue(v), (cb) => this.host.register(cb));
+    this.dictation.mount(tb);
     // Send button — lives inside the input box, right side.
     this.sendBtn = tb.createEl("button", { cls: "mva-send", attr: { "aria-label": "Send" } });
     setIcon(this.sendBtn, "arrow-up");
